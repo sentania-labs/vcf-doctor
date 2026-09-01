@@ -336,6 +336,8 @@ class Normalizer:
         self.opaque_by_id: dict[str, str] = {}
         self.vm_count_by_host: dict[str, int] = {}
         self.vm_count_by_cluster: dict[str, int] = {}
+        # cluster moref -> True/False when at least one member host reported
+        # vsanHostConfig.enabled; absent when no host did (unknown, not False).
         self.vsan_hosts_by_cluster: dict[str, bool] = {}
         for o in inventory.objects:
             if o.kind == "DistributedVirtualPortgroup":
@@ -346,7 +348,7 @@ class Normalizer:
                     self.opaque_by_id[str(oid)] = o.moref
             elif o.kind == "HostSystem":
                 cl = self.cluster_of_host(o)
-                if cl:
+                if cl and "config.vsanHostConfig.enabled" in o.props:
                     vsan = bool(o.get("config.vsanHostConfig.enabled") or False)
                     self.vsan_hosts_by_cluster[cl] = (
                         self.vsan_hosts_by_cluster.get(cl, False) or vsan
@@ -496,7 +498,7 @@ class Normalizer:
                 # vsanConfigInfo sits on ClusterConfigInfoEx, which the
                 # PropertyCollector cannot reach through configurationEx, so
                 # vSAN is derived from the member hosts' vsanHostConfig.
-                "vsanEnabled": self.vsan_hosts_by_cluster.get(obj.moref, False),
+                "vsanEnabled": self.vsan_hosts_by_cluster.get(obj.moref),
                 "ruleCount": len(obj.get("configuration.rule") or []),
                 "totalCpuMhz": _as_int(summary.get("totalCpu")),
                 "totalMemoryBytes": _as_int(summary.get("totalMemory")),
@@ -528,6 +530,7 @@ class Normalizer:
         # lists when the config was actually readable, so the NTP check does
         # not fire on hosts vCenter cannot see.
         config_seen = any(k.startswith("config.") for k in obj.props)
+        network_seen = any(k.startswith("config.network.") for k in obj.props)
         ntp = _as_str_list(obj.get("config.dateTimeInfo.ntpConfig.server"))
         dns = _as_str_list(obj.get("config.network.dnsConfig.address"))
         vmks = [
@@ -584,9 +587,13 @@ class Normalizer:
                 "lockdownMode": _as_str(obj.get("config.lockdownMode")),
                 "ntpServers": ntp if (ntp or config_seen) else None,
                 "dnsServers": dns if (dns or config_seen) else None,
-                "vmkernelAdapters": sorted(vmks, key=lambda v: _sort_key(v, "device")),
-                "physicalNics": sorted(pnics, key=lambda p: _sort_key(p, "device")),
-                "standardSwitches": vswitches,
+                "vmkernelAdapters": (
+                    sorted(vmks, key=lambda v: _sort_key(v, "device")) if network_seen else None
+                ),
+                "physicalNics": (
+                    sorted(pnics, key=lambda p: _sort_key(p, "device")) if network_seen else None
+                ),
+                "standardSwitches": vswitches if network_seen else None,
                 "vsanEnabled": _as_bool(obj.get("config.vsanHostConfig.enabled")),
                 "numVms": num_vms,
                 "datastores": self.names_of(datastores),
@@ -634,7 +641,12 @@ class Normalizer:
                         "connected": _as_bool(dev.get("connected")),
                     }
                 )
+        hardware_seen = "config.hardware.device" in obj.props
         snap_count, oldest = walk_snapshots(obj.get("snapshot.rootSnapshotList"))
+        if not hardware_seen:
+            # An inaccessible or orphaned VM returns no config; report unknown
+            # rather than "no disks, no NICs, no snapshots".
+            snap_count, oldest = None, None
         parent = obj.get("parent")
         parent_obj = self.by_moref.get(parent) if parent else None
         folder = (
@@ -669,8 +681,12 @@ class Normalizer:
                 "annotation": _as_str(obj.get("config.annotation")),
                 "snapshotCount": snap_count,
                 "oldestSnapshotTime": oldest,
-                "disks": sorted(disks, key=lambda d: _sort_key(d, "label")),
-                "nics": sorted(nics, key=lambda n: _sort_key(n, "label")),
+                "disks": sorted(disks, key=lambda d: _sort_key(d, "label"))
+                if hardware_seen
+                else None,
+                "nics": sorted(nics, key=lambda n: _sort_key(n, "label"))
+                if hardware_seen
+                else None,
                 "networks": self.names_of(networks),
                 "datastores": self.names_of(datastores),
                 "storageCommittedBytes": _as_int(obj.get("summary.storage.committed")),

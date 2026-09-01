@@ -106,6 +106,27 @@ DICT_LISTS: dict[str, str] = {
 # Properties whose values may be namespaced ids; summaries show the short name.
 _ID_VALUED = frozenset({"host", "cluster", "hosts", "networks", "datastores"})
 
+# Properties where None means "vCenter did not return it" (disconnected host,
+# inaccessible VM, no host reporting). A None on either side is unknown, not a
+# change, so these are skipped rather than reported as removed/added.
+_BOTH_SIDES_REQUIRED = frozenset(
+    {
+        "vmkernelAdapters",
+        "physicalNics",
+        "standardSwitches",
+        "ntpServers",
+        "dnsServers",
+        "lockdownMode",
+        "version",
+        "build",
+        "disks",
+        "nics",
+        "snapshotCount",
+        "vsanEnabled",
+        "hosts",
+    }
+)
+
 USAGE_BANDS = (85.0, 95.0)
 USAGE_MIN_DELTA = 5.0
 
@@ -328,6 +349,8 @@ def _diff_modified(
             o = _value(old, prop, old_members)
             n = _value(new, prop, new_members)
             if _norm(o) == _norm(n):
+                continue
+            if prop in _BOTH_SIDES_REQUIRED and (o is None or n is None):
                 continue
             if new.type == "datastore" and prop == "freeSpace":
                 _diff_free_space(old, new, props, sigs, parts)

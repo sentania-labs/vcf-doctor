@@ -424,3 +424,46 @@ def test_min_significance_filters_output():
 def test_min_significance_rejects_unknown_values():
     with pytest.raises(ValueError):
         diff([], [], min_significance="urgent")  # type: ignore[arg-type]
+
+
+def test_unknown_side_is_not_a_change():
+    """Codex review on PR #16: a disconnected host or inaccessible VM returns
+    None for config-derived lists; that must not read as 'everything removed'."""
+    from app.diff.engine import diff
+    from app.models import Resource
+
+    def host(props):
+        return Resource(
+            id="host:c:h1", type="host", name="esx01", source="vcenter:c", properties=props
+        )
+
+    known = host(
+        {
+            "connectionState": "connected",
+            "vmkernelAdapters": [{"device": "vmk0", "mtu": 1500}],
+            "ntpServers": ["a"],
+            "vsanEnabled": True,
+        }
+    )
+    unknown = host(
+        {
+            "connectionState": "disconnected",
+            "vmkernelAdapters": None,
+            "ntpServers": None,
+            "vsanEnabled": None,
+        }
+    )
+    changes = diff([known], [unknown])
+    assert len(changes) == 1
+    assert set(changes[0].property_changes) == {"connectionState"}
+
+    def vm(props):
+        return Resource(id="vm:c:v1", type="vm", name="app01", source="vcenter:c", properties=props)
+
+    assert (
+        diff(
+            [vm({"disks": [{"label": "Hard disk 1"}], "nics": [], "snapshotCount": 2})],
+            [vm({"disks": None, "nics": None, "snapshotCount": None})],
+        )
+        == []
+    )
