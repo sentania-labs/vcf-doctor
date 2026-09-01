@@ -1,0 +1,16 @@
+# python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+# node
+node_modules/
+frontend/dist/
+# data
+*.db
+data/
+# env
+.env
+.env.*

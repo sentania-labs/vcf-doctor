@@ -1,0 +1,1519 @@
+{
+  "label": "Baseline (healthy)",
+  "resources": [
+    {
+      "id": "vcenter:vc-wld01:vc-wld01",
+      "type": "vcenter",
+      "name": "vc-wld01",
+      "source": "vcenter:vc-wld01",
+      "parent_id": null,
+      "properties": {
+        "version": "8.0.3",
+        "build": "24322831",
+        "instanceUuid": "3f1b6c2a-7d0e-4c5b-9a21-5e8f0c1d2b47",
+        "apiType": "VirtualCenter"
+      },
+      "relationships": []
+    },
+    {
+      "id": "datacenter:vc-wld01:wld01-dc",
+      "type": "datacenter",
+      "name": "wld01-dc",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "vcenter:vc-wld01:vc-wld01",
+      "properties": {},
+      "relationships": []
+    },
+    {
+      "id": "cluster:vc-wld01:wld01-cl01",
+      "type": "cluster",
+      "name": "wld01-cl01",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "datacenter:vc-wld01:wld01-dc",
+      "properties": {
+        "hostCount": 4,
+        "drsEnabled": true,
+        "haEnabled": true,
+        "vsanEnabled": true
+      },
+      "relationships": []
+    },
+    {
+      "id": "cluster:vc-wld01:wld01-edge",
+      "type": "cluster",
+      "name": "wld01-edge",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "datacenter:vc-wld01:wld01-dc",
+      "properties": {
+        "hostCount": 3,
+        "drsEnabled": true,
+        "haEnabled": true,
+        "vsanEnabled": true
+      },
+      "relationships": []
+    },
+    {
+      "id": "datastore:vc-wld01:wld01-cl01-vsan01",
+      "type": "datastore",
+      "name": "wld01-cl01-vsan01",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "datacenter:vc-wld01:wld01-dc",
+      "properties": {
+        "capacity": 43980465111040,
+        "freeSpace": 18471795346636,
+        "accessible": true,
+        "type": "vsan"
+      },
+      "relationships": []
+    },
+    {
+      "id": "datastore:vc-wld01:wld01-cl01-vsan02",
+      "type": "datastore",
+      "name": "wld01-cl01-vsan02",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "datacenter:vc-wld01:wld01-dc",
+      "properties": {
+        "capacity": 21990232555520,
+        "freeSpace": 12974237207756,
+        "accessible": true,
+        "type": "vsan"
+      },
+      "relationships": []
+    },
+    {
+      "id": "datastore:vc-wld01:wld01-edge-vsan01",
+      "type": "datastore",
+      "name": "wld01-edge-vsan01",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "datacenter:vc-wld01:wld01-dc",
+      "properties": {
+        "capacity": 8796093022208,
+        "freeSpace": 6860952557322,
+        "accessible": true,
+        "type": "vsan"
+      },
+      "relationships": []
+    },
+    {
+      "id": "datastore:vc-wld01:nfs01-iso-templates",
+      "type": "datastore",
+      "name": "nfs01-iso-templates",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "datacenter:vc-wld01:wld01-dc",
+      "properties": {
+        "capacity": 4398046511104,
+        "freeSpace": 1627277209108,
+        "accessible": true,
+        "type": "NFS41"
+      },
+      "relationships": []
+    },
+    {
+      "id": "network:vc-wld01:wld01-vds01-mgmt",
+      "type": "network",
+      "name": "wld01-vds01-mgmt",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "datacenter:vc-wld01:wld01-dc",
+      "properties": {
+        "type": "DistributedVirtualPortgroup",
+        "vlanId": 1611
+      },
+      "relationships": []
+    },
+    {
+      "id": "network:vc-wld01:wld01-vds01-edge-uplink",
+      "type": "network",
+      "name": "wld01-vds01-edge-uplink",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "datacenter:vc-wld01:wld01-dc",
+      "properties": {
+        "type": "DistributedVirtualPortgroup",
+        "vlanId": 1614
+      },
+      "relationships": []
+    },
+    {
+      "id": "network:vc-wld01:seg-web-10.20.10.0",
+      "type": "network",
+      "name": "seg-web-10.20.10.0",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "datacenter:vc-wld01:wld01-dc",
+      "properties": {
+        "type": "NsxSegment",
+        "transportZone": "wld01-overlay-tz"
+      },
+      "relationships": []
+    },
+    {
+      "id": "network:vc-wld01:seg-app-10.20.20.0",
+      "type": "network",
+      "name": "seg-app-10.20.20.0",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "datacenter:vc-wld01:wld01-dc",
+      "properties": {
+        "type": "NsxSegment",
+        "transportZone": "wld01-overlay-tz"
+      },
+      "relationships": []
+    },
+    {
+      "id": "network:vc-wld01:seg-db-10.20.30.0",
+      "type": "network",
+      "name": "seg-db-10.20.30.0",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "datacenter:vc-wld01:wld01-dc",
+      "properties": {
+        "type": "NsxSegment",
+        "transportZone": "wld01-overlay-tz"
+      },
+      "relationships": []
+    },
+    {
+      "id": "network:vc-wld01:seg-dmz-10.20.40.0",
+      "type": "network",
+      "name": "seg-dmz-10.20.40.0",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "datacenter:vc-wld01:wld01-dc",
+      "properties": {
+        "type": "NsxSegment",
+        "transportZone": "wld01-overlay-tz"
+      },
+      "relationships": []
+    },
+    {
+      "id": "host:vc-wld01:esx01",
+      "type": "host",
+      "name": "esx01.wld01.vcf.example",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "cluster:vc-wld01:wld01-cl01",
+      "properties": {
+        "connectionState": "connected",
+        "powerState": "poweredOn",
+        "maintenanceMode": false,
+        "cluster": "wld01-cl01",
+        "cpuMhz": 2600,
+        "numCpuCores": 64,
+        "memoryBytes": 1099511627776,
+        "version": "8.0.3",
+        "build": "24280767"
+      },
+      "relationships": [
+        {
+          "kind": "member_of",
+          "target_id": "cluster:vc-wld01:wld01-cl01"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:wld01-cl01-vsan01"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:wld01-cl01-vsan02"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:nfs01-iso-templates"
+        }
+      ]
+    },
+    {
+      "id": "host:vc-wld01:esx02",
+      "type": "host",
+      "name": "esx02.wld01.vcf.example",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "cluster:vc-wld01:wld01-cl01",
+      "properties": {
+        "connectionState": "connected",
+        "powerState": "poweredOn",
+        "maintenanceMode": false,
+        "cluster": "wld01-cl01",
+        "cpuMhz": 2600,
+        "numCpuCores": 64,
+        "memoryBytes": 1099511627776,
+        "version": "8.0.3",
+        "build": "24280767"
+      },
+      "relationships": [
+        {
+          "kind": "member_of",
+          "target_id": "cluster:vc-wld01:wld01-cl01"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:wld01-cl01-vsan01"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:wld01-cl01-vsan02"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:nfs01-iso-templates"
+        }
+      ]
+    },
+    {
+      "id": "host:vc-wld01:esx03",
+      "type": "host",
+      "name": "esx03.wld01.vcf.example",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "cluster:vc-wld01:wld01-cl01",
+      "properties": {
+        "connectionState": "connected",
+        "powerState": "poweredOn",
+        "maintenanceMode": false,
+        "cluster": "wld01-cl01",
+        "cpuMhz": 2600,
+        "numCpuCores": 64,
+        "memoryBytes": 1099511627776,
+        "version": "8.0.3",
+        "build": "24280767"
+      },
+      "relationships": [
+        {
+          "kind": "member_of",
+          "target_id": "cluster:vc-wld01:wld01-cl01"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:wld01-cl01-vsan01"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:wld01-cl01-vsan02"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:nfs01-iso-templates"
+        }
+      ]
+    },
+    {
+      "id": "host:vc-wld01:esx04",
+      "type": "host",
+      "name": "esx04.wld01.vcf.example",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "cluster:vc-wld01:wld01-cl01",
+      "properties": {
+        "connectionState": "connected",
+        "powerState": "poweredOn",
+        "maintenanceMode": false,
+        "cluster": "wld01-cl01",
+        "cpuMhz": 2600,
+        "numCpuCores": 64,
+        "memoryBytes": 1099511627776,
+        "version": "8.0.3",
+        "build": "24280767"
+      },
+      "relationships": [
+        {
+          "kind": "member_of",
+          "target_id": "cluster:vc-wld01:wld01-cl01"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:wld01-cl01-vsan01"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:wld01-cl01-vsan02"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:nfs01-iso-templates"
+        }
+      ]
+    },
+    {
+      "id": "host:vc-wld01:esx05",
+      "type": "host",
+      "name": "esx05.wld01.vcf.example",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "cluster:vc-wld01:wld01-edge",
+      "properties": {
+        "connectionState": "connected",
+        "powerState": "poweredOn",
+        "maintenanceMode": false,
+        "cluster": "wld01-edge",
+        "cpuMhz": 2400,
+        "numCpuCores": 32,
+        "memoryBytes": 549755813888,
+        "version": "8.0.3",
+        "build": "24280767"
+      },
+      "relationships": [
+        {
+          "kind": "member_of",
+          "target_id": "cluster:vc-wld01:wld01-edge"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:wld01-edge-vsan01"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:nfs01-iso-templates"
+        }
+      ]
+    },
+    {
+      "id": "host:vc-wld01:esx06",
+      "type": "host",
+      "name": "esx06.wld01.vcf.example",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "cluster:vc-wld01:wld01-edge",
+      "properties": {
+        "connectionState": "connected",
+        "powerState": "poweredOn",
+        "maintenanceMode": false,
+        "cluster": "wld01-edge",
+        "cpuMhz": 2400,
+        "numCpuCores": 32,
+        "memoryBytes": 549755813888,
+        "version": "8.0.3",
+        "build": "24280767"
+      },
+      "relationships": [
+        {
+          "kind": "member_of",
+          "target_id": "cluster:vc-wld01:wld01-edge"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:wld01-edge-vsan01"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:nfs01-iso-templates"
+        }
+      ]
+    },
+    {
+      "id": "host:vc-wld01:esx07",
+      "type": "host",
+      "name": "esx07.wld01.vcf.example",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "cluster:vc-wld01:wld01-edge",
+      "properties": {
+        "connectionState": "connected",
+        "powerState": "poweredOn",
+        "maintenanceMode": false,
+        "cluster": "wld01-edge",
+        "cpuMhz": 2400,
+        "numCpuCores": 32,
+        "memoryBytes": 549755813888,
+        "version": "8.0.3",
+        "build": "24280767"
+      },
+      "relationships": [
+        {
+          "kind": "member_of",
+          "target_id": "cluster:vc-wld01:wld01-edge"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:wld01-edge-vsan01"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:nfs01-iso-templates"
+        }
+      ]
+    },
+    {
+      "id": "vm:vc-wld01:web01",
+      "type": "vm",
+      "name": "web01",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "host:vc-wld01:esx01",
+      "properties": {
+        "powerState": "poweredOn",
+        "host": "esx01.wld01.vcf.example",
+        "cluster": "wld01-cl01",
+        "networks": [
+          "seg-web-10.20.10.0"
+        ],
+        "datastores": [
+          "wld01-cl01-vsan01"
+        ],
+        "guestFullName": "Ubuntu Linux (64-bit)",
+        "numCpu": 2,
+        "memoryMB": 4096,
+        "template": false,
+        "overallStatus": "green"
+      },
+      "relationships": [
+        {
+          "kind": "runs_on",
+          "target_id": "host:vc-wld01:esx01"
+        },
+        {
+          "kind": "uses_network",
+          "target_id": "network:vc-wld01:seg-web-10.20.10.0"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:wld01-cl01-vsan01"
+        }
+      ]
+    },
+    {
+      "id": "vm:vc-wld01:web03",
+      "type": "vm",
+      "name": "web03",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "host:vc-wld01:esx01",
+      "properties": {
+        "powerState": "poweredOn",
+        "host": "esx01.wld01.vcf.example",
+        "cluster": "wld01-cl01",
+        "networks": [
+          "seg-web-10.20.10.0"
+        ],
+        "datastores": [
+          "wld01-cl01-vsan01"
+        ],
+        "guestFullName": "Ubuntu Linux (64-bit)",
+        "numCpu": 2,
+        "memoryMB": 4096,
+        "template": false,
+        "overallStatus": "green"
+      },
+      "relationships": [
+        {
+          "kind": "runs_on",
+          "target_id": "host:vc-wld01:esx01"
+        },
+        {
+          "kind": "uses_network",
+          "target_id": "network:vc-wld01:seg-web-10.20.10.0"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:wld01-cl01-vsan01"
+        }
+      ]
+    },
+    {
+      "id": "vm:vc-wld01:app01",
+      "type": "vm",
+      "name": "app01",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "host:vc-wld01:esx01",
+      "properties": {
+        "powerState": "poweredOn",
+        "host": "esx01.wld01.vcf.example",
+        "cluster": "wld01-cl01",
+        "networks": [
+          "seg-app-10.20.20.0"
+        ],
+        "datastores": [
+          "wld01-cl01-vsan01"
+        ],
+        "guestFullName": "Red Hat Enterprise Linux 9 (64-bit)",
+        "numCpu": 4,
+        "memoryMB": 8192,
+        "template": false,
+        "overallStatus": "green"
+      },
+      "relationships": [
+        {
+          "kind": "runs_on",
+          "target_id": "host:vc-wld01:esx01"
+        },
+        {
+          "kind": "uses_network",
+          "target_id": "network:vc-wld01:seg-app-10.20.20.0"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:wld01-cl01-vsan01"
+        }
+      ]
+    },
+    {
+      "id": "vm:vc-wld01:db01",
+      "type": "vm",
+      "name": "db01",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "host:vc-wld01:esx01",
+      "properties": {
+        "powerState": "poweredOn",
+        "host": "esx01.wld01.vcf.example",
+        "cluster": "wld01-cl01",
+        "networks": [
+          "seg-db-10.20.30.0"
+        ],
+        "datastores": [
+          "wld01-cl01-vsan01"
+        ],
+        "guestFullName": "Red Hat Enterprise Linux 9 (64-bit)",
+        "numCpu": 8,
+        "memoryMB": 32768,
+        "template": false,
+        "overallStatus": "green"
+      },
+      "relationships": [
+        {
+          "kind": "runs_on",
+          "target_id": "host:vc-wld01:esx01"
+        },
+        {
+          "kind": "uses_network",
+          "target_id": "network:vc-wld01:seg-db-10.20.30.0"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:wld01-cl01-vsan01"
+        }
+      ]
+    },
+    {
+      "id": "vm:vc-wld01:dns01",
+      "type": "vm",
+      "name": "dns01",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "host:vc-wld01:esx01",
+      "properties": {
+        "powerState": "poweredOn",
+        "host": "esx01.wld01.vcf.example",
+        "cluster": "wld01-cl01",
+        "networks": [
+          "wld01-vds01-mgmt"
+        ],
+        "datastores": [
+          "wld01-cl01-vsan01"
+        ],
+        "guestFullName": "Ubuntu Linux (64-bit)",
+        "numCpu": 2,
+        "memoryMB": 2048,
+        "template": false,
+        "overallStatus": "green"
+      },
+      "relationships": [
+        {
+          "kind": "runs_on",
+          "target_id": "host:vc-wld01:esx01"
+        },
+        {
+          "kind": "uses_network",
+          "target_id": "network:vc-wld01:wld01-vds01-mgmt"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:wld01-cl01-vsan01"
+        }
+      ]
+    },
+    {
+      "id": "vm:vc-wld01:tpl-ubuntu-2204",
+      "type": "vm",
+      "name": "tpl-ubuntu-2204",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "host:vc-wld01:esx01",
+      "properties": {
+        "powerState": "poweredOff",
+        "host": "esx01.wld01.vcf.example",
+        "cluster": "wld01-cl01",
+        "networks": [
+          "wld01-vds01-mgmt"
+        ],
+        "datastores": [
+          "nfs01-iso-templates"
+        ],
+        "guestFullName": "Ubuntu Linux (64-bit)",
+        "numCpu": 2,
+        "memoryMB": 2048,
+        "template": true,
+        "overallStatus": "green"
+      },
+      "relationships": [
+        {
+          "kind": "runs_on",
+          "target_id": "host:vc-wld01:esx01"
+        },
+        {
+          "kind": "uses_network",
+          "target_id": "network:vc-wld01:wld01-vds01-mgmt"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:nfs01-iso-templates"
+        }
+      ]
+    },
+    {
+      "id": "vm:vc-wld01:vCLS-wld01-cl01-1",
+      "type": "vm",
+      "name": "vCLS-wld01-cl01-1",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "host:vc-wld01:esx01",
+      "properties": {
+        "powerState": "poweredOn",
+        "host": "esx01.wld01.vcf.example",
+        "cluster": "wld01-cl01",
+        "networks": [],
+        "datastores": [
+          "wld01-cl01-vsan01"
+        ],
+        "guestFullName": "VMware Photon OS (64-bit)",
+        "numCpu": 1,
+        "memoryMB": 128,
+        "template": false,
+        "overallStatus": "green"
+      },
+      "relationships": [
+        {
+          "kind": "runs_on",
+          "target_id": "host:vc-wld01:esx01"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:wld01-cl01-vsan01"
+        }
+      ]
+    },
+    {
+      "id": "vm:vc-wld01:web02",
+      "type": "vm",
+      "name": "web02",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "host:vc-wld01:esx02",
+      "properties": {
+        "powerState": "poweredOn",
+        "host": "esx02.wld01.vcf.example",
+        "cluster": "wld01-cl01",
+        "networks": [
+          "seg-web-10.20.10.0"
+        ],
+        "datastores": [
+          "wld01-cl01-vsan01"
+        ],
+        "guestFullName": "Ubuntu Linux (64-bit)",
+        "numCpu": 2,
+        "memoryMB": 4096,
+        "template": false,
+        "overallStatus": "green"
+      },
+      "relationships": [
+        {
+          "kind": "runs_on",
+          "target_id": "host:vc-wld01:esx02"
+        },
+        {
+          "kind": "uses_network",
+          "target_id": "network:vc-wld01:seg-web-10.20.10.0"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:wld01-cl01-vsan01"
+        }
+      ]
+    },
+    {
+      "id": "vm:vc-wld01:app02",
+      "type": "vm",
+      "name": "app02",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "host:vc-wld01:esx02",
+      "properties": {
+        "powerState": "poweredOn",
+        "host": "esx02.wld01.vcf.example",
+        "cluster": "wld01-cl01",
+        "networks": [
+          "seg-app-10.20.20.0"
+        ],
+        "datastores": [
+          "wld01-cl01-vsan01"
+        ],
+        "guestFullName": "Red Hat Enterprise Linux 9 (64-bit)",
+        "numCpu": 4,
+        "memoryMB": 8192,
+        "template": false,
+        "overallStatus": "green"
+      },
+      "relationships": [
+        {
+          "kind": "runs_on",
+          "target_id": "host:vc-wld01:esx02"
+        },
+        {
+          "kind": "uses_network",
+          "target_id": "network:vc-wld01:seg-app-10.20.20.0"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:wld01-cl01-vsan01"
+        }
+      ]
+    },
+    {
+      "id": "vm:vc-wld01:dmz-lb01",
+      "type": "vm",
+      "name": "dmz-lb01",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "host:vc-wld01:esx02",
+      "properties": {
+        "powerState": "poweredOn",
+        "host": "esx02.wld01.vcf.example",
+        "cluster": "wld01-cl01",
+        "networks": [
+          "seg-dmz-10.20.40.0",
+          "seg-web-10.20.10.0"
+        ],
+        "datastores": [
+          "wld01-cl01-vsan01"
+        ],
+        "guestFullName": "Ubuntu Linux (64-bit)",
+        "numCpu": 2,
+        "memoryMB": 4096,
+        "template": false,
+        "overallStatus": "green"
+      },
+      "relationships": [
+        {
+          "kind": "runs_on",
+          "target_id": "host:vc-wld01:esx02"
+        },
+        {
+          "kind": "uses_network",
+          "target_id": "network:vc-wld01:seg-dmz-10.20.40.0"
+        },
+        {
+          "kind": "uses_network",
+          "target_id": "network:vc-wld01:seg-web-10.20.10.0"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:wld01-cl01-vsan01"
+        }
+      ]
+    },
+    {
+      "id": "vm:vc-wld01:monitoring01",
+      "type": "vm",
+      "name": "monitoring01",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "host:vc-wld01:esx02",
+      "properties": {
+        "powerState": "poweredOn",
+        "host": "esx02.wld01.vcf.example",
+        "cluster": "wld01-cl01",
+        "networks": [
+          "wld01-vds01-mgmt"
+        ],
+        "datastores": [
+          "wld01-cl01-vsan01"
+        ],
+        "guestFullName": "Ubuntu Linux (64-bit)",
+        "numCpu": 4,
+        "memoryMB": 16384,
+        "template": false,
+        "overallStatus": "green"
+      },
+      "relationships": [
+        {
+          "kind": "runs_on",
+          "target_id": "host:vc-wld01:esx02"
+        },
+        {
+          "kind": "uses_network",
+          "target_id": "network:vc-wld01:wld01-vds01-mgmt"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:wld01-cl01-vsan01"
+        }
+      ]
+    },
+    {
+      "id": "vm:vc-wld01:ws-cp01",
+      "type": "vm",
+      "name": "ws-cp01",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "host:vc-wld01:esx02",
+      "properties": {
+        "powerState": "poweredOn",
+        "host": "esx02.wld01.vcf.example",
+        "cluster": "wld01-cl01",
+        "networks": [
+          "seg-app-10.20.20.0"
+        ],
+        "datastores": [
+          "wld01-cl01-vsan01"
+        ],
+        "guestFullName": "VMware Photon OS (64-bit)",
+        "numCpu": 4,
+        "memoryMB": 16384,
+        "template": false,
+        "overallStatus": "green"
+      },
+      "relationships": [
+        {
+          "kind": "runs_on",
+          "target_id": "host:vc-wld01:esx02"
+        },
+        {
+          "kind": "uses_network",
+          "target_id": "network:vc-wld01:seg-app-10.20.20.0"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:wld01-cl01-vsan01"
+        }
+      ]
+    },
+    {
+      "id": "vm:vc-wld01:vCLS-wld01-cl01-2",
+      "type": "vm",
+      "name": "vCLS-wld01-cl01-2",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "host:vc-wld01:esx02",
+      "properties": {
+        "powerState": "poweredOn",
+        "host": "esx02.wld01.vcf.example",
+        "cluster": "wld01-cl01",
+        "networks": [],
+        "datastores": [
+          "wld01-cl01-vsan01"
+        ],
+        "guestFullName": "VMware Photon OS (64-bit)",
+        "numCpu": 1,
+        "memoryMB": 128,
+        "template": false,
+        "overallStatus": "green"
+      },
+      "relationships": [
+        {
+          "kind": "runs_on",
+          "target_id": "host:vc-wld01:esx02"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:wld01-cl01-vsan01"
+        }
+      ]
+    },
+    {
+      "id": "vm:vc-wld01:web04",
+      "type": "vm",
+      "name": "web04",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "host:vc-wld01:esx03",
+      "properties": {
+        "powerState": "poweredOn",
+        "host": "esx03.wld01.vcf.example",
+        "cluster": "wld01-cl01",
+        "networks": [
+          "seg-web-10.20.10.0"
+        ],
+        "datastores": [
+          "wld01-cl01-vsan01"
+        ],
+        "guestFullName": "Ubuntu Linux (64-bit)",
+        "numCpu": 2,
+        "memoryMB": 4096,
+        "template": false,
+        "overallStatus": "green"
+      },
+      "relationships": [
+        {
+          "kind": "runs_on",
+          "target_id": "host:vc-wld01:esx03"
+        },
+        {
+          "kind": "uses_network",
+          "target_id": "network:vc-wld01:seg-web-10.20.10.0"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:wld01-cl01-vsan01"
+        }
+      ]
+    },
+    {
+      "id": "vm:vc-wld01:app03",
+      "type": "vm",
+      "name": "app03",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "host:vc-wld01:esx03",
+      "properties": {
+        "powerState": "poweredOn",
+        "host": "esx03.wld01.vcf.example",
+        "cluster": "wld01-cl01",
+        "networks": [
+          "seg-app-10.20.20.0"
+        ],
+        "datastores": [
+          "wld01-cl01-vsan01"
+        ],
+        "guestFullName": "Red Hat Enterprise Linux 9 (64-bit)",
+        "numCpu": 4,
+        "memoryMB": 8192,
+        "template": false,
+        "overallStatus": "green"
+      },
+      "relationships": [
+        {
+          "kind": "runs_on",
+          "target_id": "host:vc-wld01:esx03"
+        },
+        {
+          "kind": "uses_network",
+          "target_id": "network:vc-wld01:seg-app-10.20.20.0"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:wld01-cl01-vsan01"
+        }
+      ]
+    },
+    {
+      "id": "vm:vc-wld01:db02",
+      "type": "vm",
+      "name": "db02",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "host:vc-wld01:esx03",
+      "properties": {
+        "powerState": "poweredOn",
+        "host": "esx03.wld01.vcf.example",
+        "cluster": "wld01-cl01",
+        "networks": [
+          "seg-db-10.20.30.0"
+        ],
+        "datastores": [
+          "wld01-cl01-vsan01"
+        ],
+        "guestFullName": "Red Hat Enterprise Linux 9 (64-bit)",
+        "numCpu": 8,
+        "memoryMB": 32768,
+        "template": false,
+        "overallStatus": "green"
+      },
+      "relationships": [
+        {
+          "kind": "runs_on",
+          "target_id": "host:vc-wld01:esx03"
+        },
+        {
+          "kind": "uses_network",
+          "target_id": "network:vc-wld01:seg-db-10.20.30.0"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:wld01-cl01-vsan01"
+        }
+      ]
+    },
+    {
+      "id": "vm:vc-wld01:dmz-jump01",
+      "type": "vm",
+      "name": "dmz-jump01",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "host:vc-wld01:esx03",
+      "properties": {
+        "powerState": "poweredOn",
+        "host": "esx03.wld01.vcf.example",
+        "cluster": "wld01-cl01",
+        "networks": [
+          "seg-dmz-10.20.40.0"
+        ],
+        "datastores": [
+          "wld01-cl01-vsan01"
+        ],
+        "guestFullName": "Microsoft Windows Server 2022 (64-bit)",
+        "numCpu": 2,
+        "memoryMB": 8192,
+        "template": false,
+        "overallStatus": "green"
+      },
+      "relationships": [
+        {
+          "kind": "runs_on",
+          "target_id": "host:vc-wld01:esx03"
+        },
+        {
+          "kind": "uses_network",
+          "target_id": "network:vc-wld01:seg-dmz-10.20.40.0"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:wld01-cl01-vsan01"
+        }
+      ]
+    },
+    {
+      "id": "vm:vc-wld01:ws-w01",
+      "type": "vm",
+      "name": "ws-w01",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "host:vc-wld01:esx03",
+      "properties": {
+        "powerState": "poweredOn",
+        "host": "esx03.wld01.vcf.example",
+        "cluster": "wld01-cl01",
+        "networks": [
+          "seg-app-10.20.20.0"
+        ],
+        "datastores": [
+          "wld01-cl01-vsan01"
+        ],
+        "guestFullName": "VMware Photon OS (64-bit)",
+        "numCpu": 8,
+        "memoryMB": 32768,
+        "template": false,
+        "overallStatus": "green"
+      },
+      "relationships": [
+        {
+          "kind": "runs_on",
+          "target_id": "host:vc-wld01:esx03"
+        },
+        {
+          "kind": "uses_network",
+          "target_id": "network:vc-wld01:seg-app-10.20.20.0"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:wld01-cl01-vsan01"
+        }
+      ]
+    },
+    {
+      "id": "vm:vc-wld01:logs01",
+      "type": "vm",
+      "name": "logs01",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "host:vc-wld01:esx03",
+      "properties": {
+        "powerState": "poweredOn",
+        "host": "esx03.wld01.vcf.example",
+        "cluster": "wld01-cl01",
+        "networks": [
+          "wld01-vds01-mgmt"
+        ],
+        "datastores": [
+          "wld01-cl01-vsan02"
+        ],
+        "guestFullName": "Ubuntu Linux (64-bit)",
+        "numCpu": 4,
+        "memoryMB": 16384,
+        "template": false,
+        "overallStatus": "green"
+      },
+      "relationships": [
+        {
+          "kind": "runs_on",
+          "target_id": "host:vc-wld01:esx03"
+        },
+        {
+          "kind": "uses_network",
+          "target_id": "network:vc-wld01:wld01-vds01-mgmt"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:wld01-cl01-vsan02"
+        }
+      ]
+    },
+    {
+      "id": "vm:vc-wld01:vCLS-wld01-cl01-3",
+      "type": "vm",
+      "name": "vCLS-wld01-cl01-3",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "host:vc-wld01:esx03",
+      "properties": {
+        "powerState": "poweredOn",
+        "host": "esx03.wld01.vcf.example",
+        "cluster": "wld01-cl01",
+        "networks": [],
+        "datastores": [
+          "wld01-cl01-vsan01"
+        ],
+        "guestFullName": "VMware Photon OS (64-bit)",
+        "numCpu": 1,
+        "memoryMB": 128,
+        "template": false,
+        "overallStatus": "green"
+      },
+      "relationships": [
+        {
+          "kind": "runs_on",
+          "target_id": "host:vc-wld01:esx03"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:wld01-cl01-vsan01"
+        }
+      ]
+    },
+    {
+      "id": "vm:vc-wld01:app04",
+      "type": "vm",
+      "name": "app04",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "host:vc-wld01:esx04",
+      "properties": {
+        "powerState": "poweredOn",
+        "host": "esx04.wld01.vcf.example",
+        "cluster": "wld01-cl01",
+        "networks": [
+          "seg-app-10.20.20.0"
+        ],
+        "datastores": [
+          "wld01-cl01-vsan01"
+        ],
+        "guestFullName": "Red Hat Enterprise Linux 9 (64-bit)",
+        "numCpu": 4,
+        "memoryMB": 8192,
+        "template": false,
+        "overallStatus": "green"
+      },
+      "relationships": [
+        {
+          "kind": "runs_on",
+          "target_id": "host:vc-wld01:esx04"
+        },
+        {
+          "kind": "uses_network",
+          "target_id": "network:vc-wld01:seg-app-10.20.20.0"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:wld01-cl01-vsan01"
+        }
+      ]
+    },
+    {
+      "id": "vm:vc-wld01:backup-proxy01",
+      "type": "vm",
+      "name": "backup-proxy01",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "host:vc-wld01:esx04",
+      "properties": {
+        "powerState": "poweredOn",
+        "host": "esx04.wld01.vcf.example",
+        "cluster": "wld01-cl01",
+        "networks": [
+          "wld01-vds01-mgmt"
+        ],
+        "datastores": [
+          "wld01-cl01-vsan02"
+        ],
+        "guestFullName": "Microsoft Windows Server 2022 (64-bit)",
+        "numCpu": 4,
+        "memoryMB": 16384,
+        "template": false,
+        "overallStatus": "green"
+      },
+      "relationships": [
+        {
+          "kind": "runs_on",
+          "target_id": "host:vc-wld01:esx04"
+        },
+        {
+          "kind": "uses_network",
+          "target_id": "network:vc-wld01:wld01-vds01-mgmt"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:wld01-cl01-vsan02"
+        }
+      ]
+    },
+    {
+      "id": "vm:vc-wld01:harbor01",
+      "type": "vm",
+      "name": "harbor01",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "host:vc-wld01:esx04",
+      "properties": {
+        "powerState": "poweredOn",
+        "host": "esx04.wld01.vcf.example",
+        "cluster": "wld01-cl01",
+        "networks": [
+          "seg-web-10.20.10.0"
+        ],
+        "datastores": [
+          "wld01-cl01-vsan02"
+        ],
+        "guestFullName": "Ubuntu Linux (64-bit)",
+        "numCpu": 4,
+        "memoryMB": 8192,
+        "template": false,
+        "overallStatus": "green"
+      },
+      "relationships": [
+        {
+          "kind": "runs_on",
+          "target_id": "host:vc-wld01:esx04"
+        },
+        {
+          "kind": "uses_network",
+          "target_id": "network:vc-wld01:seg-web-10.20.10.0"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:wld01-cl01-vsan02"
+        }
+      ]
+    },
+    {
+      "id": "vm:vc-wld01:ws-w02",
+      "type": "vm",
+      "name": "ws-w02",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "host:vc-wld01:esx04",
+      "properties": {
+        "powerState": "poweredOn",
+        "host": "esx04.wld01.vcf.example",
+        "cluster": "wld01-cl01",
+        "networks": [
+          "seg-app-10.20.20.0"
+        ],
+        "datastores": [
+          "wld01-cl01-vsan01"
+        ],
+        "guestFullName": "VMware Photon OS (64-bit)",
+        "numCpu": 8,
+        "memoryMB": 32768,
+        "template": false,
+        "overallStatus": "green"
+      },
+      "relationships": [
+        {
+          "kind": "runs_on",
+          "target_id": "host:vc-wld01:esx04"
+        },
+        {
+          "kind": "uses_network",
+          "target_id": "network:vc-wld01:seg-app-10.20.20.0"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:wld01-cl01-vsan01"
+        }
+      ]
+    },
+    {
+      "id": "vm:vc-wld01:ops-proxy01",
+      "type": "vm",
+      "name": "ops-proxy01",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "host:vc-wld01:esx04",
+      "properties": {
+        "powerState": "poweredOn",
+        "host": "esx04.wld01.vcf.example",
+        "cluster": "wld01-cl01",
+        "networks": [
+          "wld01-vds01-mgmt"
+        ],
+        "datastores": [
+          "wld01-cl01-vsan01"
+        ],
+        "guestFullName": "VMware Photon OS (64-bit)",
+        "numCpu": 2,
+        "memoryMB": 4096,
+        "template": false,
+        "overallStatus": "green"
+      },
+      "relationships": [
+        {
+          "kind": "runs_on",
+          "target_id": "host:vc-wld01:esx04"
+        },
+        {
+          "kind": "uses_network",
+          "target_id": "network:vc-wld01:wld01-vds01-mgmt"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:wld01-cl01-vsan01"
+        }
+      ]
+    },
+    {
+      "id": "vm:vc-wld01:tpl-win2022",
+      "type": "vm",
+      "name": "tpl-win2022",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "host:vc-wld01:esx04",
+      "properties": {
+        "powerState": "poweredOff",
+        "host": "esx04.wld01.vcf.example",
+        "cluster": "wld01-cl01",
+        "networks": [
+          "wld01-vds01-mgmt"
+        ],
+        "datastores": [
+          "nfs01-iso-templates"
+        ],
+        "guestFullName": "Microsoft Windows Server 2022 (64-bit)",
+        "numCpu": 2,
+        "memoryMB": 4096,
+        "template": true,
+        "overallStatus": "green"
+      },
+      "relationships": [
+        {
+          "kind": "runs_on",
+          "target_id": "host:vc-wld01:esx04"
+        },
+        {
+          "kind": "uses_network",
+          "target_id": "network:vc-wld01:wld01-vds01-mgmt"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:nfs01-iso-templates"
+        }
+      ]
+    },
+    {
+      "id": "vm:vc-wld01:wld01-en01",
+      "type": "vm",
+      "name": "wld01-en01",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "host:vc-wld01:esx05",
+      "properties": {
+        "powerState": "poweredOn",
+        "host": "esx05.wld01.vcf.example",
+        "cluster": "wld01-edge",
+        "networks": [
+          "wld01-vds01-mgmt",
+          "wld01-vds01-edge-uplink"
+        ],
+        "datastores": [
+          "wld01-edge-vsan01"
+        ],
+        "guestFullName": "Ubuntu Linux (64-bit)",
+        "numCpu": 8,
+        "memoryMB": 32768,
+        "template": false,
+        "overallStatus": "green"
+      },
+      "relationships": [
+        {
+          "kind": "runs_on",
+          "target_id": "host:vc-wld01:esx05"
+        },
+        {
+          "kind": "uses_network",
+          "target_id": "network:vc-wld01:wld01-vds01-mgmt"
+        },
+        {
+          "kind": "uses_network",
+          "target_id": "network:vc-wld01:wld01-vds01-edge-uplink"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:wld01-edge-vsan01"
+        }
+      ]
+    },
+    {
+      "id": "vm:vc-wld01:vCLS-wld01-edge-1",
+      "type": "vm",
+      "name": "vCLS-wld01-edge-1",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "host:vc-wld01:esx05",
+      "properties": {
+        "powerState": "poweredOn",
+        "host": "esx05.wld01.vcf.example",
+        "cluster": "wld01-edge",
+        "networks": [],
+        "datastores": [
+          "wld01-edge-vsan01"
+        ],
+        "guestFullName": "VMware Photon OS (64-bit)",
+        "numCpu": 1,
+        "memoryMB": 128,
+        "template": false,
+        "overallStatus": "green"
+      },
+      "relationships": [
+        {
+          "kind": "runs_on",
+          "target_id": "host:vc-wld01:esx05"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:wld01-edge-vsan01"
+        }
+      ]
+    },
+    {
+      "id": "vm:vc-wld01:wld01-en02",
+      "type": "vm",
+      "name": "wld01-en02",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "host:vc-wld01:esx06",
+      "properties": {
+        "powerState": "poweredOn",
+        "host": "esx06.wld01.vcf.example",
+        "cluster": "wld01-edge",
+        "networks": [
+          "wld01-vds01-mgmt",
+          "wld01-vds01-edge-uplink"
+        ],
+        "datastores": [
+          "wld01-edge-vsan01"
+        ],
+        "guestFullName": "Ubuntu Linux (64-bit)",
+        "numCpu": 8,
+        "memoryMB": 32768,
+        "template": false,
+        "overallStatus": "green"
+      },
+      "relationships": [
+        {
+          "kind": "runs_on",
+          "target_id": "host:vc-wld01:esx06"
+        },
+        {
+          "kind": "uses_network",
+          "target_id": "network:vc-wld01:wld01-vds01-mgmt"
+        },
+        {
+          "kind": "uses_network",
+          "target_id": "network:vc-wld01:wld01-vds01-edge-uplink"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:wld01-edge-vsan01"
+        }
+      ]
+    },
+    {
+      "id": "vm:vc-wld01:vCLS-wld01-edge-2",
+      "type": "vm",
+      "name": "vCLS-wld01-edge-2",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "host:vc-wld01:esx06",
+      "properties": {
+        "powerState": "poweredOn",
+        "host": "esx06.wld01.vcf.example",
+        "cluster": "wld01-edge",
+        "networks": [],
+        "datastores": [
+          "wld01-edge-vsan01"
+        ],
+        "guestFullName": "VMware Photon OS (64-bit)",
+        "numCpu": 1,
+        "memoryMB": 128,
+        "template": false,
+        "overallStatus": "green"
+      },
+      "relationships": [
+        {
+          "kind": "runs_on",
+          "target_id": "host:vc-wld01:esx06"
+        },
+        {
+          "kind": "uses_datastore",
+          "target_id": "datastore:vc-wld01:wld01-edge-vsan01"
+        }
+      ]
+    }
+  ]
+}
