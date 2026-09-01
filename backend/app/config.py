@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     default_retention: int = 96
     # Scheduler floor in minutes.
     min_interval_minutes: int = 5
+    # "on" requires the shared operator password; "off" for deployments that
+    # front the app with ingress authentication.
+    auth: str = "on"
 
 
 settings = Settings()
