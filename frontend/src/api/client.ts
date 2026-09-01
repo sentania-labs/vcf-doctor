@@ -1,6 +1,11 @@
 // Single place all API access goes through. Every api/* module uses these.
 const BASE = '/api'
 
+// Fired on window when any non-auth API call comes back 401. The auth layer
+// listens and sends the user to /login. Auth endpoints are excluded so a wrong
+// password on the login form does not bounce the page.
+export const UNAUTHENTICATED_EVENT = 'vcfdoctor:unauthenticated'
+
 export class ApiError extends Error {
   status: number
   constructor(status: number, message: string) {
@@ -9,8 +14,11 @@ export class ApiError extends Error {
   }
 }
 
-async function parse<T>(r: Response): Promise<T> {
+async function parse<T>(r: Response, path: string): Promise<T> {
   if (!r.ok) {
+    if (r.status === 401 && !path.startsWith('/auth/')) {
+      window.dispatchEvent(new CustomEvent(UNAUTHENTICATED_EVENT))
+    }
     let detail = `${r.status} ${r.statusText}`
     try {
       const body = await r.json()
@@ -27,7 +35,7 @@ async function parse<T>(r: Response): Promise<T> {
 
 export async function apiGet<T>(path: string): Promise<T> {
   const r = await fetch(`${BASE}${path}`)
-  return parse<T>(r)
+  return parse<T>(r, path)
 }
 
 export async function apiSend<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -36,7 +44,7 @@ export async function apiSend<T>(method: string, path: string, body?: unknown): 
     headers: { 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
   })
-  return parse<T>(r)
+  return parse<T>(r, path)
 }
 
 export function apiUrl(path: string): string {

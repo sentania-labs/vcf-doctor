@@ -1,7 +1,10 @@
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import { AppStateProvider } from '@/state/AppState'
 import { AssistantStateProvider } from '@/state/AssistantState'
+import { AuthProvider } from '@/state/AuthState'
+import { AuthGate } from '@/components/auth/AuthGate'
 import { Shell } from '@/components/layout/Shell'
+import LoginPage from '@/pages/Login'
 import OverviewPage from '@/pages/Overview'
 import HealthPage from '@/pages/Health'
 import ChangesPage from '@/pages/Changes'
@@ -11,9 +14,11 @@ import AssistantPage from '@/pages/Assistant'
 import ConnectionsPage from '@/pages/Connections'
 import SettingsPage from '@/pages/Settings'
 
-export default function App() {
+// The console (and its data providers, which start polling on mount) only
+// mounts once the auth gate says we are allowed in.
+function Console() {
   return (
-    <BrowserRouter>
+    <AuthGate>
       <AppStateProvider>
         <AssistantStateProvider>
           <Routes>
@@ -31,6 +36,19 @@ export default function App() {
           </Routes>
         </AssistantStateProvider>
       </AppStateProvider>
+    </AuthGate>
+  )
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <AuthProvider>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/*" element={<Console />} />
+        </Routes>
+      </AuthProvider>
     </BrowserRouter>
   )
 }

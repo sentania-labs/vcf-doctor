@@ -1,9 +1,67 @@
-import { useEffect, useState } from 'react'
-import { CheckCircle2, KeyRound } from 'lucide-react'
+import { useEffect, useState, type FormEvent } from 'react'
+import { CheckCircle2, KeyRound, ShieldCheck } from 'lucide-react'
 import type { AssistantSettings, Settings } from '@/types'
-import { getSettings, updateSettings, getAssistantStatus } from '@/api'
+import { getSettings, updateSettings, getAssistantStatus, changePassword } from '@/api'
+import { useAuth } from '@/state/AuthState'
 import { useAsync } from '@/hooks/useAsync'
 import { Badge, Button, Card, CardHeader, ErrorState, Field, Input, PageHeader, Select, Skeleton, Toggle } from '@/components/ui'
+
+function AccessCard() {
+  const { status } = useAuth()
+  const [current, setCurrent] = useState('')
+  const [next, setNext] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [done, setDone] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault()
+    setErr(null); setDone(false)
+    if (next.length < 8) { setErr('New password must be at least 8 characters.'); return }
+    if (next !== confirm) { setErr('New passwords do not match.'); return }
+    setBusy(true)
+    try {
+      await changePassword(current, next)
+      setCurrent(''); setNext(''); setConfirm('')
+      setDone(true); setTimeout(() => setDone(false), 3000)
+    } catch (e2) {
+      const msg = e2 instanceof Error ? e2.message : String(e2)
+      setErr(msg === 'invalid password' ? 'Current password is incorrect.' : msg)
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <Card>
+      <CardHeader title="Access" subtitle="One shared operator password protects this console."
+        action={status && !status.enabled ? <Badge tone="neutral">Disabled</Badge> : status?.enabled ? <Badge tone="ok" dot>Enabled</Badge> : null} />
+      <div className="px-5 pb-5">
+        {status && !status.enabled ? (
+          <p className="text-sm text-muted bg-surface-2 rounded-md px-3 py-2">Authentication is disabled by the deployment (VCF_DOCTOR_AUTH=off).</p>
+        ) : (
+          <form onSubmit={e => void submit(e)} className="space-y-4" noValidate>
+            <div className="grid sm:grid-cols-3 gap-4">
+              <Field label="Current password">
+                <Input type="password" value={current} onChange={e => setCurrent(e.target.value)} autoComplete="current-password" name="current_password" disabled={busy} />
+              </Field>
+              <Field label="New password" hint="At least 8 characters.">
+                <Input type="password" value={next} onChange={e => setNext(e.target.value)} autoComplete="new-password" name="new_password" disabled={busy} />
+              </Field>
+              <Field label="Confirm new password">
+                <Input type="password" value={confirm} onChange={e => setConfirm(e.target.value)} autoComplete="new-password" name="confirm_password" disabled={busy} />
+              </Field>
+            </div>
+            {err ? <p className="text-sm text-critical bg-critical-bg rounded-md px-3 py-2" role="alert">{err}</p> : null}
+            <div className="flex items-center gap-3">
+              <Button type="submit" loading={busy} disabled={!current || !next || !confirm}><ShieldCheck size={15} /> Change password</Button>
+              {done ? <span className="text-sm text-ok inline-flex items-center gap-1.5"><CheckCircle2 size={15} /> Password changed</span> : null}
+            </div>
+          </form>
+        )}
+      </div>
+    </Card>
+  )
+}
 
 export default function SettingsPage() {
   const s = useAsync(() => getSettings(), [])
@@ -71,6 +129,8 @@ export default function SettingsPage() {
               </Field>
             </div>
           </Card>
+
+          <AccessCard />
           {err ? <p className="text-sm text-critical">{err}</p> : null}
         </div>
       )}

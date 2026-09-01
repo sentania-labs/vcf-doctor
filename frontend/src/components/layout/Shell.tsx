@@ -1,8 +1,10 @@
 import { NavLink, Outlet } from 'react-router-dom'
-import { Activity, Bot, Boxes, Camera, GitCompareArrows, HeartPulse, LayoutDashboard, Plug, Settings as SettingsIcon, Stethoscope } from 'lucide-react'
+import { useState } from 'react'
+import { Activity, Bot, Boxes, Camera, GitCompareArrows, HeartPulse, LayoutDashboard, LogOut, Plug, Settings as SettingsIcon, Stethoscope } from 'lucide-react'
 import { TopBar } from './TopBar'
 import { AssistantDrawer } from '@/components/assistant/AssistantDrawer'
 import { useAppState } from '@/state/AppState'
+import { useAuth } from '@/state/AuthState'
 import { cn } from '@/lib/cn'
 import { USE_MOCKS } from '@/api'
 
@@ -32,6 +34,20 @@ function NavItem({ to, label, icon: Icon, end }: { to: string; label: string; ic
   )
 }
 
+function SignOutItem() {
+  const { status, signOut } = useAuth()
+  const [busy, setBusy] = useState(false)
+  if (!status?.enabled) return null
+  return (
+    <button type="button" disabled={busy} onClick={() => { setBusy(true); void signOut().finally(() => setBusy(false)) }}
+      className={cn('flex items-center gap-3 rounded-md px-3 h-9 text-[13.5px] font-medium transition-colors duration-150 w-full text-left',
+        'text-muted hover:text-fg hover:bg-surface-2 disabled:opacity-50')}>
+      <LogOut size={16} className="text-faint" />
+      Sign out
+    </button>
+  )
+}
+
 export function Shell() {
   const { backend, backendError } = useAppState()
   return (
@@ -48,6 +64,7 @@ export function Shell() {
           {primary.map(n => <NavItem key={n.to} {...n} />)}
           <div className="my-4 border-t border-border" />
           {secondary.map(n => <NavItem key={n.to} {...n} />)}
+          <div className="mt-auto pt-4"><SignOutItem /></div>
         </nav>
         <div className="px-5 py-4 border-t border-border text-[11px] text-faint flex items-center justify-between">
           <span>Read-only by design</span>
