@@ -57,6 +57,12 @@ Environment variables (all optional):
 | `ANTHROPIC_API_KEY` | unset | Enables the Claude assistant. Can also be entered in Settings. |
 | `VCF_DOCTOR_LLM_MODEL` | `claude-opus-5` | Default assistant model; changeable in Settings |
 | `VCF_DOCTOR_DEFAULT_RETENTION` | `96` | Scheduled snapshots kept per connection; changeable in Settings |
+| `VCF_DOCTOR_MIN_INTERVAL_MINUTES` | `5` | Floor for scan intervals |
+| `VCF_DOCTOR_SCHEDULER` | `on` | `off` disables scheduled scans (Scan Now still works) |
+| `VCF_DOCTOR_STATIC_DIR` | `/app/static` in the image | Built frontend location |
+| `VCF_DOCTOR_FIXTURES_DIR` | `/app/fixtures` in the image | Fixture data for demo mode |
+
+A key entered on the Settings page takes precedence over `ANTHROPIC_API_KEY`.
 
 vCenter connections, schedules, retention, and assistant settings are
 application state set through the GUI and stored on the volume. Nothing

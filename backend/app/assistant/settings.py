@@ -22,13 +22,12 @@ _PERSISTED_FIELDS = ("enabled", "provider", "model")
 
 
 def resolve_api_key() -> str | None:
-    env = os.environ.get(ENV_KEY, "").strip()
-    if env:
-        return env
+    """A key entered in Settings wins; ANTHROPIC_API_KEY is the deployment default."""
     stored = db.get_setting(API_KEY_KEY)
     if isinstance(stored, str) and stored.strip():
         return stored.strip()
-    return None
+    env = os.environ.get(ENV_KEY, "").strip()
+    return env or None
 
 
 def get_settings() -> AssistantSettings:

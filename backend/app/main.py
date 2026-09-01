@@ -4,7 +4,7 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -74,12 +74,16 @@ def mount_frontend(application: FastAPI) -> None:
         return
     application.mount("/assets", StaticFiles(directory=static / "assets"), name="assets")
 
+    root = static.resolve()
+
     @application.get("/{full_path:path}", include_in_schema=False)
     def spa(full_path: str) -> FileResponse:
-        candidate = static / full_path
-        if full_path and candidate.is_file():
+        if full_path.startswith("api/"):
+            raise HTTPException(404, "not found")
+        candidate = (root / full_path).resolve()
+        if full_path and candidate.is_relative_to(root) and candidate.is_file():
             return FileResponse(candidate)
-        return FileResponse(static / "index.html")
+        return FileResponse(root / "index.html")
 
 
 mount_frontend(app)
