@@ -5,9 +5,10 @@
 The container is deployed by Argo from the lab deployment repo. Nothing
 about a vCenter is configured ahead of time.
 
-1. Open the UI. Connections page. Add vCenter: name, host, username,
-   password, TLS verify off for the lab. Test Connection. Save.
-   Default schedule: enabled, every 15 minutes. Set 5 for the demo.
+1. Open the UI. First visit asks you to set the operator password (or it
+   was seeded with `VCF_DOCTOR_ADMIN_PASSWORD`). Sign in. Connections page.
+   Add vCenter: name, host, username, password, TLS verify off for the lab.
+   Test Connection. Add. The dialog defaults to a 5 minute interval.
 2. Top bar: Scan Now. Overview populates with real inventory.
 3. Snapshots: Capture Snapshot, label "Baseline".
 4. Make the rehearsed lab change (power off the designated VM, or put the
@@ -16,8 +17,8 @@ about a vCenter is configured ahead of time.
 6. Changes: FROM Baseline, TO latest. Point at the semantic change and its
    significance.
 7. Health: open the resulting finding. Explain. Then Generate Script
-   (PowerCLI). Show the READ ONLY and MODIFIES ENVIRONMENT badges and that
-   there is no execute control.
+   (PowerCLI). Show the "Read only" and "Modifies environment" badges and
+   that there is no execute control.
 8. Undo the lab change after the demo.
 
 ## Fallback: fixture mode
@@ -49,4 +50,6 @@ Model defaults to claude-opus-5.
 - `make lint && make test` green on the commit being demoed.
 - Rehearse the live path once end to end, including the undo.
 - Rehearse the fixture path once.
-- Confirm the Anthropic key works with Settings > Test.
+- Confirm the Anthropic key works: Settings > save the key, then ask the
+  assistant one question and check the answer is not from the mock provider
+  (the drawer header shows provider and model).
