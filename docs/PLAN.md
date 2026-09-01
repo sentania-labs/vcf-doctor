@@ -15,6 +15,31 @@ The MVP is done when that sentence is true against a real vCenter and against
 fixture data with no vCenter at all, and the pages still render when no LLM
 is configured.
 
+## Demo posture
+
+The hackathon demo runs **live** against one of Scott's VCF workload-domain
+vCenters. Real inventory, real scheduled captures, a real change made in the
+lab between snapshots. Fixture mode (`VCF_DOCTOR_DEMO_MODE=true`) exists as
+the fallback if conference networking or the lab is unreachable; it is not
+the primary path and is not what gets rehearsed first.
+
+Consequences:
+
+- The live vCenter path is verified before anything else in Phase 3. Fixture
+  mode is verified last.
+- The connection is added through the GUI on demo day like any other
+  vCenter. No workload-domain name, hostname, or credential appears in this
+  repo, in fixtures, or in the image.
+- The "something changes" step is a rehearsed, reversible lab action
+  (power off a designated VM, put a host in maintenance mode) chosen so it
+  lands inside one scan interval and is undone afterwards.
+- The scan interval floor of 5 minutes is too slow for a live demo. Scan
+  Now remains on the top bar and produces a snapshot immediately; the
+  scheduler proves itself in the background while the presenter talks.
+- Fixture snapshot data should resemble a VCF workload domain (cluster
+  names, vSAN datastores, NSX-backed segments) so the fallback does not
+  look like a different product.
+
 ## Gaps in startup.md this plan closes
 
 1. **No scheduler.** The spec only has "Scan Now". Nothing runs unattended.
@@ -274,7 +299,8 @@ Nothing is reported complete on tests or CI alone. The MVP is done when this
 sequence has been performed and observed:
 
 1. `docker compose up` from a clean checkout; open the UI cold.
-2. Add the lab vCenter on the Connections page; set a 5 minute interval.
+2. Add the workload-domain vCenter on the Connections page; set a 5 minute
+   interval. Click Scan Now; confirm a snapshot with real inventory.
 3. Watch the Snapshots page populate on its own without clicking Scan Now.
 4. Power off one VM in the lab; wait one interval.
 5. Changes page shows `poweredOn -> poweredOff` at medium significance.
@@ -336,6 +362,10 @@ work.
   frontend model and begins on mocks so it is never blocked on the backend.
 - **Single replica.** A deployment with two replicas will double-scan and
   contend for SQLite. Called out in the README deployment contract.
+- **Live demo against real infrastructure.** The primary demo depends on
+  the lab vCenter being reachable from the conference floor. Fixture mode
+  is the rehearsed fallback, one environment variable away, with data that
+  looks like a workload domain.
 - **Assistant availability on demo day.** Conference networks fail. The
   mock provider is a one-click switch on the Settings page, and the demo
   script has a mock-provider path rehearsed alongside the live one.
