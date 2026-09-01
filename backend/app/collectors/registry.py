@@ -2,7 +2,6 @@
 
 from app.collectors.base import Collector
 from app.collectors.fixture import FixtureCollector
-from app.config import settings
 from app.models import Connection
 
 
@@ -11,7 +10,7 @@ class CollectorUnavailable(Exception):
 
 
 def get_collector(connection: Connection) -> Collector:
-    if settings.demo_mode or connection.kind == "fixture":
+    if connection.kind == "fixture":
         from app.snapshots import store
 
         return FixtureCollector(connection.id, sequence=store.count_snapshots(connection.id))

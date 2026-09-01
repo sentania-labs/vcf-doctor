@@ -98,8 +98,16 @@ def test_overview_shape(client):
     for path in ("/api/overview", f"/api/overview?connection_id={cid}"):
         o = client.get(path).json()
         for key in (
-            "health_score", "counts", "resource_counts", "hosts_connected", "hosts_total",
-            "vms_on", "vms_total", "storage_free_pct", "last_scan", "top_findings",
+            "health_score",
+            "counts",
+            "resource_counts",
+            "hosts_connected",
+            "hosts_total",
+            "vms_on",
+            "vms_total",
+            "storage_free_pct",
+            "last_scan",
+            "top_findings",
             "recent_changes",
         ):
             assert key in o, key
@@ -160,3 +168,28 @@ def test_scan_lock_under_real_concurrency(tmp_path):
     for t in threads:
         t.join()
     assert sorted(results) in (["ok", "ok"], ["ok", "skipped"])
+
+
+def test_demo_mode_does_not_hijack_live_connections(monkeypatch):
+    """Demo mode only creates the fixture connection; a vcenter-kind connection
+    must still get the vSphere collector."""
+    from datetime import UTC, datetime
+
+    from app.collectors import registry
+    from app.collectors.fixture import FixtureCollector
+    from app.config import settings
+    from app.models import Connection
+
+    monkeypatch.setattr(settings, "demo_mode", True)
+    live = Connection(
+        id="c1",
+        name="wld",
+        host="vc.example",
+        username="u",
+        password="p",
+        created_at=datetime.now(UTC),
+        kind="vcenter",
+    )
+    assert not isinstance(registry.get_collector(live), FixtureCollector)
+    fixture = live.model_copy(update={"kind": "fixture"})
+    assert isinstance(registry.get_collector(fixture), FixtureCollector)
