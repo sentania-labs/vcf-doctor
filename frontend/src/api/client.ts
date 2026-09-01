@@ -6,6 +6,21 @@ const BASE = '/api'
 // password on the login form does not bounce the page.
 export const UNAUTHENTICATED_EVENT = 'vcfdoctor:unauthenticated'
 
+// Fired on window when a request fails before any HTTP response arrives (backend down,
+// connection refused). The app state listens and re-checks the backend right away
+// instead of waiting for the next heartbeat. The /health probe itself is excluded so a
+// failing check cannot re-trigger itself.
+export const BACKEND_UNREACHABLE_EVENT = 'vcfdoctor:backend-unreachable'
+
+async function request(path: string, init?: RequestInit): Promise<Response> {
+  try {
+    return await fetch(`${BASE}${path}`, init)
+  } catch (e) {
+    if (e instanceof TypeError && path !== '/health') window.dispatchEvent(new CustomEvent(BACKEND_UNREACHABLE_EVENT))
+    throw e
+  }
+}
+
 export class ApiError extends Error {
   status: number
   constructor(status: number, message: string) {
@@ -34,12 +49,12 @@ async function parse<T>(r: Response, path: string): Promise<T> {
 }
 
 export async function apiGet<T>(path: string): Promise<T> {
-  const r = await fetch(`${BASE}${path}`)
+  const r = await request(path)
   return parse<T>(r, path)
 }
 
 export async function apiSend<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const r = await fetch(`${BASE}${path}`, {
+  const r = await request(path, {
     method,
     headers: { 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),

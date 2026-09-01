@@ -25,11 +25,16 @@ export function AssistantStateProvider({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false)
   const [seed, setSeed] = useState<AssistantSeed | null>(null)
   const [seedKey, setSeedKey] = useState(0)
+  // A plain openDrawer() (top bar) starts clean; only a seeded open carries evidence and a question.
   const openDrawer = useCallback((s?: AssistantSeed) => {
-    if (s) { setSeed(s); setSeedKey(k => k + 1) }
+    if (s) { setSeed(s); setSeedKey(k => k + 1) } else setSeed(null)
     setOpen(true)
   }, [])
-  const closeDrawer = useCallback(() => setOpen(false), [])
+  // Closing keeps the evidence for the full page but disarms autoSend so a remount never re-sends the request.
+  const closeDrawer = useCallback(() => {
+    setOpen(false)
+    setSeed(s => (s && s.autoSend ? { ...s, autoSend: false } : s))
+  }, [])
   const value = useMemo(() => ({ open, seed, seedKey, openDrawer, closeDrawer }), [open, seed, seedKey, openDrawer, closeDrawer])
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }

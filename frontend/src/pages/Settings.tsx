@@ -66,7 +66,7 @@ function AccessCard() {
 export default function SettingsPage() {
   const s = useAsync(() => getSettings(), [])
   const status = useAsync(() => getAssistantStatus(), [s.data])
-  const [retention, setRetention] = useState(30)
+  const [retention, setRetention] = useState(96)
   const [assistant, setAssistant] = useState<AssistantSettings>({ enabled: true, provider: 'anthropic', model: 'claude-opus-5', api_key_set: false })
   const [apiKey, setApiKey] = useState('')
   const [saving, setSaving] = useState(false)
@@ -96,9 +96,9 @@ export default function SettingsPage() {
       {!s.data ? <div className="space-y-5"><Skeleton className="h-40 rounded-xl" /><Skeleton className="h-72 rounded-xl" /></div> : (
         <div className="space-y-5">
           <Card>
-            <CardHeader title="Snapshots" subtitle="How long scheduled snapshots are kept before pruning" />
+            <CardHeader title="Snapshots" subtitle="How many scheduled snapshots are kept per connection before the oldest are pruned" />
             <div className="px-5 pb-5 grid sm:grid-cols-2 gap-4">
-              <Field label="Retention (days)" hint="Manual snapshots with a label are kept regardless.">
+              <Field label="Scheduled snapshots kept (per connection)" hint="A count, not days. The oldest scheduled snapshots beyond this number are pruned after each scan. Manual snapshots are never pruned.">
                 <Input type="number" min={1} max={3650} value={retention} onChange={e => setRetention(Math.max(1, Number(e.target.value) || 1))} />
               </Field>
             </div>

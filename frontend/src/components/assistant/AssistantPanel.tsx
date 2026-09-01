@@ -65,6 +65,9 @@ export function AssistantPanel({ seed, seedKey, context, compact }: {
 
   useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' }) }, [messages])
 
+  // Closing the drawer unmounts the panel; abort the stream so the backend stops generating.
+  useEffect(() => () => abortRef.current?.abort(), [])
+
   const available = status.data?.available ?? false
 
   async function send(t: AssistantTask, question: string, c = ctx, f = format) {

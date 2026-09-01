@@ -37,6 +37,20 @@ export function formatValue(v: unknown): string {
   try { return JSON.stringify(v) } catch { return String(v) }
 }
 
+// Property keys whose numeric values are byte counts (freeSpace, capacity, memoryBytes, ...).
+export function isByteKey(k: string): boolean {
+  return /(freeSpace|capacity|bytes)$/i.test(k) || /^(freeSpace|capacity)/i.test(k)
+}
+
+export function formatBytes(n: number): string {
+  if (!Number.isFinite(n)) return String(n)
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB']
+  let v = Math.abs(n), i = 0
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++ }
+  const digits = i === 0 ? 0 : v >= 100 ? 0 : v >= 10 ? 1 : 2
+  return `${n < 0 ? '-' : ''}${v.toFixed(digits)} ${units[i]}`
+}
+
 export function humanKey(k: string): string {
   return k
     .replace(/_/g, ' ')

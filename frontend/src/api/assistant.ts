@@ -25,11 +25,16 @@ export async function streamAssistant(req: AssistantRequest, onEvent: AssistantE
     throw new ApiError(r.status, detail)
   }
   if (!r.body) throw new Error('Empty response body')
+  if (!(r.headers.get('content-type') ?? '').toLowerCase().startsWith('text/event-stream')) {
+    onEvent({ type: 'error', message: 'Assistant returned an unexpected response' })
+    return
+  }
 
   const reader = r.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
   let sawDone = false
+  let sawError = false
 
   const dispatch = (block: string) => {
     let event = 'message'
@@ -47,7 +52,10 @@ export async function streamAssistant(req: AssistantRequest, onEvent: AssistantE
       sawDone = true
       const ev = (data.evidence ?? {}) as Record<string, number>
       onEvent({ type: 'done', stop_reason: String(data.stop_reason ?? 'end_turn'), evidence: { findings: ev.findings ?? 0, changes: ev.changes ?? 0, resources: ev.resources ?? 0 } })
-    } else if (event === 'error') onEvent({ type: 'error', message: String(data.message ?? 'Assistant error') })
+    } else if (event === 'error') {
+      sawError = true
+      onEvent({ type: 'error', message: String(data.message ?? 'Assistant error') })
+    }
   }
 
   for (;;) {
@@ -62,8 +70,9 @@ export async function streamAssistant(req: AssistantRequest, onEvent: AssistantE
       if (block.trim()) dispatch(block)
     }
   }
-  if (buffer.trim()) dispatch(buffer)
-  if (!sawDone) onEvent({ type: 'done', stop_reason: 'end_turn', evidence: { findings: req.context.findings.length, changes: req.context.changes.length, resources: req.context.resources.length } })
+  // An unterminated trailing block means the connection was cut mid-event; do not show it as an answer.
+  // A stream that ends with neither done nor error (proxy timeout, backend crash) is an error, not a clean finish.
+  if (!sawDone && !sawError) onEvent({ type: 'error', message: 'Stream ended before completion' })
 }
 
 async function mockStream(req: AssistantRequest, onEvent: AssistantEventHandler, signal?: AbortSignal): Promise<void> {

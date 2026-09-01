@@ -31,7 +31,9 @@ export default function LoginPage() {
       navigate('/', { replace: true })
     } catch (e2) {
       const msg = e2 instanceof Error ? e2.message : String(e2)
-      setErr(msg === 'invalid password' ? 'Invalid password.' : msg)
+      // Someone else finished first-run setup meanwhile: flip to sign-in.
+      if (firstRun && /already set/i.test(msg)) { await refresh(); setErr('A password was already set. Sign in instead.') }
+      else setErr(msg === 'invalid password' ? 'Invalid password.' : msg)
       setBusy(false)
     }
   }

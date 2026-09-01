@@ -10,8 +10,10 @@ it for deployments that front the app with ingress authentication.
 import base64
 import hashlib
 import hmac
+import logging
 import os
 import secrets
+import threading
 import time
 
 from fastapi import HTTPException, Request
@@ -19,7 +21,10 @@ from fastapi import HTTPException, Request
 from app import db
 from app.config import settings
 
+log = logging.getLogger("vcf_doctor.auth")
+
 COOKIE = "vcfdoctor_session"
+_SIG_LEN = 32  # sha256 digest length
 SESSION_TTL = 7 * 24 * 3600
 MIN_PASSWORD = 8
 _HASH_KEY = "auth_password_hash"
@@ -41,9 +46,12 @@ def _hash(password: str, salt: bytes) -> str:
 
 
 def set_password(password: str) -> None:
+    """Store the password and rotate the signing secret so every existing
+    session (including one on a lost laptop) stops working."""
     if len(password) < MIN_PASSWORD:
         raise HTTPException(400, f"password must be at least {MIN_PASSWORD} characters")
     db.set_setting(_HASH_KEY, _hash(password, secrets.token_bytes(16)))
+    db.set_setting(_SECRET_KEY, secrets.token_hex(32))
 
 
 def verify_password(password: str) -> bool:
@@ -60,11 +68,24 @@ def verify_password(password: str) -> bool:
 
 def bootstrap_from_env() -> None:
     """VCF_DOCTOR_ADMIN_PASSWORD seeds the password on first boot only."""
+    if not enabled():
+        log.warning("authentication is disabled (VCF_DOCTOR_AUTH=%s)", settings.auth)
+        return
     if configured():
         return
     seed = os.environ.get("VCF_DOCTOR_ADMIN_PASSWORD", "")
-    if len(seed) >= MIN_PASSWORD:
+    if seed and len(seed) < MIN_PASSWORD:
+        log.warning(
+            "VCF_DOCTOR_ADMIN_PASSWORD is shorter than %d characters and was ignored",
+            MIN_PASSWORD,
+        )
+    elif seed:
         set_password(seed)
+        return
+    log.warning(
+        "no operator password set; the first visitor to the UI will be asked to set one. "
+        "Set VCF_DOCTOR_ADMIN_PASSWORD for any deployment reachable by more than one person."
+    )
 
 
 def _secret() -> bytes:
@@ -78,15 +99,17 @@ def _secret() -> bytes:
 def issue_token() -> str:
     payload = str(int(time.time())).encode()
     sig = hmac.new(_secret(), payload, hashlib.sha256).digest()
-    return base64.urlsafe_b64encode(payload + b"." + sig).decode()
+    # Fixed-length signature appended; never split on a delimiter, raw HMAC
+    # bytes can contain any value.
+    return base64.urlsafe_b64encode(payload + sig).decode()
 
 
 def token_valid(token: str | None) -> bool:
-    if not token:
+    if not token or len(token) > 256:
         return False
     try:
         raw = base64.urlsafe_b64decode(token.encode())
-        payload, sig = raw.rsplit(b".", 1)
+        payload, sig = raw[:-_SIG_LEN], raw[-_SIG_LEN:]
         issued = int(payload)
     except (ValueError, TypeError):
         return False
@@ -108,3 +131,33 @@ PUBLIC_PREFIXES = ("/api/health", "/api/auth/")
 
 def requires_auth(path: str) -> bool:
     return path.startswith("/api/") and not path.startswith(PUBLIC_PREFIXES)
+
+
+# ---- login backoff (per process; the deployment is single replica) ---------
+
+_fail_lock = threading.Lock()
+setup_lock = threading.Lock()
+_failures = 0
+_last_failure = 0.0
+_BACKOFF_AFTER = 5
+_BACKOFF_MAX = 60
+
+
+def login_blocked() -> int:
+    """Seconds the caller must wait before another attempt, 0 if allowed."""
+    with _fail_lock:
+        if _failures < _BACKOFF_AFTER:
+            return 0
+        wait = min(2 ** (_failures - _BACKOFF_AFTER), _BACKOFF_MAX)
+        remaining = _last_failure + wait - time.time()
+        return int(remaining) + 1 if remaining > 0 else 0
+
+
+def record_login(success: bool) -> None:
+    global _failures, _last_failure
+    with _fail_lock:
+        if success:
+            _failures = 0
+        else:
+            _failures += 1
+            _last_failure = time.time()

@@ -3,7 +3,7 @@ import { ArrowRight, Boxes, Database, HardDrive, Layers, MonitorSmartphone, Netw
 import type { Finding, Severity, Significance, Change } from '@/types'
 import { Badge, type Tone } from '@/components/ui'
 import { cn } from '@/lib/cn'
-import { formatValue, humanKey } from '@/lib/format'
+import { formatBytes, formatValue, humanKey, isByteKey } from '@/lib/format'
 
 export const severityTone: Record<Severity, Tone> = { critical: 'critical', warning: 'warning', info: 'info' }
 export const significanceTone: Record<Significance, Tone> = { high: 'critical', medium: 'warning', low: 'neutral' }
@@ -115,7 +115,7 @@ export function ChangeRow({ change, compact }: { change: Change; compact?: boole
           {entries.map(([k, v]) => (
             <div key={k} className="rounded-md bg-surface-2 border border-border px-3 py-2">
               <div className="text-[11px] uppercase tracking-wider text-faint font-semibold mb-1">{humanKey(k)}</div>
-              <ValueArrow oldValue={v.old} newValue={v.new} />
+              <ValueArrow oldValue={bytesIfNeeded(k, v.old)} newValue={bytesIfNeeded(k, v.new)} />
             </div>
           ))}
         </div>
@@ -124,6 +124,11 @@ export function ChangeRow({ change, compact }: { change: Change; compact?: boole
       ) : null}
     </div>
   )
+}
+
+// Byte-valued properties read as GiB/TiB instead of raw counts.
+function bytesIfNeeded(k: string, v: unknown): unknown {
+  return isByteKey(k) && typeof v === 'number' ? formatBytes(v) : v
 }
 
 export function StatCard({ label, value, sub, icon, tone }: { label: string; value: ReactNode; sub?: ReactNode; icon?: ReactNode; tone?: Tone }) {

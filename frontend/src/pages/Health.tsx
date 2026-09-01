@@ -88,8 +88,11 @@ function FindingDrawer({ finding, onClose }: { finding: Finding | null; onClose:
         }
         const relRes = resources.filter(r => near.has(r.id)).slice(0, 12)
         let changes: Change[] = []
-        const conn = finding.resource_id?.split(':')[1]
-        const mine = snaps.filter(s => !conn || s.connection_id === conn || connectionId).sort((a, b) => b.created_at.localeCompare(a.created_at))
+        // Resolve which vCenter this finding belongs to: the selected connection, else the namespaced
+        // resource id (host:<connection_id>:host-12), else the resource's source (vcenter:<connection_id>).
+        const candidates = [connectionId, finding.resource_id?.split(':')[1], target?.source?.split(':')[1]].filter((c): c is string => !!c)
+        const conn = candidates.find(c => snaps.some(s => s.connection_id === c)) ?? null
+        const mine = (conn ? snaps.filter(s => s.connection_id === conn) : []).sort((a, b) => b.created_at.localeCompare(a.created_at))
         if (mine.length >= 2) {
           const all = await getChanges(mine[0].connection_id, mine[1].id, mine[0].id)
           changes = all.filter(c => near.has(c.resource_id) || c.significance === 'high').slice(0, 8)

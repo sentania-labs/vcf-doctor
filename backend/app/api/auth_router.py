@@ -42,7 +42,10 @@ def setup(body: PasswordBody, request: Request, response: Response) -> dict:
         raise HTTPException(409, "authentication is disabled by the deployment")
     if auth.configured():
         raise HTTPException(409, "password already set; use change")
-    auth.set_password(body.password)
+    with auth.setup_lock:
+        if auth.configured():
+            raise HTTPException(409, "password already set; use change")
+        auth.set_password(body.password)
     _set_cookie(response, request)
     return {"ok": True}
 
@@ -51,7 +54,16 @@ def setup(body: PasswordBody, request: Request, response: Response) -> dict:
 def login(body: PasswordBody, request: Request, response: Response) -> dict:
     if not auth.configured():
         raise HTTPException(409, "no password set yet; use setup")
-    if not auth.verify_password(body.password):
+    wait = auth.login_blocked()
+    if wait:
+        raise HTTPException(
+            429,
+            f"too many failed attempts; try again in {wait}s",
+            headers={"Retry-After": str(wait)},
+        )
+    ok = auth.verify_password(body.password)
+    auth.record_login(ok)
+    if not ok:
         raise HTTPException(401, "invalid password")
     _set_cookie(response, request)
     return {"ok": True}

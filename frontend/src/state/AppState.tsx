@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { ConnectionPublic, ScanRun } from '@/types'
 import { getConnections, getHealth, getScans, triggerScan } from '@/api'
+import { BACKEND_UNREACHABLE_EVENT } from '@/api/client'
 import { useInterval } from '@/hooks/useAsync'
 
 const STORAGE_KEY = 'vcfdoctor.connection'
@@ -32,6 +33,7 @@ const Ctx = createContext<AppState | null>(null)
 export function AppStateProvider({ children }: { children: ReactNode }) {
   const [connections, setConnections] = useState<ConnectionPublic[]>([])
   const [connectionsLoading, setConnectionsLoading] = useState(true)
+  const [connectionsLoaded, setConnectionsLoaded] = useState(false)   // true only after a successful list load
   const [selectedId, setSelectedIdState] = useState<string>(() => {
     try { return localStorage.getItem(STORAGE_KEY) ?? ALL } catch { return ALL }
   })
@@ -63,6 +65,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     try {
       const list = await getConnections()
       setConnections(list)
+      setConnectionsLoaded(true)
     } catch { /* backend banner covers it */ } finally { setConnectionsLoading(false) }
   }, [])
 
@@ -79,6 +82,13 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
   // Backend heartbeat; faster while down so recovery is noticed quickly.
   useInterval(() => { void checkBackend() }, backend === 'down' ? 5000 : 20000)
+  // Any API call that fails at the network level triggers an immediate check so the banner shows within a second.
+  useEffect(() => {
+    let last = 0
+    const onUnreachable = () => { const now = Date.now(); if (now - last > 1000) { last = now; void checkBackend() } }
+    window.addEventListener(BACKEND_UNREACHABLE_EVENT, onUnreachable)
+    return () => window.removeEventListener(BACKEND_UNREACHABLE_EVENT, onUnreachable)
+  }, [checkBackend])
   // Poll scans while one is running so the top bar and pages refresh when it lands.
   useInterval(() => {
     void (async () => {
@@ -89,10 +99,11 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     })()
   }, scanning ? 2000 : 30000)
 
-  // If the stored selection no longer exists, fall back to All.
+  // If the stored selection no longer exists (including after deleting the last connection), fall back to All.
+  // Only after a successful load, so a backend outage at startup does not wipe the stored choice.
   useEffect(() => {
-    if (!connectionsLoading && selectedId !== ALL && connections.length > 0 && !connections.some(c => c.id === selectedId)) setSelectedId(ALL)
-  }, [connections, connectionsLoading, selectedId, setSelectedId])
+    if (connectionsLoaded && selectedId !== ALL && !connections.some(c => c.id === selectedId)) setSelectedId(ALL)
+  }, [connections, connectionsLoaded, selectedId, setSelectedId])
 
   const scanNow = useCallback(async () => {
     setScanError(null)

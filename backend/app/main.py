@@ -47,7 +47,14 @@ async def lifespan(application: FastAPI):
         scheduler.shutdown()
 
 
-app = FastAPI(title="VCF Doctor", version="0.1.0", lifespan=lifespan)
+app = FastAPI(
+    title="VCF Doctor",
+    version="0.1.0",
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+    lifespan=lifespan,
+)
 
 
 @app.middleware("http")
