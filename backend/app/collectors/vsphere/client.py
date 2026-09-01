@@ -126,6 +126,12 @@ def to_plain(value: Any) -> Any:
     return str(value)
 
 
+def tcp_preflight(addr: str, port: int, timeout: float) -> None:
+    """Open and close a TCP connection. Raises OSError on failure."""
+    with socket.create_connection((addr, port), timeout=timeout):
+        pass
+
+
 class VSphereSession:
     """Context manager around a pyVmomi ServiceInstance."""
 
@@ -146,6 +152,13 @@ class VSphereSession:
 
     def __enter__(self) -> VSphereSession:
         addr, port = split_host_port(self.host)
+        # pyVmomi's SmartConnect does not honour httpConnectionTimeout on its
+        # initial version probe, so a blackholed address hangs for minutes.
+        # A cheap TCP pre-flight turns that into a prompt, readable failure.
+        try:
+            tcp_preflight(addr, port, min(self.timeout, 10))
+        except OSError as exc:
+            raise classify_exception(exc, self.host) from exc
         try:
             self.si = pyvim_connect.SmartConnect(
                 host=addr,
