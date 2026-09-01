@@ -6,12 +6,14 @@ unattended, scheduled inventory.
 
 ## MVP use case
 
-> Add a vCenter in the GUI, set it to scan every N minutes, walk away. Come
-> back, see a list of timestamped inventory snapshots, pick two, see what
-> changed.
+> Add one or more vCenters in the GUI, set each to scan every N minutes, walk
+> away. Come back, see a list of timestamped inventory snapshots, pick two,
+> see what changed, and ask Claude to explain a finding and draft an
+> investigation script.
 
 The MVP is done when that sentence is true against a real vCenter and against
-fixture data with no vCenter at all.
+fixture data with no vCenter at all, and the pages still render when no LLM
+is configured.
 
 ## Gaps in startup.md this plan closes
 
@@ -50,10 +52,27 @@ Two consequences for the application:
   follow-up issues.
 - **Config split.** Deployment-time config comes from environment variables
   set by the deployment repo (`VCF_DOCTOR_DB_PATH`, `VCF_DOCTOR_DEMO_MODE`,
-  later the LLM variables). Operator-time config (vCenter connections,
+  `ANTHROPIC_API_KEY`, `VCF_DOCTOR_LLM_MODEL`). Operator-time config (vCenter connections,
   schedules, retention) is application state in SQLite, set through the GUI,
   and survives restarts via the persistent volume. No specific vCenter is
   named in either repo.
+
+## Multiple vCenters
+
+The MVP supports any number of vCenter connections from the first release.
+
+- `Connection` is a table; `/api/connections` is list, create, update, delete.
+- Each connection has its own `Schedule`, its own scan history, and its own
+  one-scan-at-a-time guard. A slow vCenter never blocks the others.
+- Resource IDs are namespaced by source (`host:vc01:esx03`), so two vCenters
+  with a host named `esx03` never collide in a snapshot or a diff.
+- **Snapshots are per connection.** One snapshot is one vCenter's inventory
+  at one moment. The Changes page compares two snapshots of the same
+  connection. This keeps independent schedules simple. Estate-wide
+  comparison across vCenters is a follow-up.
+- The top bar carries a connection selector with an "All" option. Overview,
+  Health, and Inventory filter by it. Snapshots and Changes always operate
+  on one connection.
 
 ---
 
@@ -98,11 +117,26 @@ class ScanRun:
     snapshot_id: str | None
 ```
 
+Assistant configuration is also application state so it has a GUI:
+
+```python
+class AssistantSettings:
+    enabled: bool
+    model: str             # default "claude-opus-5"
+    api_key_set: bool      # never returns the key itself
+```
+
+The API key may be supplied by `ANTHROPIC_API_KEY` from the deployment or
+entered on the Settings page. The environment variable wins when both are
+present. The key is never returned by any endpoint or written to a snapshot.
+
 ### API surface
 
 The spec's endpoints (section 20) plus:
 
 ```text
+POST   /api/assistant
+GET    /api/assistant/status
 GET    /api/connections
 POST   /api/connections
 GET    /api/connections/{id}
@@ -129,22 +163,24 @@ builds, `docker compose up` serves a placeholder page.
 
 ## Phase 1: Parallel build
 
-Duration: about 90 minutes. Five agents in parallel, disjoint ownership.
+Duration: about 90 minutes. Six agents in parallel, disjoint ownership.
 
 | Agent | Owns | Delivers |
 |---|---|---|
 | A: Core + scheduler | `backend/app/` except collectors, diagnostics, diff | FastAPI, SQLite persistence, scheduler, scan-run history, retention pruning, fixture collector |
 | B: vSphere collector | `backend/app/collectors/vsphere/` | pyVmomi collector per spec section 8, stable resource IDs |
 | C: Diagnostics + diff | `backend/app/diagnostics/`, `backend/app/diff/` | Eight checks, semantic diff with significance |
-| D: Frontend | `frontend/` | Overview, Inventory, Snapshots, Changes, Health, Connections (with schedule controls), Settings |
-| F: Fixtures | `fixtures/` | Snapshot A (healthy) and B (degraded), demo mode wiring |
+| D: Frontend | `frontend/` | Overview, Inventory, Snapshots, Changes, Health (with Explain / Investigate / Generate Script), Assistant, Connections (with schedule controls), Settings (retention, assistant) |
+| E: Assistant | `backend/app/assistant/` | Anthropic API provider, mock provider, evidence-grounded prompt, `/api/assistant` |
+| F: Fixtures | `fixtures/` | Snapshot A (healthy) and B (degraded), demo mode wiring, canned assistant responses for the mock provider |
 
-The spec's Agent E (LLM assistant) is deferred to a later phase. It is not on
-the path for this MVP.
+Six agents run in parallel. Token spend is authorized; speed is the
+constraint, not cost.
 
 Agent prompts are in `startup.md` sections 20 through 25. Agent A's prompt is
-extended with the scheduler requirements below. Agent D starts on mock data
-and is not blocked on the backend.
+extended with the scheduler requirements below; Agent E's prompt is replaced
+by the assistant design below. Agent D starts on mock data and is not blocked
+on the backend.
 
 ### Scheduler design
 
@@ -165,6 +201,41 @@ and is not blocked on the backend.
 
 Every setting above has a GUI control. Nothing requires editing a file or a
 database row.
+
+### Assistant design (Anthropic API)
+
+The assistant is in the MVP. The spec's stretch providers (OpenAI-compatible
+endpoints, local models) are not; the provider abstraction exists so they can
+be added later without touching the API surface.
+
+- **Provider: Anthropic, via the official `anthropic` Python SDK.** Not an
+  OpenAI-compatible shim. Model default `claude-opus-5`, changeable on the
+  Settings page. Adaptive thinking is the model default and is left on.
+- **Second provider: mock.** Returns canned, evidence-shaped answers from
+  fixtures. Used in demo mode, in tests, and automatically whenever no API
+  key is configured. This is how the app runs with no LLM at all.
+- **Evidence package, not free chat.** Every request carries the
+  `AssistantContext` from spec section 7.7: the selected finding, the changes
+  around it, the related resources. The system prompt is spec section 18
+  verbatim. The UI shows the evidence count ("Using: 1 finding, 3 changes,
+  5 resources") on every answer.
+- **Three tasks:** `explain`, `investigate`, `generate-script` (formats:
+  PowerCLI, Python, shell, REST). Scripts are returned as text for operator
+  review; nothing is ever executed. Script output is split into
+  read-only and modifying sections so the UI can badge them differently.
+- **Streaming responses**, so a long script does not sit behind a spinner
+  or trip an HTTP timeout. The backend streams to the browser as
+  server-sent events.
+- **Refusal handling.** The API can return a `refusal` stop reason. The
+  assistant reports it plainly in the UI rather than showing an empty
+  answer.
+- **Failure mode is degradation, not breakage.** No key, bad key, network
+  down, rate limited: the Health and Changes pages are unaffected, the
+  Explain button shows why the assistant is unavailable, and the mock
+  provider remains selectable from Settings for demos.
+- **Nothing sensitive leaves the box except the evidence package.** No
+  credentials, no connection details beyond hostnames already in the
+  resource data.
 
 Exit criteria per agent: unit tests pass in isolation; the agent's slice runs
 against fixture data.
@@ -208,8 +279,17 @@ sequence has been performed and observed:
 4. Power off one VM in the lab; wait one interval.
 5. Changes page shows `poweredOn -> poweredOff` at medium significance.
 6. Restart the container; confirm the schedule resumes with no GUI action.
-7. Stop the container, start with `VCF_DOCTOR_DEMO_MODE=true`, confirm the
-   same pages render from fixtures with no vCenter reachable.
+7. Open the powered-off VM finding on the Health page, click Explain;
+   confirm a streamed answer from Claude that references only the supplied
+   evidence and shows the evidence count.
+8. Click Generate Script, choose PowerCLI; confirm a reviewable script with
+   read-only and modifying sections badged separately, and no execute
+   control anywhere.
+9. Remove the API key in Settings; confirm Health and Changes still work
+   and the Explain button explains why the assistant is unavailable.
+10. Stop the container, start with `VCF_DOCTOR_DEMO_MODE=true`, confirm the
+    same pages render from fixtures with no vCenter reachable and the
+    assistant answers from the mock provider.
 
 ---
 
@@ -226,12 +306,16 @@ release.
 Image scanning and similar gates are suspended under the hackathon exception
 until 2026-09-02.
 
+Assistant tests run against the mock provider. No Anthropic API key exists
+in CI.
+
 ---
 
 ## Explicitly out of the MVP
 
-LLM assistant, SDDC Manager discovery, NSX collector, topology view,
-correlation engine, authentication, encrypted credential storage, Postgres,
+OpenAI-compatible and local LLM providers, SDDC Manager discovery, NSX
+collector, topology view, correlation engine, cross-vCenter snapshot
+comparison, authentication, encrypted credential storage, Postgres,
 external job queue. Each becomes a follow-up issue, not extra rounds on this
 work.
 
@@ -252,3 +336,9 @@ work.
   frontend model and begins on mocks so it is never blocked on the backend.
 - **Single replica.** A deployment with two replicas will double-scan and
   contend for SQLite. Called out in the README deployment contract.
+- **Assistant availability on demo day.** Conference networks fail. The
+  mock provider is a one-click switch on the Settings page, and the demo
+  script has a mock-provider path rehearsed alongside the live one.
+- **API key handling.** The key lives in an environment variable or in
+  SQLite alongside the vCenter credentials, same lab-grade caveat. It is
+  never logged, never returned by the API, never in a snapshot.
