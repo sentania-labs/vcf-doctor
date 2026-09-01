@@ -335,15 +335,19 @@ def test_network_switch_and_ports_and_vcenter_versions():
 
 
 def test_missing_versus_present_list_is_reported_as_added():
-    c = one(res("host", "h"), res("host", "h", ntpServers=["10.0.0.1"]))
-    assert c.summary == "ntpServers added 10.0.0.1"
-    assert c.property_changes["ntpServers"].old is None
+    # networks is always collected, so None -> list is a real change there.
+    c = one(res("vm", "v"), res("vm", "v", networks=["app-net"]))
+    assert c.summary == "networks added app-net"
+    assert c.property_changes["networks"].old is None
 
 
-def test_none_versus_empty_list_is_not_a_change_in_summary_terms():
-    # None -> [] differs as a value; the engine must not crash and must say so plainly.
-    c = one(res("host", "h", ntpServers=None), res("host", "h", ntpServers=[]))
-    assert c.summary == "ntpServers changed"
+def test_unknown_config_lists_are_skipped_not_reported():
+    # ntpServers None means the host config was unreadable (disconnected host):
+    # unknown on either side is not a change (Codex round on PR #16).
+    from app.diff.engine import diff
+
+    assert diff([res("host", "h", ntpServers=None)], [res("host", "h", ntpServers=[])]) == []
+    assert diff([res("host", "h", ntpServers=["a"])], [res("host", "h", ntpServers=None)]) == []
 
 
 def test_scalar_where_a_list_was_expected():
