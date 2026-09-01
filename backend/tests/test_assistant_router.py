@@ -116,3 +116,21 @@ def test_demo_mode_uses_mock_without_key(client, monkeypatch):
     monkeypatch.setattr(cfg, "demo_mode", True)
     assert assistant_settings.get_provider().name == "mock"
     assert client.get("/api/assistant/status").json()["available"] is True
+
+
+def test_api_error_detail_uses_body_message():
+    import httpx
+    from anthropic import APIStatusError
+
+    from app.assistant.providers.anthropic_provider import _api_error_detail
+
+    resp = httpx.Response(
+        400, request=httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    )
+    body = {
+        "type": "error",
+        "error": {"type": "invalid_request_error", "message": "fallbacks: nope"},
+    }
+    e = APIStatusError("400", response=resp, body=body)
+    assert _api_error_detail(e) == "invalid_request_error: fallbacks: nope"
+    assert "sk-" not in _api_error_detail(e)

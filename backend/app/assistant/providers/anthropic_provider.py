@@ -75,7 +75,11 @@ class AnthropicProvider(LLMProvider):
                 "Could not reach the Anthropic API. Check outbound network access."
             ) from e
         except anthropic.APIStatusError as e:
-            raise ProviderUnavailable(f"Anthropic API error (HTTP {e.status_code}).") from e
+            detail = _api_error_detail(e)
+            log.warning("assistant: Anthropic API error HTTP %s: %s", e.status_code, detail)
+            raise ProviderUnavailable(
+                f"Anthropic API error (HTTP {e.status_code}): {detail}"
+            ) from e
 
         self.last_stop_reason = final.stop_reason or "end_turn"
         if final.stop_reason == "refusal":
@@ -104,7 +108,21 @@ class AnthropicProvider(LLMProvider):
         except anthropic.APIConnectionError:
             return False, "Could not reach the Anthropic API."
         except anthropic.APIStatusError as e:
-            return False, f"Anthropic API error (HTTP {e.status_code})."
+            detail = _api_error_detail(e)
+            log.warning("assistant: Anthropic API error HTTP %s: %s", e.status_code, detail)
+            return False, f"Anthropic API error (HTTP {e.status_code}): {detail}"
         if msg.stop_reason == "refusal":
             return False, "The model refused the test prompt."
         return True, f"Connected. Model {msg.model} answered."
+
+
+def _api_error_detail(e: "anthropic.APIStatusError") -> str:
+    """The API's own reason, e.g. 'model: claude-opus-5 is not available' or
+    'fallbacks: Extra inputs are not permitted'. Error bodies never carry the
+    key, so this is safe to show to the operator and to log."""
+    body = getattr(e, "body", None)
+    if isinstance(body, dict):
+        err = body.get("error") or {}
+        if isinstance(err, dict) and err.get("message"):
+            return f"{err.get('type', 'error')}: {err['message']}"[:300]
+    return (getattr(e, "message", None) or str(e))[:300]
