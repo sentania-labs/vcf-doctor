@@ -351,15 +351,19 @@ def test_network_switch_and_ports_and_vcenter_versions():
 
 
 def test_missing_versus_present_list_is_reported_as_added():
-    c = one(res("host", "h"), res("host", "h", ntpServers=["10.0.0.1"]))
-    assert c.summary == "ntpServers added 10.0.0.1"
-    assert c.property_changes["ntpServers"].old is None
+    # networks is always collected, so None -> list is a real change there.
+    c = one(res("vm", "v"), res("vm", "v", networks=["app-net"]))
+    assert c.summary == "networks added app-net"
+    assert c.property_changes["networks"].old is None
 
 
-def test_none_versus_empty_list_is_not_a_change_in_summary_terms():
-    # None -> [] differs as a value; the engine must not crash and must say so plainly.
-    c = one(res("host", "h", ntpServers=None), res("host", "h", ntpServers=[]))
-    assert c.summary == "ntpServers changed"
+def test_unknown_config_lists_are_skipped_not_reported():
+    # ntpServers None means the host config was unreadable (disconnected host):
+    # unknown on either side is not a change (Codex round on PR #16).
+    from app.diff.engine import diff
+
+    assert diff([res("host", "h", ntpServers=None)], [res("host", "h", ntpServers=[])]) == []
+    assert diff([res("host", "h", ntpServers=["a"])], [res("host", "h", ntpServers=None)]) == []
 
 
 def test_scalar_where_a_list_was_expected():
@@ -440,3 +444,46 @@ def test_min_significance_filters_output():
 def test_min_significance_rejects_unknown_values():
     with pytest.raises(ValueError):
         diff([], [], min_significance="urgent")  # type: ignore[arg-type]
+
+
+def test_unknown_side_is_not_a_change():
+    """Codex review on PR #16: a disconnected host or inaccessible VM returns
+    None for config-derived lists; that must not read as 'everything removed'."""
+    from app.diff.engine import diff
+    from app.models import Resource
+
+    def host(props):
+        return Resource(
+            id="host:c:h1", type="host", name="esx01", source="vcenter:c", properties=props
+        )
+
+    known = host(
+        {
+            "connectionState": "connected",
+            "vmkernelAdapters": [{"device": "vmk0", "mtu": 1500}],
+            "ntpServers": ["a"],
+            "vsanEnabled": True,
+        }
+    )
+    unknown = host(
+        {
+            "connectionState": "disconnected",
+            "vmkernelAdapters": None,
+            "ntpServers": None,
+            "vsanEnabled": None,
+        }
+    )
+    changes = diff([known], [unknown])
+    assert len(changes) == 1
+    assert set(changes[0].property_changes) == {"connectionState"}
+
+    def vm(props):
+        return Resource(id="vm:c:v1", type="vm", name="app01", source="vcenter:c", properties=props)
+
+    assert (
+        diff(
+            [vm({"disks": [{"label": "Hard disk 1"}], "nics": [], "snapshotCount": 2})],
+            [vm({"disks": None, "nics": None, "snapshotCount": None})],
+        )
+        == []
+    )

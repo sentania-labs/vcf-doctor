@@ -428,7 +428,7 @@ def test_cluster_without_summary_or_vsan_hosts():
             o.props.pop("config.vsanHostConfig.enabled", None)
     p = _by_id(normalize(inv))["cluster:vc01:domain-c7"].properties
     assert p["evcMode"] is None
-    assert p["vsanEnabled"] is False
+    assert p["vsanEnabled"] is None  # no host reported a value: unknown, not False
     assert p["ruleCount"] == 0
     assert p["totalCpuMhz"] is None and p["totalMemoryBytes"] is None
 
@@ -492,9 +492,10 @@ def test_disconnected_host_missing_props_do_not_crash():
     # config unreadable: unknown, not "no NTP configured"
     assert p["ntpServers"] is None
     assert p["dnsServers"] is None
-    assert p["vmkernelAdapters"] == []
-    assert p["physicalNics"] == []
-    assert p["standardSwitches"] == []
+    # config.network.* was not returned: unknown, not "no adapters".
+    assert p["vmkernelAdapters"] is None
+    assert p["physicalNics"] is None
+    assert p["standardSwitches"] is None
     assert p["numVms"] == 0
     assert p["vsanEnabled"] is None
 
@@ -559,8 +560,9 @@ def test_vm_snapshots_are_counted_recursively_with_oldest_time():
     p = _by_id(normalize(_inventory()))["vm:vc01:vm-101"].properties
     assert p["snapshotCount"] == 2
     assert p["oldestSnapshotTime"] == "2026-08-01T12:00:00+00:00"
+    # vm-102 returned no config (orphan): snapshot state is unknown, not zero.
     none = _by_id(normalize(_inventory()))["vm:vc01:vm-102"].properties
-    assert none["snapshotCount"] == 0
+    assert none["snapshotCount"] is None
     assert none["oldestSnapshotTime"] is None
 
 
@@ -632,7 +634,7 @@ def test_orphan_template_vm():
     assert p["template"] is True
     assert p["host"] is None
     assert p["resourcePool"] is None and p["folder"] is None
-    assert p["disks"] == [] and p["nics"] == []
+    assert p["disks"] is None and p["nics"] is None  # no config returned: unknown
     assert vm.relationships == []
 
 

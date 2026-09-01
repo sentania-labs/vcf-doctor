@@ -111,6 +111,27 @@ _ID_VALUED = frozenset({"host", "cluster", "hosts", "networks", "datastores"})
 # has no bootTime; that is not a reboot).
 _BOTH_SIDES_REQUIRED = frozenset({"bootTime"})
 
+# Properties where None means "vCenter did not return it" (disconnected host,
+# inaccessible VM, no host reporting). A None on either side is unknown, not a
+# change, so these are skipped rather than reported as removed/added.
+_BOTH_SIDES_REQUIRED = frozenset(
+    {
+        "vmkernelAdapters",
+        "physicalNics",
+        "standardSwitches",
+        "ntpServers",
+        "dnsServers",
+        "lockdownMode",
+        "version",
+        "build",
+        "disks",
+        "nics",
+        "snapshotCount",
+        "vsanEnabled",
+        "hosts",
+    }
+)
+
 USAGE_BANDS = (85.0, 95.0)
 USAGE_MIN_DELTA = 5.0
 
