@@ -43,8 +43,8 @@ PROPERTY_SPECS: dict[str, list[str]] = {
         "name",
         "parent",
         "host",
-        "configurationEx.drsConfig.enabled",
-        "configurationEx.dasConfig.enabled",
+        "configuration.drsConfig.enabled",
+        "configuration.dasConfig.enabled",
     ],
     "HostSystem": [
         "name",
@@ -265,8 +265,8 @@ class Normalizer:
                 "moref": obj.moref,
                 "hostCount": len(hosts),
                 "hosts": sorted(self.rid("host", h) for h in hosts),
-                "drsEnabled": bool(obj.get("configurationEx.drsConfig.enabled") or False),
-                "haEnabled": bool(obj.get("configurationEx.dasConfig.enabled") or False),
+                "drsEnabled": bool(obj.get("configuration.drsConfig.enabled") or False),
+                "haEnabled": bool(obj.get("configuration.dasConfig.enabled") or False),
                 "datacenter": self.name_of(dc),
             },
         )
