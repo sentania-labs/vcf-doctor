@@ -1,14 +1,22 @@
-"""Persistence for connections, schedules, scan runs, snapshots and findings.
+"""Persistence for connections, schedules, scan runs, snapshots, findings,
+the retention policy and the persisted change log.
 
 Every row is keyed by connection_id. Timestamps are ISO 8601 UTC strings in
-SQLite and timezone-aware datetimes in Python.
+SQLite and timezone-aware datetimes in Python. Snapshot resource lists are
+stored gzip-compressed in snapshots.resources_gz; the legacy text column is
+read as a fallback and emptied by migrate_legacy_snapshots().
 """
 
+import gzip
 import json
+import logging
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+
+from pydantic import ValidationError
 
 from app import db
+from app.config import settings as cfg
 from app.models import (
     Connection,
     ConnectionCreate,
@@ -20,6 +28,17 @@ from app.models import (
     Snapshot,
     SnapshotSummary,
 )
+from app.models.change import Change, ChangeRecord
+from app.models.snapshot import RetentionPolicy, Tier
+
+log = logging.getLogger("vcf_doctor.store")
+
+RETENTION_POLICY_KEY = "retention_policy"
+HOUR = timedelta(hours=1)
+DAY = timedelta(days=1)
+_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+_SIG_ORDER = ("high", "medium", "low")
+_SQL_CHUNK = 500  # ids per IN (...) clause; well under SQLite's variable limit
 
 
 def now() -> datetime:
@@ -150,6 +169,7 @@ def delete_connection(connection_id: str) -> bool:
             (connection_id,),
         )
         c.execute("DELETE FROM snapshots WHERE connection_id = ?", (connection_id,))
+        c.execute("DELETE FROM changes WHERE connection_id = ?", (connection_id,))
         c.execute("DELETE FROM scan_runs WHERE connection_id = ?", (connection_id,))
         c.execute("DELETE FROM schedules WHERE connection_id = ?", (connection_id,))
         cur = c.execute("DELETE FROM connections WHERE id = ?", (connection_id,))
@@ -278,21 +298,86 @@ def latest_run(connection_id: str | None = None) -> ScanRun | None:
     return runs[0] if runs else None
 
 
+# --- retention policy ----------------------------------------------------
+
+
+def default_retention_policy() -> RetentionPolicy:
+    return RetentionPolicy(
+        recent_days=cfg.retention_recent_days,
+        hourly_days=cfg.retention_hourly_days,
+        daily_days=cfg.retention_daily_days,
+    )
+
+
+def retention_policy() -> RetentionPolicy:
+    """Stored policy, or the deployment defaults. The pre-tier `retention`
+    count setting is deliberately not consulted."""
+    raw = db.get_setting(RETENTION_POLICY_KEY)
+    if raw:
+        try:
+            return RetentionPolicy.model_validate(raw)
+        except ValidationError:
+            log.warning("stored retention_policy is invalid, using defaults: %r", raw)
+    return default_retention_policy()
+
+
+def set_retention_policy(policy: RetentionPolicy) -> RetentionPolicy:
+    db.set_setting(RETENTION_POLICY_KEY, policy.model_dump())
+    return policy
+
+
+def tier_for(created_at: datetime, scheduled: bool, policy: RetentionPolicy, at: datetime) -> Tier:
+    if not scheduled:
+        return "manual"
+    age = at - created_at
+    if age < timedelta(days=policy.recent_days):
+        return "recent"
+    if age < timedelta(days=policy.hourly_days):
+        return "hourly"
+    return "daily"
+
+
 # --- snapshots -----------------------------------------------------------
 
 
-def _row_to_summary(row) -> SnapshotSummary:
+def _row_to_summary(
+    row, policy: RetentionPolicy | None = None, at: datetime | None = None
+) -> SnapshotSummary:
+    created = _dt(row["created_at"])
     return SnapshotSummary(
         id=row["id"],
-        created_at=_dt(row["created_at"]),
+        created_at=created,
         label=row["label"],
         connection_id=row["connection_id"],
         scheduled=bool(row["scheduled"]),
         resource_count=row["resource_count"],
+        tier=tier_for(created, bool(row["scheduled"]), policy or retention_policy(), at or now()),
     )
 
 
 _SUMMARY_COLS = "id, connection_id, created_at, label, scheduled, resource_count"
+
+
+def _encode_resources(resources: list[Resource]) -> bytes:
+    payload = json.dumps([r.model_dump(mode="json") for r in resources])
+    return gzip.compress(payload.encode("utf-8"), compresslevel=6)
+
+
+def _decode_resources(row) -> list[Resource]:
+    blob = row["resources_gz"]
+    if blob is not None:
+        raw = gzip.decompress(blob)
+    else:
+        raw = row["resources"]
+        if not raw:
+            return []
+    return [Resource.model_validate(r) for r in json.loads(raw)]
+
+
+def _legacy_text_placeholder() -> str | None:
+    """Databases created before the gzip change declared `resources` NOT NULL,
+    so '' stands in for NULL there; new databases store NULL."""
+    return None if db.column_is_nullable("snapshots", "resources") else ""
 
 
 def save_snapshot(
@@ -300,11 +385,10 @@ def save_snapshot(
 ) -> Snapshot:
     sid = new_id()
     created = now()
-    payload = json.dumps([r.model_dump(mode="json") for r in resources])
     with db.transaction() as c:
         c.execute(
             "INSERT INTO snapshots(id, connection_id, created_at, label, scheduled, "
-            "resource_count, resources) VALUES(?,?,?,?,?,?,?)",
+            "resource_count, resources, resources_gz) VALUES(?,?,?,?,?,?,?,?)",
             (
                 sid,
                 connection_id,
@@ -312,7 +396,8 @@ def save_snapshot(
                 label,
                 int(scheduled),
                 len(resources),
-                payload,
+                _legacy_text_placeholder(),
+                _encode_resources(resources),
             ),
         )
     return Snapshot(
@@ -323,7 +408,40 @@ def save_snapshot(
         scheduled=scheduled,
         resource_count=len(resources),
         resources=resources,
+        tier="recent" if scheduled else "manual",
     )
+
+
+def migrate_legacy_snapshots(batch_size: int = 200) -> int:
+    """Compress rows still holding JSON text in `resources`. Runs in batches,
+    each under the write lock, so API reads interleave. Idempotent."""
+    placeholder = _legacy_text_placeholder()
+    total = 0
+    while True:
+        with db.transaction() as c:
+            rows = c.execute(
+                "SELECT id, resources FROM snapshots WHERE resources_gz IS NULL "
+                "AND resources IS NOT NULL AND resources != '' LIMIT ?",
+                (batch_size,),
+            ).fetchall()
+            if not rows:
+                break
+            c.executemany(
+                "UPDATE snapshots SET resources_gz = ?, resources = ? WHERE id = ?",
+                [
+                    (
+                        gzip.compress(r["resources"].encode("utf-8"), compresslevel=6),
+                        placeholder,
+                        r["id"],
+                    )
+                    for r in rows
+                ],
+            )
+        total += len(rows)
+        log.info("compressed %d legacy snapshot rows (%d so far)", len(rows), total)
+    if total:
+        log.info("legacy snapshot migration complete: %d rows compressed", total)
+    return total
 
 
 def list_snapshots(connection_id: str | None = None) -> list[SnapshotSummary]:
@@ -333,7 +451,8 @@ def list_snapshots(connection_id: str | None = None) -> list[SnapshotSummary]:
         q += " WHERE connection_id = ?"
         args = (connection_id,)
     q += " ORDER BY created_at DESC"
-    return [_row_to_summary(r) for r in db.fetchall(q, args)]
+    policy, at = retention_policy(), now()
+    return [_row_to_summary(r, policy, at) for r in db.fetchall(q, args)]
 
 
 def count_snapshots(connection_id: str) -> int:
@@ -348,8 +467,7 @@ def get_snapshot(snapshot_id: str) -> Snapshot | None:
     if row is None:
         return None
     summary = _row_to_summary(row)
-    resources = [Resource.model_validate(r) for r in json.loads(row["resources"])]
-    return Snapshot(**summary.model_dump(), resources=resources)
+    return Snapshot(**summary.model_dump(), resources=_decode_resources(row))
 
 
 def latest_snapshots(connection_id: str, n: int = 2) -> list[Snapshot]:
@@ -374,21 +492,194 @@ def delete_snapshot(snapshot_id: str) -> bool:
         return cur.rowcount > 0
 
 
-def prune_scheduled(connection_id: str, keep: int) -> int:
-    """Delete scheduled snapshots beyond the newest `keep`. Manual ones are never touched."""
+def delete_snapshots(snapshot_ids: list[str]) -> int:
+    """Delete snapshots and their cached findings. Change rows are kept on
+    purpose: the log outlives the snapshots it was computed from."""
+    deleted = 0
+    for i in range(0, len(snapshot_ids), _SQL_CHUNK):
+        chunk = snapshot_ids[i : i + _SQL_CHUNK]
+        marks = ",".join("?" * len(chunk))
+        with db.transaction() as c:
+            c.execute(f"DELETE FROM findings WHERE snapshot_id IN ({marks})", chunk)
+            deleted += c.execute(f"DELETE FROM snapshots WHERE id IN ({marks})", chunk).rowcount
+    return deleted
+
+
+def _nearest_mark(t: datetime, period: timedelta) -> datetime:
+    """The hour or day (00:00 UTC) mark closest to t; a half-way tie rounds up."""
+    whole, rem = divmod(t - _EPOCH, period)
+    mark = _EPOCH + whole * period
+    return mark + period if rem * 2 >= period else mark
+
+
+def select_retention_victims(
+    rows: list[tuple[str, datetime]], policy: RetentionPolicy, at: datetime
+) -> list[str]:
+    """Pure tier selection over (id, created_at) pairs of scheduled snapshots.
+
+    age < recent_days: keep all. recent <= age < hourly: group by nearest hour
+    mark, keep the snapshot closest to the mark (ties: oldest, then id).
+    hourly <= age < daily: same with day marks (00:00 UTC). age >= daily: prune.
+    """
+    recent = timedelta(days=policy.recent_days)
+    hourly = timedelta(days=policy.hourly_days)
+    daily = timedelta(days=policy.daily_days)
+    best: dict[tuple[timedelta, datetime], tuple[timedelta, datetime, str]] = {}
+    victims: list[str] = []
+    for sid, created in rows:
+        age = at - created
+        if age < recent:
+            continue
+        if age >= daily:
+            victims.append(sid)
+            continue
+        period = HOUR if age < hourly else DAY
+        mark = _nearest_mark(created, period)
+        candidate = (abs(created - mark), created, sid)
+        current = best.get((period, mark))
+        if current is None:
+            best[(period, mark)] = candidate
+        elif candidate < current:
+            victims.append(current[2])
+            best[(period, mark)] = candidate
+        else:
+            victims.append(sid)
+    return victims
+
+
+def apply_retention(
+    connection_id: str, policy: RetentionPolicy | None = None, at: datetime | None = None
+) -> int:
+    """Prune scheduled snapshots per the tier policy and expire change rows
+    older than daily_days. Manual snapshots are never touched. Returns the
+    number of snapshots deleted."""
+    policy = policy or retention_policy()
+    at = at or now()
     rows = db.fetchall(
-        "SELECT id FROM snapshots WHERE connection_id = ? AND scheduled = 1 "
-        "ORDER BY created_at DESC",
+        "SELECT id, created_at FROM snapshots WHERE connection_id = ? AND scheduled = 1 "
+        "ORDER BY created_at",
         (connection_id,),
     )
-    victims = [r["id"] for r in rows[max(keep, 0) :]]
-    if not victims:
+    victims = select_retention_victims([(r["id"], _dt(r["created_at"])) for r in rows], policy, at)
+    deleted = delete_snapshots(victims) if victims else 0
+    expired = prune_changes(connection_id, before=at - timedelta(days=policy.daily_days))
+    if deleted or expired:
+        log.info(
+            "retention for %s: pruned %d snapshot(s), expired %d change row(s)",
+            connection_id,
+            deleted,
+            expired,
+        )
+    return deleted
+
+
+# --- change log -----------------------------------------------------------
+
+
+def _row_to_change(row) -> ChangeRecord:
+    return ChangeRecord(
+        id=row["id"],
+        connection_id=row["connection_id"],
+        from_snapshot_id=row["from_snapshot_id"],
+        to_snapshot_id=row["to_snapshot_id"],
+        observed_at=_dt(row["observed_at"]),
+        resource_id=row["resource_id"],
+        resource_type=row["resource_type"],
+        resource_name=row["resource_name"],
+        change_type=row["change_type"],
+        significance=row["significance"],
+        summary=row["summary"],
+        property_changes=json.loads(row["property_changes"] or "{}"),
+    )
+
+
+def save_changes(
+    connection_id: str,
+    from_snapshot_id: str,
+    to_snapshot_id: str,
+    observed_at: datetime,
+    changes: list[Change],
+) -> int:
+    """Persist one scan's diff(previous, current). Every significance is
+    stored; readers filter."""
+    if not changes:
         return 0
-    marks = ",".join("?" * len(victims))
     with db.transaction() as c:
-        c.execute(f"DELETE FROM findings WHERE snapshot_id IN ({marks})", victims)
-        c.execute(f"DELETE FROM snapshots WHERE id IN ({marks})", victims)
-    return len(victims)
+        c.executemany(
+            "INSERT INTO changes(id, connection_id, from_snapshot_id, to_snapshot_id, "
+            "observed_at, resource_id, resource_type, resource_name, change_type, "
+            "significance, summary, property_changes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+            [
+                (
+                    new_id(),
+                    connection_id,
+                    from_snapshot_id,
+                    to_snapshot_id,
+                    observed_at.isoformat(),
+                    ch.resource_id,
+                    ch.resource_type,
+                    ch.resource_name,
+                    ch.change_type,
+                    ch.significance,
+                    ch.summary,
+                    json.dumps(
+                        {k: v.model_dump(mode="json") for k, v in ch.property_changes.items()}
+                    ),
+                )
+                for ch in changes
+            ],
+        )
+    return len(changes)
+
+
+def list_change_log(
+    connection_id: str | None = None,
+    since: datetime | None = None,
+    until: datetime | None = None,
+    min_significance: str = "low",
+    resource_id: str | None = None,
+    limit: int = 500,
+) -> list[ChangeRecord]:
+    """Newest first; within one observation, high significance first."""
+    where: list[str] = []
+    args: list[object] = []
+    if connection_id:
+        where.append("connection_id = ?")
+        args.append(connection_id)
+    if since is not None:
+        where.append("observed_at >= ?")
+        args.append(since.isoformat())
+    if until is not None:
+        where.append("observed_at <= ?")
+        args.append(until.isoformat())
+    if resource_id:
+        where.append("resource_id = ?")
+        args.append(resource_id)
+    allowed = _SIG_ORDER[: _SIG_ORDER.index(min_significance) + 1]
+    where.append(f"significance IN ({','.join('?' * len(allowed))})")
+    args.extend(allowed)
+    sig_rank = "CASE significance WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END"
+    q = (
+        "SELECT * FROM changes WHERE "
+        + " AND ".join(where)
+        + f" ORDER BY observed_at DESC, {sig_rank}, resource_type, resource_name LIMIT ?"
+    )
+    args.append(limit)
+    return [_row_to_change(r) for r in db.fetchall(q, tuple(args))]
+
+
+def count_changes(connection_id: str) -> int:
+    row = db.fetchone("SELECT COUNT(*) AS n FROM changes WHERE connection_id = ?", (connection_id,))
+    return int(row["n"])
+
+
+def prune_changes(connection_id: str, before: datetime) -> int:
+    with db.transaction() as c:
+        cur = c.execute(
+            "DELETE FROM changes WHERE connection_id = ? AND observed_at < ?",
+            (connection_id, before.isoformat()),
+        )
+        return cur.rowcount
 
 
 # --- findings cache -------------------------------------------------------

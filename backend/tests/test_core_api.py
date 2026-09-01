@@ -118,11 +118,17 @@ def test_overview_shape(client):
         assert 0 <= o["health_score"] <= 100
 
 
-def test_settings_retention_roundtrip(client):
-    assert client.get("/api/settings").json()["retention"] == 96
+def test_settings_retention_policy_roundtrip(client):
+    body = client.get("/api/settings").json()
+    assert "retention" not in body
+    assert body["retention_policy"] == {"recent_days": 14, "hourly_days": 30, "daily_days": 365}
+    r = client.put("/api/settings", json={"retention_policy": {"recent_days": 7}})
+    assert r.status_code == 200, r.text
+    assert r.json()["retention_policy"] == {"recent_days": 7, "hourly_days": 30, "daily_days": 365}
+    assert client.get("/api/settings").json()["retention_policy"]["recent_days"] == 7
+    # The old count is neither accepted nor echoed.
     r = client.put("/api/settings", json={"retention": 12})
-    assert r.json()["retention"] == 12
-    assert client.put("/api/settings", json={"retention": 0}).status_code == 400
+    assert r.status_code == 200 and "retention" not in r.json()
 
 
 def test_test_connection_endpoint(client):
@@ -199,11 +205,14 @@ def test_demo_mode_does_not_hijack_live_connections(monkeypatch):
 def test_settings_carries_assistant_and_never_echoes_key(client):
     r = client.put(
         "/api/settings",
-        json={"retention": 50, "assistant": {"provider": "mock", "api_key": "sk-secret"}},
+        json={
+            "retention_policy": {"recent_days": 5},
+            "assistant": {"provider": "mock", "api_key": "sk-secret"},
+        },
     )
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["retention"] == 50
+    assert body["retention_policy"]["recent_days"] == 5
     assert body["assistant"]["provider"] == "mock"
     assert body["assistant"]["api_key_set"] is True
     assert "sk-secret" not in r.text
@@ -221,7 +230,7 @@ def test_settings_changes_min_significance_roundtrip_and_validation(client):
     assert r.status_code == 400
     assert client.get("/api/settings").json()["changes_min_significance"] == "medium"
     # A partial update that omits the key leaves it alone.
-    client.put("/api/settings", json={"retention": 5})
+    client.put("/api/settings", json={"retention_policy": {"recent_days": 5}})
     assert client.get("/api/settings").json()["changes_min_significance"] == "medium"
 
 
@@ -282,11 +291,13 @@ def test_changes_min_significance_param_and_setting(client, monkeypatch):
         "low",
     ]
 
-    # Overview recent_changes honours the same floor.
+    # Overview recent_changes honours the same floor. It reads the persisted
+    # log written by the two real scans above (the fake diff is not consulted).
     ov = client.get(f"/api/overview?connection_id={cid}").json()
-    assert [c["significance"] for c in ov["recent_changes"]] == ["high"]
+    assert ov["recent_changes"] and all(c["significance"] == "high" for c in ov["recent_changes"])
     ov = client.get(f"/api/overview?connection_id={cid}&min_significance=low").json()
-    assert [c["significance"] for c in ov["recent_changes"]] == ["high", "medium", "low"]
+    assert len(ov["recent_changes"]) == 5
+    assert ov["recent_changes"][0]["significance"] == "high"
     assert client.get(f"/api/overview?connection_id={cid}&min_significance=nope").status_code == 400
 
 

@@ -19,9 +19,20 @@ export interface Change {
   change_type: ChangeType; resource_id: string; resource_type: string; resource_name: string
   property_changes: Record<string, PropertyChange>; significance: Significance; summary: string
 }
+// Retention tier (docs/RETENTION_EVENTS.md): manual and labelled snapshots are never pruned.
+export type SnapshotTier = 'manual' | 'recent' | 'hourly' | 'daily'
 export interface SnapshotSummary {
   id: string; created_at: string; label: string; connection_id: string
-  scheduled: boolean; resource_count: number
+  scheduled: boolean; resource_count: number; tier: SnapshotTier
+}
+// A persisted diff row from GET /changes/log (newest first). observed_at is the TO snapshot time.
+export type ChangeLogEntry = Change & { id: string; observed_at: string; from_snapshot_id: string; to_snapshot_id: string }
+// vCenter event or task, normalised by the collector and stored per connection.
+export type EventSource = 'event' | 'task'
+export type EventCategory = 'info' | 'warning' | 'error' | 'user'
+export interface Event {
+  id: string; connection_id: string; time: string; source: EventSource; type: string; category: EventCategory
+  message: string; user: string | null; resource_id: string | null; resource_name: string | null; resource_type: string | null
 }
 export interface Snapshot extends SnapshotSummary { resources: Resource[] }
 export interface ConnectionPublic {
@@ -43,7 +54,7 @@ export interface ScanRun {
 export type AssistantTask = 'explain' | 'investigate' | 'generate-script' | 'ask'
 export type ScriptFormat = 'powercli' | 'python' | 'shell' | 'rest'
 export interface AssistantContext {
-  question: string; findings: Finding[]; changes: Change[]; resources: Resource[]; allowed_actions: string[]
+  question: string; findings: Finding[]; changes: Change[]; resources: Resource[]; events: Event[]; allowed_actions: string[]
 }
 export interface AssistantRequest { task: AssistantTask; script_format?: ScriptFormat; context: AssistantContext }
 export interface AssistantSettings { enabled: boolean; provider: 'anthropic' | 'mock'; model: string; api_key_set: boolean }
@@ -66,10 +77,13 @@ export interface Overview {
   recent_changes: Change[]
 }
 export interface ConnectionTestResult { ok: boolean; message: string; version?: string | null; build?: string | null }
+// Retention policy in days per tier; must satisfy recent_days <= hourly_days <= daily_days.
+// Events and the change log follow daily_days.
+export interface RetentionPolicy { recent_days: number; hourly_days: number; daily_days: number }
 // changes_min_significance: lowest significance the Changes page and Overview show by default (low = everything).
-export interface Settings { retention: number; assistant: AssistantSettings; changes_min_significance?: Significance }
-export interface SettingsUpdate { retention: number; assistant: Partial<AssistantSettings> & { api_key?: string }; changes_min_significance?: Significance }
-export interface AssistantEvidenceCount { findings: number; changes: number; resources: number }
+export interface Settings { retention_policy: RetentionPolicy; assistant: AssistantSettings; changes_min_significance?: Significance }
+export interface SettingsUpdate { retention_policy: RetentionPolicy; assistant: Partial<AssistantSettings> & { api_key?: string }; changes_min_significance?: Significance }
+export interface AssistantEvidenceCount { findings: number; changes: number; resources: number; events: number }
 export type AssistantStreamEvent =
   | { type: 'delta'; text: string }
   | { type: 'done'; stop_reason: string; evidence: AssistantEvidenceCount }

@@ -8,7 +8,7 @@ import { AssistantPanel } from './AssistantPanel'
 export function AssistantDrawer() {
   const { open, seed, seedKey, closeDrawer } = useAssistantDrawer()
   const nav = useNavigate()
-  const empty = useMemo(() => ({ findings: [], changes: [], resources: [] }), [])
+  const empty = useMemo(() => ({ findings: [], changes: [], resources: [], events: [] }), [])
   return (
     <Drawer open={open} onClose={closeDrawer} width="w-[560px]"
       header={

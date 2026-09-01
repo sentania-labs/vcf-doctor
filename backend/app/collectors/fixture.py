@@ -8,10 +8,16 @@ are missing a tiny built-in inventory is used so the app always boots.
 
 import json
 import os
+import re
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from app.collectors.base import Collector
 from app.models import ConnectionResult, Relationship, Resource
+from app.models.event import Event
+
+EVENTS_FIXTURE = "events_b.json"
+_OFFSET_RE = re.compile(r"^([+-])?(\d{1,3}):(\d{2}):(\d{2})$")
 
 
 def fixtures_dir() -> Path | None:
@@ -180,6 +186,54 @@ def builtin_resources(degraded: bool = False) -> list[Resource]:
     ]
 
 
+def parse_offset(value: str | int | float) -> timedelta:
+    """ "-00:07:30" -> 7 min 30 s before scan time. Plain numbers are seconds."""
+    if isinstance(value, int | float):
+        return timedelta(seconds=float(value))
+    m = _OFFSET_RE.match(str(value).strip())
+    if not m:
+        raise ValueError(f"bad event offset {value!r}, expected [-]HH:MM:SS")
+    sign = -1 if m.group(1) == "-" else 1
+    h, mnt, sec = (int(m.group(i)) for i in (2, 3, 4))
+    return sign * timedelta(hours=h, minutes=mnt, seconds=sec)
+
+
+def load_fixture_events(
+    connection_id: str, at: datetime, name: str = EVENTS_FIXTURE
+) -> list[Event]:
+    """Materialize fixtures/events_b.json: offsets become absolute times
+    relative to `at`, fixture resource ids are re-keyed onto the connection."""
+    base = fixtures_dir()
+    if base is None or not (base / name).is_file():
+        return []
+    with (base / name).open() as fh:
+        payload = json.load(fh)
+    items = payload.get("events", payload) if isinstance(payload, dict) else payload
+    out: list[Event] = []
+    for item in items:
+        rid = item.get("resource_id")
+        if rid:
+            parts = rid.split(":", 2)
+            if len(parts) == 3:
+                rid = f"{parts[0]}:{connection_id}:{parts[2]}"
+        out.append(
+            Event(
+                id=f"{connection_id}:{item['key']}",
+                connection_id=connection_id,
+                time=at + parse_offset(item.get("offset", 0)),
+                source=item.get("source", "event"),
+                type=item["type"],
+                category=item.get("category", "info"),
+                message=item.get("message", ""),
+                user=item.get("user"),
+                resource_id=rid,
+                resource_name=item.get("resource_name"),
+                resource_type=item.get("resource_type"),
+            )
+        )
+    return out
+
+
 class FixtureCollector(Collector):
     id = "fixture"
     resource_types = ["vcenter", "datacenter", "cluster", "host", "vm", "datastore", "network"]
@@ -206,6 +260,15 @@ class FixtureCollector(Collector):
             loaded = load_fixture("snapshot_a.json")
         resources = loaded if loaded is not None else builtin_resources(degraded)
         return namespace_resources(resources, self.connection_id)
+
+    def collect_events(self, since: datetime, until: datetime) -> list[Event]:
+        """Nothing on the first scan (the healthy baseline). From the second
+        scan on, the A -> B story from fixtures/events_b.json, timed relative
+        to the scan. Same ids every time, so the store keeps one copy."""
+        if self.sequence < 1:
+            return []
+        at = until if until.tzinfo else until.replace(tzinfo=UTC)
+        return load_fixture_events(self.connection_id, at)
 
 
 def namespace_resources(resources: list[Resource], namespace: str) -> list[Resource]:

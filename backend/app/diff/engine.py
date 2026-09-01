@@ -34,6 +34,7 @@ SIGNIFICANCE: dict[str, dict[str, Significance]] = {
         "lockdownMode": "medium",
         "ntpServers": "medium",
         "dnsServers": "medium",
+        "bootTime": "medium",
         "model": "low",
         "memoryBytes": "low",
         "numCpuCores": "low",
@@ -59,6 +60,7 @@ SIGNIFICANCE: dict[str, dict[str, Significance]] = {
         "toolsStatus": "low",
         "guestIp": "low",
         "annotation": "low",
+        "bootTime": "low",
     },
     "cluster": {
         "drsEnabled": "high",
@@ -105,6 +107,9 @@ DICT_LISTS: dict[str, str] = {
 }
 # Properties whose values may be namespaced ids; summaries show the short name.
 _ID_VALUED = frozenset({"host", "cluster", "hosts", "networks", "datastores"})
+# Properties only compared when both sides carry a value (a powered-off VM
+# has no bootTime; that is not a reboot).
+_BOTH_SIDES_REQUIRED = frozenset({"bootTime"})
 
 USAGE_BANDS = (85.0, 95.0)
 USAGE_MIN_DELTA = 5.0
@@ -232,6 +237,8 @@ def _scalar_summary(prop: str, old: Any, new: Any) -> str:
         return "entered maintenance mode" if new else "exited maintenance mode"
     if prop == "accessible":
         return "became inaccessible" if new is False else "became accessible"
+    if prop == "bootTime":
+        return f"rebooted {_fmt(old)} -> {_fmt(new)}"
     if prop in _ID_VALUED:
         return f"{prop} {_short(old)} -> {_short(new)}"
     return f"{prop} {_fmt(old)} -> {_fmt(new)}"
@@ -328,6 +335,8 @@ def _diff_modified(
             o = _value(old, prop, old_members)
             n = _value(new, prop, new_members)
             if _norm(o) == _norm(n):
+                continue
+            if prop in _BOTH_SIDES_REQUIRED and (o is None or n is None):
                 continue
             if new.type == "datastore" and prop == "freeSpace":
                 _diff_free_space(old, new, props, sigs, parts)

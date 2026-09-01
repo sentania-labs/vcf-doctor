@@ -33,6 +33,7 @@ EXPECTED = {
             "lockdownMode",
             "ntpServers",
             "dnsServers",
+            "bootTime",
         },
         "low": {"model", "memoryBytes", "numCpuCores", "physicalNics", "standardSwitches"},
     },
@@ -53,6 +54,7 @@ EXPECTED = {
             "toolsStatus",
             "guestIp",
             "annotation",
+            "bootTime",
         },
     },
     "cluster": {
@@ -100,8 +102,22 @@ def test_scalar_property_significance(rtype, prop, sig):
     c = one(old, new)
     assert c.significance == sig
     assert set(c.property_changes) == {prop}
-    if prop not in ("maintenanceMode", "accessible", "cluster"):
+    if prop == "bootTime":
+        assert c.summary == "rebooted one -> two"
+    elif prop not in ("maintenanceMode", "accessible", "cluster"):
         assert c.summary == f"{prop} one -> two"
+
+
+@pytest.mark.parametrize("rtype", ["host", "vm"])
+def test_boot_time_ignored_when_either_side_is_null(rtype):
+    """A powered-off VM (or a host mid-collection) has no bootTime; that is
+    not a reboot. Only value -> different value counts."""
+    assert diff([res(rtype, "x", bootTime=None)], [res(rtype, "x", bootTime="t1")]) == []
+    assert diff([res(rtype, "x", bootTime="t1")], [res(rtype, "x", bootTime=None)]) == []
+    assert diff([res(rtype, "x")], [res(rtype, "x", bootTime="t1")]) == []
+    c = one(res(rtype, "x", bootTime="t1"), res(rtype, "x", bootTime="t2"))
+    assert c.summary == "rebooted t1 -> t2"
+    assert c.significance == ("medium" if rtype == "host" else "low")
 
 
 def test_host_power_state_is_high_in_both_directions():
@@ -125,8 +141,8 @@ def test_rename_is_medium_on_every_type(rtype):
 
 
 def test_untracked_properties_never_produce_changes():
-    old = res("host", "h", uptimeSeconds=1, cpuMhz=1, bootTime="x", overallStatus="green")
-    new = res("host", "h", uptimeSeconds=2, cpuMhz=2, bootTime="y", overallStatus="red")
+    old = res("host", "h", uptimeSeconds=1, cpuMhz=1, overallStatus="green")
+    new = res("host", "h", uptimeSeconds=2, cpuMhz=2, overallStatus="red")
     assert diff([old], [new]) == []
     assert diff([res("vm", "v", guestState="running")], [res("vm", "v", guestState="x")]) == []
 

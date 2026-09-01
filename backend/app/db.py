@@ -63,14 +63,52 @@ CREATE TABLE IF NOT EXISTS snapshots (
     label TEXT NOT NULL,
     scheduled INTEGER NOT NULL DEFAULT 0,
     resource_count INTEGER NOT NULL DEFAULT 0,
-    resources TEXT NOT NULL
+    resources TEXT,
+    resources_gz BLOB
 );
 CREATE INDEX IF NOT EXISTS ix_snapshots_conn ON snapshots(connection_id, created_at);
 CREATE TABLE IF NOT EXISTS findings (
     snapshot_id TEXT PRIMARY KEY REFERENCES snapshots(id) ON DELETE CASCADE,
     findings TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS changes (
+    id TEXT PRIMARY KEY,
+    connection_id TEXT NOT NULL,
+    from_snapshot_id TEXT NOT NULL,
+    to_snapshot_id TEXT NOT NULL,
+    observed_at TEXT NOT NULL,
+    resource_id TEXT NOT NULL,
+    resource_type TEXT NOT NULL,
+    resource_name TEXT NOT NULL,
+    change_type TEXT NOT NULL,
+    significance TEXT NOT NULL,
+    summary TEXT NOT NULL DEFAULT '',
+    property_changes TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS ix_changes_conn_time ON changes(connection_id, observed_at);
+CREATE INDEX IF NOT EXISTS ix_changes_to_snapshot ON changes(to_snapshot_id);
 """
+
+# Columns added after the first release. Applied with ALTER TABLE ADD COLUMN
+# when missing, so a database created by an older build keeps working.
+_ADDED_COLUMNS: tuple[tuple[str, str, str], ...] = (("snapshots", "resources_gz", "BLOB"),)
+
+
+def _add_missing_columns(conn: sqlite3.Connection) -> None:
+    for table, column, decl in _ADDED_COLUMNS:
+        present = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in present:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+
+
+def column_is_nullable(table: str, column: str) -> bool:
+    """Databases created before the gzip change declared resources NOT NULL;
+    callers store '' instead of NULL there."""
+    with _lock:
+        for r in connect().execute(f"PRAGMA table_info({table})"):
+            if r["name"] == column:
+                return not r["notnull"]
+    return True
 
 
 def connect() -> sqlite3.Connection:
@@ -83,6 +121,7 @@ def connect() -> sqlite3.Connection:
             _conn.execute("PRAGMA journal_mode=WAL")
             _conn.execute("PRAGMA foreign_keys=ON")
             _conn.executescript(SCHEMA)
+            _add_missing_columns(_conn)
             _conn.commit()
         return _conn
 

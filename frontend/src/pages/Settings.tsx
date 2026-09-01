@@ -1,6 +1,6 @@
-import { useEffect, useState, type FormEvent } from 'react'
-import { CheckCircle2, KeyRound, ShieldCheck } from 'lucide-react'
-import type { AssistantSettings, Settings, Significance } from '@/types'
+import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react'
+import { AlertTriangle, CheckCircle2, KeyRound, ShieldCheck } from 'lucide-react'
+import type { AssistantSettings, RetentionPolicy, Settings, Significance } from '@/types'
 import { getSettings, updateSettings, getAssistantStatus, changePassword, getAssistantModels, type AssistantModel } from '@/api'
 import { useAuth } from '@/state/AuthState'
 import { useAsync } from '@/hooks/useAsync'
@@ -63,10 +63,53 @@ function AccessCard() {
   )
 }
 
+const DEFAULT_RETENTION: RetentionPolicy = { recent_days: 14, hourly_days: 30, daily_days: 365 }
+
+// Inline validation for the retention tiers. Returns the field in error and a message, or null.
+function retentionProblem(p: RetentionPolicy): { field: keyof RetentionPolicy; message: string } | null {
+  for (const k of ['recent_days', 'hourly_days', 'daily_days'] as const) {
+    if (!Number.isInteger(p[k]) || p[k] < 1) return { field: k, message: 'Each window must be a whole number of days, at least 1.' }
+  }
+  if (p.recent_days > p.hourly_days) return { field: 'hourly_days', message: `Hourly window (${p.hourly_days} d) must be at least the every-scan window (${p.recent_days} d).` }
+  if (p.hourly_days > p.daily_days) return { field: 'daily_days', message: `Daily window (${p.daily_days} d) must be at least the hourly window (${p.hourly_days} d).` }
+  return null
+}
+
+function RetentionCard({ value, onChange }: { value: RetentionPolicy; onChange: (p: RetentionPolicy) => void }) {
+  const problem = retentionProblem(value)
+  const set = (k: keyof RetentionPolicy) => (e: ChangeEvent<HTMLInputElement>) => onChange({ ...value, [k]: e.target.value === '' ? 0 : Math.floor(Number(e.target.value)) })
+  const cls = (k: keyof RetentionPolicy) => problem?.field === k ? 'border-critical focus:border-critical focus:ring-critical/25' : undefined
+  return (
+    <Card>
+      <CardHeader title="Retention" subtitle="How long scheduled snapshots are kept, thinning out as they age. Applied per connection after every scan."
+        action={problem ? <Badge tone="critical"><AlertTriangle size={11} /> Check values</Badge> : <Badge tone="ok" dot>Valid</Badge>} />
+      <div className="px-5 pb-5 space-y-4">
+        <div className="grid sm:grid-cols-3 gap-4">
+          <Field label="Every scan kept for (days)" hint="Younger than this, every scheduled snapshot stays.">
+            <Input type="number" min={1} max={3650} inputMode="numeric" value={value.recent_days || ''} onChange={set('recent_days')} className={cls('recent_days')} aria-invalid={problem?.field === 'recent_days'} />
+          </Field>
+          <Field label="One per hour kept for (days)" hint="Between the two windows, the snapshot nearest each hour mark stays.">
+            <Input type="number" min={1} max={3650} inputMode="numeric" value={value.hourly_days || ''} onChange={set('hourly_days')} className={cls('hourly_days')} aria-invalid={problem?.field === 'hourly_days'} />
+          </Field>
+          <Field label="One per day kept for (days)" hint="Older than this, scheduled snapshots are removed.">
+            <Input type="number" min={1} max={3650} inputMode="numeric" value={value.daily_days || ''} onChange={set('daily_days')} className={cls('daily_days')} aria-invalid={problem?.field === 'daily_days'} />
+          </Field>
+        </div>
+        {problem ? <p className="text-sm text-critical bg-critical-bg rounded-md px-3 py-2" role="alert">{problem.message}</p>
+          : <p className="text-sm text-muted">Every scan for {value.recent_days} {value.recent_days === 1 ? 'day' : 'days'}, then hourly to {value.hourly_days} {value.hourly_days === 1 ? 'day' : 'days'}, then daily to {value.daily_days} {value.daily_days === 1 ? 'day' : 'days'}.</p>}
+        <ul className="text-xs text-faint space-y-1 list-disc pl-4">
+          <li>Manual and labelled snapshots are never pruned.</li>
+          <li>vCenter events and the change log follow the daily window ({value.daily_days || '?'} {value.daily_days === 1 ? 'day' : 'days'}).</li>
+        </ul>
+      </div>
+    </Card>
+  )
+}
+
 export default function SettingsPage() {
   const s = useAsync(() => getSettings(), [])
   const status = useAsync(() => getAssistantStatus(), [s.data])
-  const [retention, setRetention] = useState(96)
+  const [retention, setRetention] = useState<RetentionPolicy>(DEFAULT_RETENTION)
   const [minSig, setMinSig] = useState<Significance>('low')
   const [assistant, setAssistant] = useState<AssistantSettings>({ enabled: true, provider: 'anthropic', model: 'claude-opus-5', api_key_set: false })
   const [models, setModels] = useState<AssistantModel[]>([])
@@ -81,13 +124,14 @@ export default function SettingsPage() {
   const [saved, setSaved] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
-  useEffect(() => { if (s.data) { setRetention(s.data.retention); setAssistant(s.data.assistant); setMinSig(s.data.changes_min_significance ?? 'low') } }, [s.data])
-  const apply = (d: Settings) => { setRetention(d.retention); setAssistant(d.assistant); setMinSig(d.changes_min_significance ?? 'low'); setApiKey('') }
+  useEffect(() => { if (s.data) { setRetention(s.data.retention_policy ?? DEFAULT_RETENTION); setAssistant(s.data.assistant); setMinSig(s.data.changes_min_significance ?? 'low') } }, [s.data])
+  const apply = (d: Settings) => { setRetention(d.retention_policy ?? DEFAULT_RETENTION); setAssistant(d.assistant); setMinSig(d.changes_min_significance ?? 'low'); setApiKey('') }
+  const retentionInvalid = retentionProblem(retention) !== null
 
   const save = async () => {
     setSaving(true); setErr(null); setSaved(false)
     try {
-      const body = { retention, changes_min_significance: minSig, assistant: { enabled: assistant.enabled, provider: assistant.provider, model: assistant.model.trim() || 'claude-opus-5', ...(apiKey ? { api_key: apiKey } : {}) } }
+      const body = { retention_policy: retention, changes_min_significance: minSig, assistant: { enabled: assistant.enabled, provider: assistant.provider, model: assistant.model.trim() || 'claude-opus-5', ...(apiKey ? { api_key: apiKey } : {}) } }
       apply(await updateSettings(body))
       setSaved(true); setTimeout(() => setSaved(false), 2500)
       status.reload()
@@ -99,18 +143,11 @@ export default function SettingsPage() {
   return (
     <div className="anim-fade-up max-w-3xl">
       <PageHeader title="Settings" subtitle="Working defaults are in place. Nothing here is required to start."
-        actions={<>{saved ? <span className="text-sm text-ok inline-flex items-center gap-1.5"><CheckCircle2 size={15} /> Saved</span> : null}<Button variant="primary" onClick={() => void save()} loading={saving} disabled={!s.data}>Save changes</Button></>} />
+        actions={<>{saved ? <span className="text-sm text-ok inline-flex items-center gap-1.5"><CheckCircle2 size={15} /> Saved</span> : null}<Button variant="primary" onClick={() => void save()} loading={saving} disabled={!s.data || retentionInvalid} title={retentionInvalid ? 'Fix the retention windows first' : undefined}>Save changes</Button></>} />
 
       {!s.data ? <div className="space-y-5"><Skeleton className="h-40 rounded-xl" /><Skeleton className="h-72 rounded-xl" /></div> : (
         <div className="space-y-5">
-          <Card>
-            <CardHeader title="Snapshots" subtitle="How many scheduled snapshots are kept per connection before the oldest are pruned" />
-            <div className="px-5 pb-5 grid sm:grid-cols-2 gap-4">
-              <Field label="Scheduled snapshots kept (per connection)" hint="A count, not days. The oldest scheduled snapshots beyond this number are pruned after each scan. Manual snapshots are never pruned.">
-                <Input type="number" min={1} max={3650} value={retention} onChange={e => setRetention(Math.max(1, Number(e.target.value) || 1))} />
-              </Field>
-            </div>
-          </Card>
+          <RetentionCard value={retention} onChange={setRetention} />
 
           <Card>
             <CardHeader title="Changes" subtitle="What the Changes page and the Overview's recent changes show by default" />

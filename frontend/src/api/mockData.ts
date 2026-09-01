@@ -1,11 +1,27 @@
 // Realistic mock estate: a VCF workload domain with two clusters, six hosts, thirty VMs,
 // vSAN datastores and NSX segments, one disconnected host, one datastore at 91%.
 import type {
-  Change, ConnectionPublic, Finding, Resource, ScanRun, Schedule, SnapshotSummary, Settings, AssistantStatus,
+  Change, ChangeLogEntry, ConnectionPublic, Event, EventCategory, EventSource, Finding, Resource, ScanRun, Schedule, SnapshotSummary, SnapshotTier, Settings, AssistantStatus,
 } from '@/types'
 
 const now = Date.now()
 const minutesAgo = (m: number) => new Date(now - m * 60_000).toISOString()
+const hoursAgo = (h: number) => minutesAgo(h * 60)
+
+// Scheduled snapshot series shaped like the retention policy leaves it: every scan for the
+// last few hours (recent), one per few hours for the last two days (hourly), one per day
+// after that (daily). Enough rows (> 30) to exercise the grouped pickers and their filter.
+function tieredSnapshots(src: string, idPrefix: string, resourceCount: number, startSeq: number): SnapshotSummary[] {
+  const out: SnapshotSummary[] = []
+  let seq = startSeq
+  const add = (minAgo: number, tier: SnapshotTier, label = 'Scheduled', count = resourceCount) => {
+    out.push({ id: `${idPrefix}-${String(seq--).padStart(3, '0')}`, created_at: minutesAgo(minAgo), label, connection_id: src, scheduled: true, resource_count: count, tier })
+  }
+  for (let m = 102; m <= 12 * 60; m += 40) add(m, 'recent', 'Scheduled', resourceCount - 1)            // ~17 rows over the last 12 h
+  for (let h = 15; h <= 48; h += 3) add(h * 60, 'hourly', 'Scheduled', resourceCount - 1)              // 12 rows, hourly tier
+  for (let d = 3; d <= 16; d++) add(d * 1440 + 17, 'daily', 'Scheduled', resourceCount - 2)             // 14 rows, daily tier
+  return out
+}
 
 export interface MockEstate {
   connection: ConnectionPublic
@@ -14,6 +30,8 @@ export interface MockEstate {
   findings: Finding[]
   snapshots: SnapshotSummary[]
   changes: Change[]
+  changeLog: ChangeLogEntry[]
+  events: Event[]
   scans: ScanRun[]
 }
 
@@ -208,12 +226,13 @@ function buildWorkloadDomain(): MockEstate {
     },
   ]
 
-  const snapshots: SnapshotSummary[] = [
-    { id: 'snap-vc01-004', created_at: minutesAgo(2), label: 'Current', connection_id: src, scheduled: true, resource_count: r.length },
-    { id: 'snap-vc01-003', created_at: minutesAgo(22), label: 'Before firmware window', connection_id: src, scheduled: false, resource_count: r.length },
-    { id: 'snap-vc01-002', created_at: minutesAgo(62), label: 'Scheduled', connection_id: src, scheduled: true, resource_count: r.length - 1 },
-    { id: 'snap-vc01-001', created_at: minutesAgo(180), label: 'Demo baseline', connection_id: src, scheduled: false, resource_count: r.length - 1 },
-  ]
+  const snapshots: SnapshotSummary[] = ([
+    { id: 'snap-vc01-004', created_at: minutesAgo(2), label: 'Current', connection_id: src, scheduled: true, resource_count: r.length, tier: 'recent' },
+    { id: 'snap-vc01-003', created_at: minutesAgo(22), label: 'Before firmware window', connection_id: src, scheduled: false, resource_count: r.length, tier: 'manual' },
+    { id: 'snap-vc01-002', created_at: minutesAgo(62), label: 'Scheduled', connection_id: src, scheduled: true, resource_count: r.length - 1, tier: 'recent' },
+    { id: 'snap-vc01-001', created_at: minutesAgo(180), label: 'Demo baseline', connection_id: src, scheduled: false, resource_count: r.length - 1, tier: 'manual' },
+    ...tieredSnapshots(src, 'snap-vc01-h', r.length, 99),
+  ] satisfies SnapshotSummary[]).sort((a, b) => b.created_at.localeCompare(a.created_at))
 
   const changes: Change[] = [
     { change_type: 'modified', resource_id: hosts[2].id, resource_type: 'host', resource_name: hosts[2].name, significance: 'high', summary: 'Host connection state changed', property_changes: { connectionState: { old: 'connected', new: 'disconnected' }, powerState: { old: 'poweredOn', new: 'unknown' } } },
@@ -272,6 +291,81 @@ function buildWorkloadDomain(): MockEstate {
     { change_type: 'modified', resource_id: vc.id, resource_type: 'vcenter', resource_name: vc.name, significance: 'low', summary: 'vCenter build changed', property_changes: { build: { old: '24755230', new: '24805960' } } },
   ]
 
+  // Persisted change log: the latest window carries the changes above; earlier windows in the
+  // last two days carry the smaller things a scheduled scan normally picks up.
+  const logRow = (i: number, minAgo: number, fromId: string, toId: string, c: Change): ChangeLogEntry => ({ ...c, id: `chg-${src}-${i}`, observed_at: minutesAgo(minAgo), from_snapshot_id: fromId, to_snapshot_id: toId })
+  const mod = (resource: Resource, significance: Change['significance'], summary: string, property_changes: Change['property_changes']): Change => ({ change_type: 'modified', resource_id: resource.id, resource_type: resource.type, resource_name: resource.name, significance, summary, property_changes })
+  const changeLog: ChangeLogEntry[] = [
+    ...changes.map((c, i) => logRow(i, 2, 'snap-vc01-003', 'snap-vc01-004', c)),
+    logRow(20, 62, 'snap-vc01-h099', 'snap-vc01-002', mod(vms[5], 'medium', 'VM moved host', { host: { old: 'esx01.wld01.vcf.example', new: 'esx02.wld01.vcf.example' } })),
+    logRow(21, 62, 'snap-vc01-h099', 'snap-vc01-002', mod(vms[12], 'low', 'Host resource usage changed', { cpuUsagePct: { old: 12, new: 19 } })),
+    logRow(22, 142, 'snap-vc01-h098', 'snap-vc01-h099', mod(vms[2], 'medium', 'VM powered off', { powerState: { old: 'poweredOn', new: 'poweredOff' }, guestIp: { old: '10.16.22.12', new: null } })),
+    logRow(23, 222, 'snap-vc01-h096', 'snap-vc01-h097', mod(hosts[3], 'high', 'rebooted', { bootTime: { old: new Date(now - 48 * 86400_000).toISOString(), new: new Date(now - 4 * 3600_000).toISOString() }, uptimeSeconds: { old: 48 * 86400, new: 4 * 3600 } })),
+    logRow(24, 262, 'snap-vc01-h095', 'snap-vc01-h096', mod(hosts[3], 'medium', 'Host entered maintenance mode', { maintenanceMode: { old: false, new: true } })),
+    logRow(25, 342, 'snap-vc01-h093', 'snap-vc01-h094', mod(networks[1], 'high', 'VLAN 1612 -> 1622', { vlan: { old: 1612, new: 1622 } })),
+    logRow(26, 422, 'snap-vc01-h091', 'snap-vc01-h092', mod(vms[4], 'medium', 'memoryMB 8192 -> 16384; numCpu 4 -> 8', { memoryMB: { old: 8192, new: 16384 }, numCpu: { old: 4, new: 8 } })),
+    logRow(27, 542, 'snap-vc01-h088', 'snap-vc01-h089', mod(hosts[4], 'medium', 'NTP servers changed', { ntpServers: { old: ['10.16.0.10'], new: ['10.16.0.10', '10.16.0.11'] } })),
+    logRow(28, 702, 'snap-vc01-h084', 'snap-vc01-h085', mod(datastores[1], 'low', 'Datastore usage changed', { usedPct: { old: 52, new: 54 }, freeGB: { old: 29500, new: 28100 } })),
+    logRow(29, 900, 'snap-vc01-h082', 'snap-vc01-h083', { change_type: 'added', resource_id: vms[15].id, resource_type: 'vm', resource_name: 'ci-runner02', significance: 'low', summary: 'VM created', property_changes: {} }),
+    logRow(30, 1260, 'snap-vc01-h078', 'snap-vc01-h079', mod(vms[24], 'low', 'snapshotCount 1 -> 2', { snapshotCount: { old: 1, new: 2 } })),
+    logRow(31, 1620, 'snap-vc01-h076', 'snap-vc01-h077', mod(clusters[0], 'medium', 'DRS automation level changed', { drsAutomationLevel: { old: 'partiallyAutomated', new: 'fullyAutomated' } })),
+    logRow(32, 2160, 'snap-vc01-h073', 'snap-vc01-h074', mod(hosts[5], 'high', 'Host connection state changed', { connectionState: { old: 'notResponding', new: 'connected' } })),
+    logRow(33, 2340, 'snap-vc01-h072', 'snap-vc01-h073', mod(hosts[5], 'high', 'Host connection state changed', { connectionState: { old: 'connected', new: 'notResponding' } })),
+  ].sort((a, b) => b.observed_at.localeCompare(a.observed_at))
+
+  // What vCenter recorded around those changes. Times are relative to scan time; the latest
+  // window (2 to 22 minutes ago) explains the esx03 disconnect and what happened around it.
+  let evSeq = 1
+  const ev = (minAgo: number, source: EventSource, type: string, category: EventCategory, message: string, user: string | null, res: Resource | null): Event => ({
+    id: `${src}:${evSeq++}`, connection_id: src, time: minutesAgo(minAgo), source, type, category, message, user,
+    resource_id: res?.id ?? null, resource_name: res?.name ?? null, resource_type: res?.type ?? null,
+  })
+  const admin = 'VSPHERE.LOCAL\\Administrator'
+  const ops = 'WLD01\\ops-jsmith'
+  const events: Event[] = [
+    ev(4, 'event', 'com.vmware.vc.ha.VmRestartedByHAEvent', 'warning', 'vSphere HA restarted virtual machine app01 on host esx02.wld01.vcf.example in cluster wld01-cl01', null, vms[4]),
+    ev(4, 'event', 'com.vmware.vc.ha.VmRestartedByHAEvent', 'warning', 'vSphere HA restarted virtual machine web01 on host esx01.wld01.vcf.example in cluster wld01-cl01', null, vms[0]),
+    ev(6, 'event', 'AlarmStatusChangedEvent', 'error', "Alarm 'Host connection and power state' on esx03.wld01.vcf.example changed from Green to Red", null, hosts[2]),
+    ev(6, 'event', 'HostConnectionLostEvent', 'error', 'Host esx03.wld01.vcf.example in wld01-dc is not responding', null, hosts[2]),
+    ev(7, 'event', 'com.vmware.vc.HA.HostStateChangedEvent', 'warning', 'The vSphere HA availability state of the host esx03.wld01.vcf.example has changed to Dead', null, hosts[2]),
+    ev(9, 'task', 'Task: Remove segment', 'user', 'Remove segment seg-legacy-tier from transport zone tz-overlay-01', admin, null),
+    ev(11, 'task', 'Task: Update network configuration', 'user', 'Update network configuration on esx02.wld01.vcf.example: vmk1 MTU 9000, add vmk3 on wld01-tep-vlan1614', ops, hosts[1]),
+    ev(12, 'event', 'HostVnicConnectedToCustomizedDVPortEvent', 'info', 'vmk3 on host esx02.wld01.vcf.example connected to port 41 on wld01-vds01', ops, hosts[1]),
+    ev(14, 'event', 'DasDisabledEvent', 'user', 'vSphere HA disabled for cluster wld01-cl02 in wld01-dc', admin, clusters[1]),
+    ev(15, 'task', 'Task: Reconfigure cluster', 'user', 'Reconfigure cluster wld01-cl02: HA disabled, admission control off', admin, clusters[1]),
+    ev(17, 'event', 'VmReconfiguredEvent', 'user', 'Reconfigured db01 on esx05.wld01.vcf.example in wld01-dc. Added Hard disk 3 (256 GB, thick); Hard disk 2 changed to thick provisioned', ops, vms[8]),
+    ev(19, 'event', 'HostSyncFailedEvent', 'warning', 'Failed to sync with the vCenter Agent on host esx03.wld01.vcf.example', null, hosts[2]),
+    ev(20, 'event', 'UserLoginSessionEvent', 'info', `User ${admin}@10.16.0.51 logged in as VMware vim-java 1.0`, admin, null),
+    ev(21, 'event', 'com.vmware.vc.vsan.HostVsanNetworkMismatch', 'warning', 'vSAN network configuration on esx05.wld01.vcf.example is not in sync with cluster wld01-cl02 (NTP servers removed)', null, hosts[4]),
+    ev(28, 'task', 'Task: Create virtual machine snapshot', 'user', 'Create virtual machine snapshot "pre-17.11 upgrade" on gitlab01', ops, vms[24]),
+    ev(31, 'event', 'VmPoweredOffEvent', 'user', 'test-win11 on esx03.wld01.vcf.example in wld01-dc is powered off', ops, vms[28]),
+    ev(34, 'event', 'VmCreatedEvent', 'user', 'Created virtual machine test-rhel9 on esx04.wld01.vcf.example in wld01-dc', ops, vms[29]),
+    ev(58, 'event', 'DrsVmMigratedEvent', 'info', 'DRS migrated app02 from esx01.wld01.vcf.example to esx02.wld01.vcf.example in cluster wld01-cl01', null, vms[5]),
+    ev(65, 'event', 'ScheduledTaskCompletedEvent', 'info', "Scheduled task 'Weekly vSAN health check' completed on wld01-cl01", null, clusters[0]),
+    ev(140, 'event', 'VmPoweredOffEvent', 'user', 'web03 on esx01.wld01.vcf.example in wld01-dc is powered off', admin, vms[2]),
+    ev(141, 'event', 'VmGuestShutdownEvent', 'user', 'Guest OS shut down for web03 on esx01.wld01.vcf.example in wld01-dc', admin, vms[2]),
+    ev(218, 'event', 'HostConnectedEvent', 'info', 'Connected to esx04.wld01.vcf.example in wld01-dc', null, hosts[3]),
+    ev(221, 'event', 'ExitMaintenanceModeEvent', 'user', 'esx04.wld01.vcf.example in wld01-dc has exited maintenance mode', ops, hosts[3]),
+    ev(236, 'event', 'HostShutdownEvent', 'user', 'Host esx04.wld01.vcf.example in wld01-dc was rebooted by ops-jsmith: BIOS 2.4.4 firmware update', ops, hosts[3]),
+    ev(258, 'event', 'EnteredMaintenanceModeEvent', 'user', 'esx04.wld01.vcf.example in wld01-dc has entered maintenance mode', ops, hosts[3]),
+    ev(259, 'task', 'Task: Enter maintenance mode', 'user', 'Enter maintenance mode on esx04.wld01.vcf.example (evacuate powered off VMs, ensure accessibility)', ops, hosts[3]),
+    ev(261, 'event', 'VmMigratedEvent', 'user', 'Migration of app02 from esx04.wld01.vcf.example to esx05.wld01.vcf.example completed', ops, vms[5]),
+    ev(338, 'task', 'Task: Reconfigure distributed port group', 'user', 'Reconfigure dvPort group wld01-vmotion-vlan1612 on wld01-vds01: VLAN 1612 -> 1622', admin, networks[1]),
+    ev(339, 'event', 'DVPortgroupReconfiguredEvent', 'user', 'dvPort group wld01-vmotion-vlan1612 in wld01-dc was reconfigured', admin, networks[1]),
+    ev(420, 'event', 'VmReconfiguredEvent', 'user', 'Reconfigured app01 on esx02.wld01.vcf.example in wld01-dc. Memory 8 GB -> 16 GB, CPUs 4 -> 8', ops, vms[4]),
+    ev(540, 'task', 'Task: Update date/time configuration', 'user', 'Update date/time configuration on esx05.wld01.vcf.example: NTP servers 10.16.0.10, 10.16.0.11', ops, hosts[4]),
+    ev(612, 'event', 'AlarmStatusChangedEvent', 'warning', "Alarm 'Datastore usage on disk' on wld01-cl01-vsan changed from Green to Yellow", null, datastores[0]),
+    ev(700, 'event', 'com.vmware.vc.vsan.ResyncStartedEvent', 'info', 'vSAN resync started on wld01-cl01-vsan: 1.2 TB to resync', null, datastores[0]),
+    ev(1080, 'event', 'UserLogoutSessionEvent', 'info', `User ${ops}@10.16.0.77 logged out (login time: yesterday, number of API invocations: 412)`, ops, null),
+    ev(1258, 'task', 'Task: Create virtual machine snapshot', 'user', 'Create virtual machine snapshot "pre-17.10 upgrade" on gitlab01', ops, vms[24]),
+    ev(1620, 'event', 'ClusterReconfiguredEvent', 'user', 'Reconfigured cluster wld01-cl01 in datacenter wld01-dc: DRS automation level fullyAutomated', admin, clusters[0]),
+    ev(2160, 'event', 'HostConnectedEvent', 'info', 'Connected to esx06.wld01.vcf.example in wld01-dc', null, hosts[5]),
+    ev(2340, 'event', 'HostConnectionLostEvent', 'error', 'Host esx06.wld01.vcf.example in wld01-dc is not responding', null, hosts[5]),
+    ev(2341, 'event', 'AlarmStatusChangedEvent', 'error', "Alarm 'Host connection and power state' on esx06.wld01.vcf.example changed from Green to Red", null, hosts[5]),
+    ev(4300, 'event', 'GeneralUserEvent', 'user', 'Cluster image remediation scheduled for wld01-cl02 (esx06 pending)', admin, clusters[1]),
+    ev(7200, 'event', 'LicenseExpiredEvent', 'warning', 'Evaluation license for wld01 NSX will expire in 30 days', null, null),
+  ]
+
   const scans: ScanRun[] = [
     { id: 'scan-vc01-9', connection_id: src, started: minutesAgo(2), finished: minutesAgo(1.7), status: 'ok', error: null, snapshot_id: 'snap-vc01-004', trigger: 'scheduled' },
     { id: 'scan-vc01-8', connection_id: src, started: minutesAgo(22), finished: minutesAgo(21.5), status: 'ok', error: null, snapshot_id: 'snap-vc01-003', trigger: 'manual' },
@@ -281,7 +375,7 @@ function buildWorkloadDomain(): MockEstate {
   return {
     connection: { id: src, name: 'Centennial Lab (wld01)', host: 'vc-wld01.wld01.vcf.example', username: 'administrator@vsphere.local', verify_tls: false, created_at: minutesAgo(400), kind: 'vcenter' },
     schedule: { connection_id: src, interval_minutes: 5, enabled: true, last_run: minutesAgo(2), next_run: new Date(now + 3 * 60_000).toISOString(), last_status: 'ok' },
-    resources: r, findings, snapshots, changes, scans,
+    resources: r, findings, snapshots, changes, changeLog, events, scans,
   }
 }
 
@@ -308,11 +402,21 @@ function buildManagementDomain(): MockEstate {
     resources: r,
     findings: [],
     snapshots: [
-      { id: 'snap-vc00-002', created_at: minutesAgo(9), label: 'Scheduled', connection_id: src, scheduled: true, resource_count: r.length },
-      { id: 'snap-vc00-001', created_at: minutesAgo(130), label: 'Scheduled', connection_id: src, scheduled: true, resource_count: r.length },
+      { id: 'snap-vc00-002', created_at: minutesAgo(9), label: 'Scheduled', connection_id: src, scheduled: true, resource_count: r.length, tier: 'recent' },
+      { id: 'snap-vc00-001', created_at: minutesAgo(130), label: 'Scheduled', connection_id: src, scheduled: true, resource_count: r.length, tier: 'recent' },
+      { id: 'snap-vc00-000', created_at: hoursAgo(26), label: 'Scheduled', connection_id: src, scheduled: true, resource_count: r.length, tier: 'hourly' },
+      { id: 'snap-vc00-d01', created_at: hoursAgo(74), label: 'Scheduled', connection_id: src, scheduled: true, resource_count: r.length, tier: 'daily' },
     ],
     changes: [
       { change_type: 'modified', resource_id: hosts[1].id, resource_type: 'host', resource_name: hosts[1].name, significance: 'low', summary: 'Host resource usage changed', property_changes: { cpuUsagePct: { old: 31, new: 35 } } },
+    ],
+    changeLog: [
+      { id: 'chg-vc00-1', observed_at: minutesAgo(9), from_snapshot_id: 'snap-vc00-001', to_snapshot_id: 'snap-vc00-002', change_type: 'modified', resource_id: hosts[1].id, resource_type: 'host', resource_name: hosts[1].name, significance: 'low', summary: 'Host resource usage changed', property_changes: { cpuUsagePct: { old: 31, new: 35 } } },
+    ],
+    events: [
+      { id: `${src}:1`, connection_id: src, time: minutesAgo(12), source: 'event', category: 'info', type: 'UserLoginSessionEvent', message: 'User VSPHERE.LOCAL\\svc-vcfdoctor@10.16.0.90 logged in as pyvmomi', user: 'VSPHERE.LOCAL\\svc-vcfdoctor', resource_id: null, resource_name: null, resource_type: null },
+      { id: `${src}:2`, connection_id: src, time: minutesAgo(95), source: 'task', category: 'user', type: 'Task: Create virtual machine snapshot', message: 'Create virtual machine snapshot "pre-patch" on sddc-manager', user: 'VSPHERE.LOCAL\\Administrator', resource_id: id('vm', 'sddc-manager'), resource_name: 'sddc-manager', resource_type: 'vm' },
+      { id: `${src}:3`, connection_id: src, time: minutesAgo(640), source: 'event', category: 'warning', type: 'AlarmStatusChangedEvent', message: "Alarm 'Virtual machine memory usage' on nsx-mgr-02 changed from Green to Yellow", user: null, resource_id: id('vm', 'nsx-mgr-02'), resource_name: 'nsx-mgr-02', resource_type: 'vm' },
     ],
     scans: [
       { id: 'scan-vc00-3', connection_id: src, started: minutesAgo(9), finished: minutesAgo(8.6), status: 'ok', error: null, snapshot_id: 'snap-vc00-002', trigger: 'scheduled' },
@@ -322,7 +426,7 @@ function buildManagementDomain(): MockEstate {
 
 export const mockState = {
   estates: [buildWorkloadDomain(), buildManagementDomain()] as MockEstate[],
-  settings: { retention: 30, changes_min_significance: 'low', assistant: { enabled: true, provider: 'mock', model: 'claude-opus-5', api_key_set: false } } as Settings,
+  settings: { retention_policy: { recent_days: 14, hourly_days: 30, daily_days: 365 }, changes_min_significance: 'low', assistant: { enabled: true, provider: 'mock', model: 'claude-opus-5', api_key_set: false } } as Settings,
   assistantStatus: { available: true, provider: 'mock', model: 'claude-opus-5', reason: null } as AssistantStatus,
   nextId: 100,
 }

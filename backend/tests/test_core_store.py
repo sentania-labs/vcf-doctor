@@ -1,7 +1,10 @@
 """Persistence and retention tests for the snapshot store."""
 
+from datetime import timedelta
+
 from app import db, scheduler
 from app.models import ConnectionCreate, Finding, Resource
+from app.models.snapshot import RetentionPolicy
 from app.snapshots import store
 
 
@@ -38,29 +41,39 @@ def test_snapshot_persistence_roundtrip(tmp_path):
 
 
 def test_retention_prunes_only_scheduled(tmp_path):
+    """Tier pruning never touches manual snapshots, even ancient ones."""
     db.reset_for_tests(str(tmp_path / "t.db"))
     conn = _conn()
     manual = store.save_snapshot(conn.id, [_res(1)], "keep me", scheduled=False)
-    scheduled_ids = [
-        store.save_snapshot(conn.id, [_res(1)], f"Scheduled {i}", scheduled=True).id
-        for i in range(5)
-    ]
-    removed = store.prune_scheduled(conn.id, keep=2)
-    assert removed == 3
-    remaining = {s.id for s in store.list_snapshots(conn.id)}
-    assert manual.id in remaining
-    assert set(scheduled_ids[-2:]) <= remaining
-    assert not (set(scheduled_ids[:3]) & remaining)
+    old = store.save_snapshot(conn.id, [_res(1)], "Scheduled ancient", scheduled=True)
+    fresh = store.save_snapshot(conn.id, [_res(1)], "Scheduled fresh", scheduled=True)
+    ancient = (store.now() - timedelta(days=400)).isoformat()
+    with db.transaction() as c:
+        c.execute(
+            "UPDATE snapshots SET created_at = ? WHERE id IN (?, ?)", (ancient, manual.id, old.id)
+        )
+    assert store.apply_retention(conn.id) == 1
+    remaining = {s.id: s.tier for s in store.list_snapshots(conn.id)}
+    assert remaining == {manual.id: "manual", fresh.id: "recent"}
 
 
-def test_scheduled_scan_applies_retention_setting(tmp_path):
+def test_scan_applies_retention_policy_setting(tmp_path):
+    """run_scan applies the stored policy after every scan, manual or scheduled."""
     db.reset_for_tests(str(tmp_path / "t.db"))
-    db.set_setting("retention", 2)
     conn = _conn()
-    for _ in range(4):
-        assert scheduler.run_scan(conn.id, "scheduled").status == "ok"
+    assert scheduler.run_scan(conn.id, "scheduled").status == "ok"
+    stale = (store.now() - timedelta(days=3)).isoformat()
+    with db.transaction() as c:
+        c.execute("UPDATE snapshots SET created_at = ? WHERE connection_id = ?", (stale, conn.id))
+    # Default policy keeps a 3-day-old scheduled snapshot (recent tier).
+    assert scheduler.run_scan(conn.id, "manual").status == "ok"
+    assert len(store.list_snapshots(conn.id)) == 2
+    # Shrinking the tiers below its age prunes it on the next scan.
+    store.set_retention_policy(RetentionPolicy(recent_days=1, hourly_days=1, daily_days=1))
+    assert scheduler.run_scan(conn.id, "scheduled").status == "ok"
     snaps = store.list_snapshots(conn.id)
-    assert len(snaps) == 2 and all(s.scheduled for s in snaps)
+    assert len(snaps) == 2  # stale scheduled one gone; the manual and the new one remain
+    assert {s.tier for s in snaps} == {"manual", "recent"}
     assert snaps[0].label.startswith("Scheduled ")
 
 

@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app import auth, db, scheduler
 from app.api.auth_router import router as auth_router
+from app.api.events_router import router as events_router
 from app.api.router import router as api_router
 from app.config import settings
 from app.models import ConnectionCreate
@@ -42,6 +43,7 @@ async def lifespan(application: FastAPI):
     if interrupted:
         log.warning("marked %d interrupted scan run(s) as error", interrupted)
     auth.bootstrap_from_env()
+    scheduler.startup_maintenance()
     ensure_demo_connection()
     scheduler.start()
     try:
@@ -81,6 +83,7 @@ def health() -> dict:
 
 
 app.include_router(api_router)
+app.include_router(events_router)
 
 try:
     from app.assistant.router import router as assistant_router

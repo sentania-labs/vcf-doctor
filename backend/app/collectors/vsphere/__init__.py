@@ -12,6 +12,7 @@ See normalize.py for the ID scheme and the property list.
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 
 from app.collectors.base import Collector
 from app.collectors.vsphere.client import (
@@ -22,6 +23,7 @@ from app.collectors.vsphere.client import (
     VSphereUnreachableError,
     classify_exception,
 )
+from app.collectors.vsphere.events import collect_events as _collect_events
 from app.collectors.vsphere.normalize import (
     RawInventory,
     RawObject,
@@ -29,6 +31,7 @@ from app.collectors.vsphere.normalize import (
     vcenter_key,
 )
 from app.models import ConnectionResult, Resource
+from app.models.event import Event
 
 log = logging.getLogger(__name__)
 
@@ -88,6 +91,19 @@ class VSphereCollector(Collector):
         resources = normalize(inventory, self.namespace)
         log.info("vsphere collect %s: %d resources", self.host, len(resources))
         return resources
+
+    def collect_events(self, since: datetime, until: datetime) -> list[Event]:
+        """vCenter events and tasks in (since, until], mapped to Event with
+        resource ids in this collector's namespace. Raises VSphereError."""
+        try:
+            with self._session() as s:
+                events = _collect_events(s.si, self.namespace, since, until)
+        except VSphereError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise classify_exception(exc, self.host) from exc
+        log.info("vsphere events %s: %d events/tasks", self.host, len(events))
+        return events
 
 
 __all__ = [

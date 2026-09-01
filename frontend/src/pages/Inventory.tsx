@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { ChevronDown, ChevronRight, Search } from 'lucide-react'
 import type { Resource } from '@/types'
 import { getResources } from '@/api'
@@ -17,6 +18,7 @@ export default function InventoryPage() {
   const res = useAsync(() => getResources(connectionId), [connectionId, refreshKey])
   const [selected, setSelected] = useState<Resource | null>(null)
   const [q, setQ] = useState('')
+  const [params] = useSearchParams()
 
   const { roots, childrenOf, extras, byId } = useMemo(() => {
     const all = res.data ?? []
@@ -37,6 +39,16 @@ export default function InventoryPage() {
     for (const l of childrenOf.values()) l.sort(sortFn)
     return { roots, childrenOf, extras, byId }
   }, [res.data])
+
+  // Deep link from Events and the finding drawer: /inventory?resource=<id>. Applied once per id so a
+  // later refresh does not yank the selection back after the user clicks elsewhere.
+  const appliedRef = useRef<string | null>(null)
+  const wanted = params.get('resource')
+  useEffect(() => {
+    if (!wanted || appliedRef.current === wanted) return
+    const r = byId.get(wanted)
+    if (r) { appliedRef.current = wanted; setSelected(r) }
+  }, [wanted, byId])
 
   const query = q.trim().toLowerCase()
   const matches = (r: Resource) => !query || r.name.toLowerCase().includes(query) || r.type.includes(query)

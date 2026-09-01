@@ -17,7 +17,7 @@ export function createSnapshot(connectionId: string, label: string): Promise<Sna
     if (!estate) return Promise.reject(new Error('Unknown connection'))
     const snap: SnapshotSummary = {
       id: `snap-${connectionId}-${mockState.nextId++}`, created_at: new Date().toISOString(), label: label || 'Manual',
-      connection_id: connectionId, scheduled: false, resource_count: estate.resources.length,
+      connection_id: connectionId, scheduled: false, resource_count: estate.resources.length, tier: 'manual',
     }
     estate.snapshots.unshift(snap)
     return delay(snap, 900)

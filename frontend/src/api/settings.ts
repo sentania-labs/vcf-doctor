@@ -11,7 +11,7 @@ export function updateSettings(body: SettingsUpdate): Promise<Settings> {
   if (USE_MOCKS) {
     const { api_key, ...rest } = body.assistant
     mockState.settings = {
-      retention: body.retention,
+      retention_policy: { ...body.retention_policy },
       changes_min_significance: body.changes_min_significance ?? mockState.settings.changes_min_significance ?? 'low',
       assistant: { ...mockState.settings.assistant, ...rest, api_key_set: api_key ? true : mockState.settings.assistant.api_key_set },
     }
