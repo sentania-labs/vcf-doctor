@@ -245,6 +245,18 @@ def finish_run(
     return get_run(run_id)
 
 
+def reconcile_interrupted_runs() -> int:
+    """Mark runs left in 'running' by a crash or restart as errors.
+    Called once at startup; returns how many were reconciled."""
+    with db.transaction() as c:
+        cur = c.execute(
+            "UPDATE scan_runs SET finished = ?, status = 'error', "
+            "error = 'interrupted by restart' WHERE status = 'running'",
+            (now().isoformat(),),
+        )
+        return cur.rowcount
+
+
 def get_run(run_id: str) -> ScanRun | None:
     row = db.fetchone("SELECT * FROM scan_runs WHERE id = ?", (run_id,))
     return _row_to_run(row) if row else None

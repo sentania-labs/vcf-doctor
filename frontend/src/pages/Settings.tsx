@@ -121,7 +121,7 @@ export default function SettingsPage() {
                   <Input value={assistant.model} onChange={e => setAssistant(a => ({ ...a, model: e.target.value }))} placeholder="claude-opus-5" disabled={assistant.provider === 'mock'} />
                 </Field>
               </div>
-              <Field label="Anthropic API key" hint="Write-only. The key is stored on the server and never shown again. An ANTHROPIC_API_KEY environment variable takes precedence.">
+              <Field label="Anthropic API key" hint="Write-only. The key is stored on the server and never shown again. A key saved here takes precedence over the ANTHROPIC_API_KEY environment variable; clear it to fall back to the environment.">
                 <div className="flex items-center gap-3">
                   <Input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder={assistant.api_key_set ? 'Enter a new key to replace the stored one' : 'sk-ant-...'} autoComplete="new-password" disabled={assistant.provider === 'mock'} />
                   <Badge tone={assistant.api_key_set ? 'ok' : 'neutral'} className="shrink-0"><KeyRound size={11} /> {assistant.api_key_set ? 'Key set' : 'No key'}</Badge>

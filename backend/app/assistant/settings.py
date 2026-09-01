@@ -1,8 +1,9 @@
 """Assistant settings: GUI-editable, stored in SQLite via db.get_setting.
 
-Key resolution: the ANTHROPIC_API_KEY environment variable wins, then the
-"assistant_api_key" setting row. The key is stored but never returned;
-AssistantSettings.api_key_set reflects whether one resolves.
+Key resolution: a key entered in Settings (the "assistant_api_key" row) wins;
+the ANTHROPIC_API_KEY environment variable is the deployment default. The
+key is stored but never returned; AssistantSettings.api_key_set reflects
+whether one resolves.
 """
 
 import os

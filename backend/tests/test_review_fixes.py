@@ -85,3 +85,21 @@ def test_demo_flow_produces_known_findings_and_changes(tmp_path, monkeypatch):
         )
         ov = c.get(f"/api/overview?connection_id={a}").json()
         assert ov["counts"]["critical"] == 2 and ov["health_score"] < 100
+
+
+def test_interrupted_runs_are_reconciled_on_startup(tmp_path, monkeypatch):
+    from app import db
+    from app.snapshots import store
+
+    db.reset_for_tests(str(tmp_path / "r.db"))
+    db.connect()
+    conn = store.create_connection(
+        __import__("app.models", fromlist=["ConnectionCreate"]).ConnectionCreate(
+            name="x", host="fixture", username="u", password="p", kind="fixture"
+        )
+    )
+    run = store.create_run(conn.id, "manual")
+    assert run.status == "running"
+    assert store.reconcile_interrupted_runs() == 1
+    assert store.get_run(run.id).status == "error"
+    assert store.reconcile_interrupted_runs() == 0

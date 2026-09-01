@@ -38,6 +38,9 @@ def ensure_demo_connection() -> None:
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     db.connect()
+    interrupted = store.reconcile_interrupted_runs()
+    if interrupted:
+        log.warning("marked %d interrupted scan run(s) as error", interrupted)
     auth.bootstrap_from_env()
     ensure_demo_connection()
     scheduler.start()
