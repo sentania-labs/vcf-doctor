@@ -18,7 +18,14 @@ Updated by the lead agent after every integration.
   READ ONLY / MODIFIES ENVIRONMENT badges, Changes, Capture Snapshot,
   Settings save, Add vCenter test (refused host).
 
+- Shared operator password with session cookie; first-run setup page;
+  change password in Settings; VCF_DOCTOR_AUTH=off escape hatch. Seen
+  working in a browser walk with auth on.
+- Image runs as uid 10001; CI smoke test covers auth, traversal, inventory.
+
 ## In progress
+- PR #4 open: auth, PR #3 review fixes (v0.1.2 lacks the traversal fix; do
+  not expose it), image hardening, frontend review fixes.
 - Live vCenter verification (Phase 3 step 2) is owed; no vCenter run yet.
 - Live Anthropic call with a real key not yet exercised (mock verified).
 
