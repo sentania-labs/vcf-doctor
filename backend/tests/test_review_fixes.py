@@ -75,10 +75,35 @@ def test_demo_flow_produces_known_findings_and_changes(tmp_path, monkeypatch):
         c.post("/api/scan", json={"connection_id": a})
         findings = c.get(f"/api/findings?connection_id={a}").json()
         checks = {f["check_id"] for f in findings}
-        assert {"HOST_DISCONNECTED", "NETWORK_REMOVED", "DATASTORE_HIGH_USAGE"} <= checks
+        assert {
+            "HOST_DISCONNECTED",
+            "NETWORK_REMOVED",
+            "DATASTORE_HIGH_USAGE",
+            "HOST_MAINTENANCE_MODE",
+            "VM_POWERED_OFF",
+            "VM_SNAPSHOT_STALE",
+        } <= checks
         assert "HOST_COUNT_LOW" not in checks
+        # esx04 drops to one NTP server, which is still configured.
+        assert "HOST_NTP_NOT_CONFIGURED" not in checks
+        assert not {"CLUSTER_HA_DISABLED", "CLUSTER_DRS_DISABLED", "HOST_VERSION_MISMATCH"} & checks
+        # VM_SNAPSHOT_STALE fires on both outliers: backup-proxy01 (4 snapshots)
+        # and monitoring01 (one snapshot 21 days old at BASE_TIME).
+        stale = {
+            f["resource_id"].rsplit(":", 1)[-1]
+            for f in findings
+            if f["check_id"] == "VM_SNAPSHOT_STALE"
+        }
+        assert stale == {"backup-proxy01", "monitoring01"}
         changes = c.get(f"/api/changes?connection_id={a}").json()
-        assert len(changes) == 8
+        # One Change per changed resource: 14 modified (esx02, esx03, esx04,
+        # esx07, pg-vmotion, wld01-edge, vsan01, app01, app02, db01, web02,
+        # web03, dmz-lb01, dmz-jump01) plus the removed DMZ segment.
+        assert len(changes) == 15
+        by_sig = {}
+        for ch in changes:
+            by_sig[ch["significance"]] = by_sig.get(ch["significance"], 0) + 1
+        assert by_sig == {"high": 4, "medium": 9, "low": 2}
         assert any(
             ch["resource_name"].startswith("esx03") and ch["significance"] == "high"
             for ch in changes

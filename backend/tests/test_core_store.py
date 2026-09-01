@@ -12,8 +12,13 @@ def _conn():
 
 
 def _res(i: int) -> Resource:
-    return Resource(id=f"host:vc:esx{i}", type="host", name=f"esx{i}", source="vcenter:vc",
-                    properties={"connectionState": "connected"})
+    return Resource(
+        id=f"host:vc:esx{i}",
+        type="host",
+        name=f"esx{i}",
+        source="vcenter:vc",
+        properties={"connectionState": "connected"},
+    )
 
 
 def test_snapshot_persistence_roundtrip(tmp_path):

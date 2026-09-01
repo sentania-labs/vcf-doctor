@@ -2,6 +2,7 @@
 
 import socket
 import ssl
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -23,7 +24,7 @@ from app.collectors.vsphere.client import (
     split_host_port,
     to_plain,
 )
-from app.collectors.vsphere.normalize import RawInventory, RawObject
+from app.collectors.vsphere.normalize import PROPERTY_SPECS, RawInventory, RawObject
 
 SMART = "app.collectors.vsphere.client.pyvim_connect.SmartConnect"
 DISC = "app.collectors.vsphere.client.pyvim_connect.Disconnect"
@@ -61,6 +62,248 @@ def test_to_plain_converts_morefs_lists_and_enums():
     assert to_plain(274877906944) == 274877906944
     assert to_plain(True) is True
     assert to_plain(None) is None
+
+
+def test_to_plain_datetime_is_iso():
+    t = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
+    assert to_plain(t) == "2026-08-01T12:00:00+00:00"
+
+
+def test_to_plain_flattens_host_network_objects():
+    vnic0 = vim.host.VirtualNic(
+        device="vmk0",
+        portgroup="Management Network",
+        spec=vim.host.VirtualNic.Specification(
+            ip=vim.host.IpConfig(ipAddress="10.0.0.11"), mtu=1500
+        ),
+    )
+    vnic1 = vim.host.VirtualNic(
+        device="vmk1",
+        portgroup="",
+        spec=vim.host.VirtualNic.Specification(
+            ip=vim.host.IpConfig(ipAddress="10.0.1.11"),
+            mtu=9000,
+            distributedVirtualPort=vim.dvs.PortConnection(
+                switchUuid="x", portgroupKey="dvportgroup-20"
+            ),
+        ),
+    )
+    assert to_plain([vnic0, vnic1]) == [
+        {
+            "device": "vmk0",
+            "ip": "10.0.0.11",
+            "mtu": 1500,
+            "portgroup": "Management Network",
+            "portgroupKey": None,
+        },
+        {
+            "device": "vmk1",
+            "ip": "10.0.1.11",
+            "mtu": 9000,
+            "portgroup": None,
+            "portgroupKey": "dvportgroup-20",
+        },
+    ]
+    up = vim.host.PhysicalNic(
+        device="vmnic0",
+        mac="aa:bb",
+        linkSpeed=vim.host.PhysicalNic.LinkSpeedDuplex(speedMb=25000, duplex=True),
+    )
+    down = vim.host.PhysicalNic(device="vmnic1", mac="aa:bc")
+    assert to_plain([up, down]) == [
+        {"device": "vmnic0", "mac": "aa:bb", "linkSpeedMb": 25000},
+        {"device": "vmnic1", "mac": "aa:bc", "linkSpeedMb": None},
+    ]
+    assert to_plain([vim.host.VirtualSwitch(name="vSwitch0")]) == [{"name": "vSwitch0"}]
+
+
+def test_to_plain_flattens_vm_devices_and_drops_the_rest():
+    dev = vim.vm.device
+    disk = dev.VirtualDisk(
+        key=2000,
+        deviceInfo=vim.Description(label="Hard disk 1", summary=""),
+        capacityInKB=1048576,
+        capacityInBytes=1073741824,
+        backing=dev.VirtualDisk.FlatVer2BackingInfo(
+            fileName="[ds] a.vmdk",
+            datastore=vim.Datastore("datastore-15"),
+            thinProvisioned=True,
+            diskMode="persistent",
+        ),
+    )
+    # capacityInBytes missing: fall back to KB * 1024
+    disk_kb = dev.VirtualDisk(
+        key=2001,
+        deviceInfo=vim.Description(label="Hard disk 2", summary=""),
+        capacityInKB=2048,
+        backing=dev.VirtualDisk.FlatVer2BackingInfo(
+            fileName="[ds] b.vmdk", datastore=vim.Datastore("datastore-15"), diskMode="persistent"
+        ),
+    )
+    nic_dvs = dev.VirtualVmxnet3(
+        key=4000,
+        deviceInfo=vim.Description(label="Network adapter 1", summary=""),
+        macAddress="00:50:56:aa:bb:cc",
+        backing=dev.VirtualEthernetCard.DistributedVirtualPortBackingInfo(
+            port=vim.dvs.PortConnection(switchUuid="x", portgroupKey="dvportgroup-20")
+        ),
+        connectable=dev.VirtualDevice.ConnectInfo(
+            connected=True, startConnected=True, allowGuestControl=True
+        ),
+    )
+    nic_std = dev.VirtualE1000(
+        key=4001,
+        deviceInfo=vim.Description(label="Network adapter 2", summary=""),
+        macAddress="00:50:56:aa:bb:cd",
+        backing=dev.VirtualEthernetCard.NetworkBackingInfo(
+            deviceName="VM Network", network=vim.Network("network-30")
+        ),
+        connectable=dev.VirtualDevice.ConnectInfo(
+            connected=False, startConnected=True, allowGuestControl=True
+        ),
+    )
+    controller = dev.VirtualLsiLogicController(key=1000, busNumber=0)
+    out = to_plain([controller, disk, disk_kb, nic_dvs, nic_std])
+    assert out == [
+        {
+            "kind": "disk",
+            "label": "Hard disk 1",
+            "capacityBytes": 1073741824,
+            "datastore": "datastore-15",
+            "thin": True,
+        },
+        {
+            "kind": "disk",
+            "label": "Hard disk 2",
+            "capacityBytes": 2097152,
+            "datastore": "datastore-15",
+            "thin": None,
+        },
+        {
+            "kind": "nic",
+            "label": "Network adapter 1",
+            "mac": "00:50:56:aa:bb:cc",
+            "network": None,
+            "portgroupKey": "dvportgroup-20",
+            "opaqueNetworkId": None,
+            "connected": True,
+        },
+        {
+            "kind": "nic",
+            "label": "Network adapter 2",
+            "mac": "00:50:56:aa:bb:cd",
+            "network": "network-30",
+            "portgroupKey": None,
+            "opaqueNetworkId": None,
+            "connected": False,
+        },
+    ]
+
+
+def test_to_plain_flattens_snapshot_tree_recursively():
+    t1 = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
+    t2 = datetime(2026, 8, 20, 12, 0, tzinfo=UTC)
+    child = vim.vm.SnapshotTree(
+        snapshot=vim.vm.Snapshot("snapshot-2"),
+        vm=vim.VirtualMachine("vm-101"),
+        name="after",
+        createTime=t2,
+        state="poweredOn",
+        quiesced=False,
+    )
+    root = vim.vm.SnapshotTree(
+        snapshot=vim.vm.Snapshot("snapshot-1"),
+        vm=vim.VirtualMachine("vm-101"),
+        name="before-patch",
+        createTime=t1,
+        state="poweredOn",
+        quiesced=False,
+        childSnapshotList=[child],
+    )
+    assert to_plain([root]) == [
+        {
+            "name": "before-patch",
+            "createTime": "2026-08-01T12:00:00+00:00",
+            "children": [
+                {"name": "after", "createTime": "2026-08-20T12:00:00+00:00", "children": []}
+            ],
+        }
+    ]
+
+
+def test_to_plain_flattens_dvportgroup_vlan_specs():
+    vmw = vim.dvs.VmwareDistributedVirtualSwitch
+    trunk = vmw.VmwarePortConfigPolicy(
+        vlan=vmw.TrunkVlanSpec(
+            vlanId=[vim.NumericRange(start=100, end=110), vim.NumericRange(start=5, end=5)]
+        )
+    )
+    assert to_plain(trunk) == {"vlan": {"kind": "trunk", "ranges": [[100, 110], [5, 5]]}}
+    assert to_plain(vmw.VmwarePortConfigPolicy(vlan=vmw.VlanIdSpec(vlanId=42))) == {
+        "vlan": {"kind": "id", "vlanId": 42}
+    }
+    assert to_plain(vmw.VmwarePortConfigPolicy(vlan=vmw.PvlanSpec(pvlanId=200))) == {
+        "vlan": {"kind": "pvlan", "pvlanId": 200}
+    }
+    # a non-VMware port setting has no vlan at all
+    assert to_plain(vim.dvs.DistributedVirtualPort.Setting()) == {"vlan": None}
+
+
+def test_to_plain_flattens_datastore_cluster_and_opaque_summaries():
+    mount = vim.Datastore.HostMount(
+        key=vim.HostSystem("host-12"),
+        mountInfo=vim.host.MountInfo(mounted=True, accessible=True),
+    )
+    assert to_plain([mount]) == [{"host": "host-12", "mounted": True, "accessible": True}]
+    vmfs = vim.host.VmfsDatastoreInfo(
+        name="ds",
+        url="ds:///",
+        vmfs=vim.host.VmfsVolume(
+            version="6.82",
+            name="ds",
+            uuid="u",
+            blockSizeMb=1,
+            maxBlocks=1,
+            majorVersion=6,
+            capacity=1,
+            extent=[vim.host.ScsiDisk.Partition(diskName="naa.1", partition=1)],
+            vmfsUpgradable=False,
+            ssd=True,
+        ),
+    )
+    assert to_plain(vmfs) == {"vmfsVersion": "6.82"}
+    assert to_plain(vim.host.NasDatastoreInfo(name="nfs", url="ds:///")) == {"vmfsVersion": None}
+    summary = vim.ClusterComputeResource.Summary(
+        currentEVCModeKey="intel-icelake",
+        totalCpu=96000,
+        totalMemory=2**40,
+        numHosts=4,
+        numCpuCores=1,
+        numCpuThreads=1,
+        effectiveCpu=1,
+        effectiveMemory=1,
+        numEffectiveHosts=1,
+        overallStatus="green",
+    )
+    assert to_plain(summary) == {
+        "currentEVCModeKey": "intel-icelake",
+        "totalCpu": 96000,
+        "totalMemory": 2**40,
+        "numHosts": 4,
+    }
+    opaque = vim.OpaqueNetwork.Summary(
+        opaqueNetworkId="seg-1",
+        opaqueNetworkType="nsx.LogicalSwitch",
+        name="nsx-seg",
+        accessible=True,
+    )
+    assert to_plain(opaque) == {
+        "opaqueNetworkType": "nsx.LogicalSwitch",
+        "opaqueNetworkId": "seg-1",
+    }
+    assert to_plain([vim.cluster.AffinityRuleSpec(name="r1", enabled=True, key=1)]) == [
+        {"name": "r1", "enabled": True}
+    ]
 
 
 @pytest.mark.parametrize(
@@ -228,4 +471,5 @@ def test_session_retrieve_merges_base_and_subclass_views():
     }
     assert by["dvportgroup-1"].kind == "DistributedVirtualPortgroup"
     # one container view per property spec type, each destroyed
-    assert content.viewManager.CreateContainerView.call_count == 8
+    assert content.viewManager.CreateContainerView.call_count == len(PROPERTY_SPECS)
+    assert content.viewManager.CreateContainerView.call_count == 12

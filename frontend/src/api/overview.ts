@@ -1,14 +1,17 @@
-import type { Overview } from '@/types'
+import type { Overview, Significance } from '@/types'
 import { apiGet } from './client'
 import { qs } from '@/lib/format'
-import { USE_MOCKS, delay, mockEstate } from './mocks'
+import { USE_MOCKS, delay, mockEstate, mockState } from './mocks'
+import { SIGNIFICANCE_RANK } from './changes'
 
-export function getOverview(connectionId?: string | null): Promise<Overview> {
+// minSignificance filters recent_changes; omitted means the backend applies the Settings default.
+export function getOverview(connectionId?: string | null, minSignificance?: Significance): Promise<Overview> {
   if (USE_MOCKS) {
     const estates = mockEstate(connectionId)
     const resources = estates.flatMap(e => e.resources)
     const findings = estates.flatMap(e => e.findings)
-    const changes = estates.flatMap(e => e.changes)
+    const floor = SIGNIFICANCE_RANK[minSignificance ?? mockState.settings.changes_min_significance ?? 'low']
+    const changes = estates.flatMap(e => e.changes).filter(c => SIGNIFICANCE_RANK[c.significance] >= floor)
     const hosts = resources.filter(r => r.type === 'host')
     const vms = resources.filter(r => r.type === 'vm')
     const ds = resources.filter(r => r.type === 'datastore')
@@ -34,5 +37,5 @@ export function getOverview(connectionId?: string | null): Promise<Overview> {
       recent_changes: changes.slice(0, 6),
     })
   }
-  return apiGet<Overview>(`/overview${qs({ connection_id: connectionId })}`)
+  return apiGet<Overview>(`/overview${qs({ connection_id: connectionId, min_significance: minSignificance })}`)
 }

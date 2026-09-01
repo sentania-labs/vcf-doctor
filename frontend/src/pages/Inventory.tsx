@@ -6,7 +6,8 @@ import { useAsync } from '@/hooks/useAsync'
 import { useAppState } from '@/state/AppState'
 import { Badge, Card, EmptyState, ErrorState, Input, PageHeader, Skeleton } from '@/components/ui'
 import { ResourceIcon, ResourceTypeLabel } from '@/components/domain'
-import { formatValue, humanKey } from '@/lib/format'
+import { PropertyGroups } from '@/components/properties'
+import { humanKey } from '@/lib/format'
 import { cn } from '@/lib/cn'
 
 const TREE_TYPES = new Set(['vcenter', 'datacenter', 'cluster', 'host', 'vm'])
@@ -71,7 +72,7 @@ export default function InventoryPage() {
                 ))}
               </div>
             </div>
-            <Card className="xl:sticky xl:top-0">
+            <Card className="xl:sticky xl:top-0 xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto">
               {selected ? <Properties r={selected} byId={byId} onSelect={setSelected} /> : <EmptyState title="Select a resource" body="Click any item in the tree to see its collected properties and relationships." />}
             </Card>
           </div>
@@ -125,7 +126,6 @@ function LeafRow({ r, selected, onSelect }: { r: Resource; selected: Resource | 
 
 function Properties({ r, byId, onSelect }: { r: Resource; byId: Map<string, Resource>; onSelect: (r: Resource) => void }) {
   const parent = r.parent_id ? byId.get(r.parent_id) : null
-  const entries = Object.entries(r.properties)
   return (
     <div>
       <div className="px-5 pt-5 pb-4 border-b border-border">
@@ -135,17 +135,7 @@ function Properties({ r, byId, onSelect }: { r: Resource; byId: Map<string, Reso
         {parent ? <p className="text-sm text-muted mt-2">in <button onClick={() => onSelect(parent)} className="text-accent hover:underline">{parent.name}</button></p> : null}
       </div>
       <div className="px-5 py-4">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-faint mb-2">Properties</h3>
-        {entries.length === 0 ? <p className="text-sm text-faint">None collected.</p> : (
-          <dl className="divide-y divide-border">
-            {entries.map(([k, v]) => (
-              <div key={k} className="grid grid-cols-[140px_1fr] gap-3 py-2">
-                <dt className="text-[13px] text-muted truncate" title={k}>{humanKey(k)}</dt>
-                <dd className="text-[13px] font-mono break-all">{formatValue(v)}</dd>
-              </div>
-            ))}
-          </dl>
-        )}
+        <PropertyGroups properties={r.properties} />
         {r.relationships.length > 0 ? (
           <>
             <h3 className="text-xs font-semibold uppercase tracking-wider text-faint mt-5 mb-2">Relationships</h3>

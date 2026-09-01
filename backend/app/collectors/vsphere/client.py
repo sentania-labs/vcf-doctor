@@ -12,6 +12,7 @@ from __future__ import annotations
 import socket
 import ssl
 from collections.abc import Iterable
+from datetime import datetime
 from typing import Any
 
 from pyVim import connect as pyvim_connect
@@ -50,6 +51,10 @@ _VIM_TYPES: dict[str, type] = {
     "VirtualMachine": vim.VirtualMachine,
     "Datastore": vim.Datastore,
     "Network": vim.Network,
+    "DistributedVirtualPortgroup": vim.dvs.DistributedVirtualPortgroup,
+    "OpaqueNetwork": vim.OpaqueNetwork,
+    "DistributedVirtualSwitch": vim.DistributedVirtualSwitch,
+    "ResourcePool": vim.ResourcePool,
 }
 
 
@@ -113,20 +118,165 @@ def classify_exception(exc: BaseException, host: str) -> VSphereError:
     return VSphereError(f"unexpected error talking to {host}: {type(exc).__name__}: {exc}")
 
 
+def _iso(value: Any) -> str | None:
+    if value is None:
+        return None
+    return value.isoformat() if isinstance(value, datetime) else str(value)
+
+
+def _moid(value: Any) -> str | None:
+    return None if value is None else str(getattr(value, "_moId", value))
+
+
+def _flatten_vnic(v: Any) -> dict[str, Any]:
+    spec = getattr(v, "spec", None)
+    ip = getattr(spec, "ip", None)
+    dvport = getattr(spec, "distributedVirtualPort", None)
+    return {
+        "device": to_plain(getattr(v, "device", None)),
+        "ip": to_plain(getattr(ip, "ipAddress", None)),
+        "mtu": to_plain(getattr(spec, "mtu", None)),
+        "portgroup": to_plain(getattr(v, "portgroup", None)) or None,
+        "portgroupKey": to_plain(getattr(dvport, "portgroupKey", None)),
+    }
+
+
+def _flatten_pnic(p: Any) -> dict[str, Any]:
+    link = getattr(p, "linkSpeed", None)
+    return {
+        "device": to_plain(getattr(p, "device", None)),
+        "mac": to_plain(getattr(p, "mac", None)),
+        "linkSpeedMb": to_plain(getattr(link, "speedMb", None)),
+    }
+
+
+def _flatten_device(d: Any) -> dict[str, Any] | None:
+    """VirtualDisk and VirtualEthernetCard subclasses only; everything else
+    (controllers, CD-ROMs, video cards) is dropped."""
+    info = getattr(d, "deviceInfo", None)
+    backing = getattr(d, "backing", None)
+    if isinstance(d, vim.vm.device.VirtualDisk):
+        cap = getattr(d, "capacityInBytes", None)
+        if cap is None and getattr(d, "capacityInKB", None) is not None:
+            cap = int(d.capacityInKB) * 1024
+        return {
+            "kind": "disk",
+            "label": to_plain(getattr(info, "label", None)),
+            "capacityBytes": None if cap is None else int(cap),
+            "datastore": _moid(getattr(backing, "datastore", None)),
+            "thin": to_plain(getattr(backing, "thinProvisioned", None)),
+        }
+    if isinstance(d, vim.vm.device.VirtualEthernetCard):
+        port = getattr(backing, "port", None)
+        conn = getattr(d, "connectable", None)
+        return {
+            "kind": "nic",
+            "label": to_plain(getattr(info, "label", None)),
+            "mac": to_plain(getattr(d, "macAddress", None)),
+            "network": _moid(getattr(backing, "network", None)),
+            "portgroupKey": to_plain(getattr(port, "portgroupKey", None)),
+            "opaqueNetworkId": to_plain(getattr(backing, "opaqueNetworkId", None)),
+            "connected": to_plain(getattr(conn, "connected", None)),
+        }
+    return None
+
+
+def _flatten_snapshot(node: Any) -> dict[str, Any]:
+    return {
+        "name": to_plain(getattr(node, "name", None)),
+        "createTime": _iso(getattr(node, "createTime", None)),
+        "children": [
+            _flatten_snapshot(c) for c in (getattr(node, "childSnapshotList", None) or [])
+        ],
+    }
+
+
+def _flatten_vlan(spec: Any) -> dict[str, Any] | None:
+    vmw = vim.dvs.VmwareDistributedVirtualSwitch
+    if isinstance(spec, vmw.TrunkVlanSpec):
+        ranges = [
+            [int(r.start), int(r.end)]
+            for r in (spec.vlanId or [])
+            if getattr(r, "start", None) is not None
+        ]
+        return {"kind": "trunk", "ranges": ranges}
+    if isinstance(spec, vmw.PvlanSpec):
+        return {"kind": "pvlan", "pvlanId": to_plain(spec.pvlanId)}
+    if isinstance(spec, vmw.VlanIdSpec):
+        return {"kind": "id", "vlanId": to_plain(spec.vlanId)}
+    return None
+
+
+def _flatten_data_object(value: Any) -> Any:
+    """Targeted flatteners for the DataObjects we request whole or in lists.
+    Returns the sentinel `_SKIP` for list members that carry nothing we need."""
+    if isinstance(value, vim.host.VirtualNic):
+        return _flatten_vnic(value)
+    if isinstance(value, vim.host.PhysicalNic):
+        return _flatten_pnic(value)
+    if isinstance(value, vim.host.VirtualSwitch):
+        return {"name": to_plain(value.name)}
+    if isinstance(value, vim.vm.device.VirtualDevice):
+        flat = _flatten_device(value)
+        return _SKIP if flat is None else flat
+    if isinstance(value, vim.vm.SnapshotTree):
+        return _flatten_snapshot(value)
+    if isinstance(value, vim.Datastore.HostMount):
+        mi = getattr(value, "mountInfo", None)
+        return {
+            "host": _moid(getattr(value, "key", None)),
+            "mounted": to_plain(getattr(mi, "mounted", None)),
+            "accessible": to_plain(getattr(mi, "accessible", None)),
+        }
+    if isinstance(value, vim.Datastore.Info):
+        vmfs = (
+            getattr(value, "vmfs", None) if isinstance(value, vim.host.VmfsDatastoreInfo) else None
+        )
+        return {"vmfsVersion": to_plain(getattr(vmfs, "version", None))}
+    if isinstance(value, vim.ComputeResource.Summary):
+        return {
+            "currentEVCModeKey": to_plain(getattr(value, "currentEVCModeKey", None)),
+            "totalCpu": to_plain(getattr(value, "totalCpu", None)),
+            "totalMemory": to_plain(getattr(value, "totalMemory", None)),
+            "numHosts": to_plain(getattr(value, "numHosts", None)),
+        }
+    if isinstance(value, vim.cluster.RuleInfo):
+        return {"name": to_plain(value.name), "enabled": to_plain(value.enabled)}
+    if isinstance(value, vim.dvs.DistributedVirtualPort.Setting):
+        return {"vlan": _flatten_vlan(getattr(value, "vlan", None))}
+    if isinstance(value, vim.Network.Summary):
+        return {
+            "opaqueNetworkType": to_plain(getattr(value, "opaqueNetworkType", None)),
+            "opaqueNetworkId": to_plain(getattr(value, "opaqueNetworkId", None)),
+        }
+    return None
+
+
+_SKIP = object()
+
+
 def to_plain(value: Any) -> Any:
     """Collapse a pyVmomi property value to JSON-friendly Python.
 
     Managed object references become their moref id string; arrays become
-    lists; enums (str subclasses) become plain str; scalars pass through.
+    lists; enums (str subclasses) become plain str; datetimes become ISO
+    strings; the DataObjects listed in normalize.py become small dicts;
+    scalars pass through.
     """
     if value is None or isinstance(value, bool | int | float):
         return value
     if isinstance(value, str):
         return str(value)
+    if isinstance(value, datetime):
+        return value.isoformat()
     if hasattr(value, "_moId"):
         return str(value._moId)
     if isinstance(value, list | tuple):
-        return [to_plain(v) for v in value]
+        out = [to_plain(v) for v in value]
+        return [v for v in out if v is not _SKIP]
+    flat = _flatten_data_object(value)
+    if flat is not None:
+        return flat
     if hasattr(value, "_wsdlName"):
         # A DataObject we did not expect; keep something readable.
         return str(value)
@@ -198,6 +348,8 @@ class VSphereSession:
             "build": getattr(about, "build", None),
             "instanceUuid": getattr(about, "instanceUuid", None),
             "apiType": getattr(about, "apiType", None),
+            "apiVersion": getattr(about, "apiVersion", None),
+            "osType": getattr(about, "osType", None),
         }
 
     # ---- bulk retrieval ---------------------------------------------------------
@@ -258,4 +410,6 @@ class VSphereSession:
             build=about["build"],
             instance_uuid=about["instanceUuid"],
             objects=list(merged.values()),
+            api_version=about.get("apiVersion"),
+            os_type=about.get("osType"),
         )

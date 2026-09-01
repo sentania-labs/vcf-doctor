@@ -66,8 +66,9 @@ export interface Overview {
   recent_changes: Change[]
 }
 export interface ConnectionTestResult { ok: boolean; message: string; version?: string | null; build?: string | null }
-export interface Settings { retention: number; assistant: AssistantSettings }
-export interface SettingsUpdate { retention: number; assistant: Partial<AssistantSettings> & { api_key?: string } }
+// changes_min_significance: lowest significance the Changes page and Overview show by default (low = everything).
+export interface Settings { retention: number; assistant: AssistantSettings; changes_min_significance?: Significance }
+export interface SettingsUpdate { retention: number; assistant: Partial<AssistantSettings> & { api_key?: string }; changes_min_significance?: Significance }
 export interface AssistantEvidenceCount { findings: number; changes: number; resources: number }
 export type AssistantStreamEvent =
   | { type: 'delta'; text: string }

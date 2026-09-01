@@ -25,7 +25,7 @@ function buildWorkloadDomain(): MockEstate {
 
   const vc = push({
     id: id('vcenter', 'vc01'), type: 'vcenter', name: 'vc-wld01.wld01.vcf.example', source: src, parent_id: null,
-    properties: { version: '9.0.1', build: '24805960', apiType: 'VirtualCenter', instanceUuid: 'c9b2c5d0-2f0e-4a4e-9f8f-1a2b3c4d5e6f' },
+    properties: { name: 'vc-wld01.wld01.vcf.example', version: '9.0.1', build: '24805960', apiVersion: '9.0.1.0', instanceUuid: 'c9b2c5d0-2f0e-4a4e-9f8f-1a2b3c4d5e6f', osType: 'linux-x64' },
     relationships: [],
   })
   const dc = push({
@@ -37,7 +37,11 @@ function buildWorkloadDomain(): MockEstate {
     { name: 'wld01-cl02', ha: false, drs: 'manual', vsan: true },
   ].map(c => push({
     id: id('cluster', c.name), type: 'cluster', name: c.name, source: src, parent_id: dc.id,
-    properties: { haEnabled: c.ha, drsEnabled: true, drsBehavior: c.drs, vsanEnabled: c.vsan, numHosts: 3, evcMode: 'intel-sapphirerapids' },
+    properties: {
+      hostCount: 3, hosts: ['esx01', 'esx02', 'esx03'].map((h, i) => id('host', c.name === 'wld01-cl01' ? h : `esx0${i + 4}`)),
+      drsEnabled: true, drsAutomationLevel: c.drs, haEnabled: c.ha, haAdmissionControl: c.ha, evcMode: 'intel-sapphirerapids', vsanEnabled: c.vsan,
+      ruleCount: c.name === 'wld01-cl01' ? 2 : 0, totalCpuMhz: 3 * 64 * 2400, totalMemoryBytes: 3 * 1024 * 1024 ** 3, numVms: 15, overallStatus: c.ha ? 'green' : 'yellow',
+    },
     relationships: [],
   }))
 
@@ -49,13 +53,32 @@ function buildWorkloadDomain(): MockEstate {
     { n: 'esx05', cl: 1, state: 'connected', cpu: 71, mem: 84 },
     { n: 'esx06', cl: 1, state: 'connected', cpu: 33, mem: 49 },
   ]
-  const hosts = hostSpecs.map(h => push({
+  const hosts = hostSpecs.map((h, hi) => push({
     id: id('host', h.n), type: 'host', name: `${h.n}.wld01.vcf.example`, source: src, parent_id: clusters[h.cl].id,
     properties: {
       connectionState: h.state, powerState: h.state === 'disconnected' ? 'unknown' : 'poweredOn',
-      maintenanceMode: false, version: '9.0.1', build: '24805960', model: 'Dell PowerEdge R760',
-      cpuCores: 64, memoryGB: 1024, cpuUsagePct: h.cpu, memUsagePct: h.mem, uptimeDays: h.state === 'disconnected' ? 0 : 41,
-      ntpSynced: h.n !== 'esx05', vmkernelNics: ['vmk0', 'vmk1', 'vmk2', 'vmk10'],
+      maintenanceMode: false, cluster: clusters[h.cl].name, datacenter: dc.name,
+      version: h.n === 'esx06' ? '9.0.0' : '9.0.1', build: h.n === 'esx06' ? '24755230' : '24805960',
+      model: 'PowerEdge R760', vendor: 'Dell Inc.', biosVersion: '2.4.4',
+      cpuMhz: 2400, numCpuCores: 64, memoryBytes: 1024 * 1024 ** 3,
+      uptimeSeconds: h.state === 'disconnected' ? null : 41 * 86400 + 3 * 3600 + 12 * 60,
+      bootTime: h.state === 'disconnected' ? null : new Date(now - (41 * 86400 + 3 * 3600 + 12 * 60) * 1000).toISOString(),
+      lockdownMode: h.n === 'esx01' ? 'lockdownNormal' : 'lockdownDisabled',
+      ntpServers: h.n === 'esx05' ? [] : ['10.16.0.10', '10.16.0.11'], dnsServers: ['10.16.0.2', '10.16.0.3'],
+      vmkernelAdapters: [
+        { device: 'vmk0', ip: `10.16.11.${20 + hi}`, mtu: 1500, portgroup: 'wld01-mgmt-vlan1611' },
+        { device: 'vmk1', ip: `10.16.12.${20 + hi}`, mtu: h.n === 'esx02' ? 9000 : 1500, portgroup: 'wld01-vmotion-vlan1612' },
+        { device: 'vmk2', ip: `10.16.13.${20 + hi}`, mtu: 9000, portgroup: 'wld01-vsan-vlan1613' },
+        ...(h.n === 'esx02' ? [{ device: 'vmk3', ip: `10.16.14.${20 + hi}`, mtu: 9000, portgroup: 'wld01-tep-vlan1614' }] : []),
+      ],
+      physicalNics: [
+        { device: 'vmnic0', mac: `3c:ec:ef:1a:0${hi}:10`, linkSpeedMb: 25000 },
+        { device: 'vmnic1', mac: `3c:ec:ef:1a:0${hi}:11`, linkSpeedMb: 25000 },
+      ],
+      standardSwitches: [], numVms: h.state === 'disconnected' ? 0 : 5,
+      datastores: [h.cl === 0 ? 'wld01-cl01-vsan' : 'wld01-cl02-vsan', 'nfs-backup-01'],
+      overallStatus: h.state === 'disconnected' ? 'red' : h.n === 'esx05' ? 'yellow' : 'green',
+      cpuUsagePct: h.cpu, memUsagePct: h.mem,
     },
     relationships: [{ kind: 'member_of', target_id: clusters[h.cl].id }],
   }))
@@ -67,8 +90,9 @@ function buildWorkloadDomain(): MockEstate {
   ].map(d => push({
     id: id('datastore', d.n), type: 'datastore', name: d.n, source: src, parent_id: dc.id,
     properties: {
-      type: d.type, capacityGB: d.cap, freeGB: d.free, usedPct: Math.round(((d.cap - d.free) / d.cap) * 100),
-      accessible: true, maintenanceMode: 'normal', hostCount: d.cl === null ? 6 : 3,
+      type: d.type, capacity: d.cap * 1024 ** 3, freeSpace: d.free * 1024 ** 3, capacityGB: d.cap, freeGB: d.free, usedPct: Math.round(((d.cap - d.free) / d.cap) * 100),
+      accessible: true, maintenanceMode: 'normal', multipleHostAccess: true, vmfsVersion: null,
+      url: `ds:///vmfs/volumes/${d.n}/`, hosts: hosts.filter(h => d.cl === null || h.parent_id === clusters[d.cl].id).map(h => h.name), overallStatus: d.free / d.cap < 0.15 ? 'yellow' : 'green',
     },
     relationships: hosts.filter(h => d.cl === null || h.parent_id === clusters[d.cl].id).map(h => ({ kind: 'mounted_on', target_id: h.id })),
   }))
@@ -82,7 +106,7 @@ function buildWorkloadDomain(): MockEstate {
     { n: 'seg-db-tier', kind: 'NsxSegment', vlan: null },
   ].map(n => push({
     id: id('network', n.n), type: 'network', name: n.n, source: src, parent_id: dc.id,
-    properties: { kind: n.kind, vlanId: n.vlan, switch: n.kind === 'NsxSegment' ? 'wld01-nvds' : 'wld01-vds01', accessible: true, transportZone: n.kind === 'NsxSegment' ? 'tz-overlay-01' : null },
+    properties: { type: n.kind === 'NsxSegment' ? 'opaque' : 'dvportgroup', kind: n.kind, vlan: n.vlan, numPorts: n.kind === 'NsxSegment' ? null : 128, switch: n.kind === 'NsxSegment' ? 'wld01-nvds' : 'wld01-vds01', exists: true, transportZone: n.kind === 'NsxSegment' ? 'tz-overlay-01' : null },
     relationships: [],
   }))
 
@@ -100,10 +124,22 @@ function buildWorkloadDomain(): MockEstate {
     return push({
       id: id('vm', n), type: 'vm', name: n, source: src, parent_id: host.id,
       properties: {
-        powerState: powered ? 'poweredOn' : 'poweredOff', guestOS: n.includes('win') ? 'Windows 11 (64-bit)' : 'Ubuntu Linux (64-bit)',
-        vcpus: n.startsWith('db') ? 8 : 4, memoryGB: n.startsWith('db') ? 32 : 8, toolsStatus: powered ? (n === 'log02' ? 'toolsNotRunning' : 'toolsOk') : 'toolsNotRunning',
-        snapshots: n === 'gitlab01' ? 3 : 0, oldestSnapshotDays: n === 'gitlab01' ? 19 : null, host: host.name, datastore: ds.name, network: seg.name,
-        ipAddress: powered ? `10.16.${20 + hostIdx}.${10 + i}` : null,
+        powerState: powered ? 'poweredOn' : 'poweredOff', connectionState: 'connected',
+        host: host.name, cluster: clusters[host.parent_id === clusters[0].id ? 0 : 1].name, resourcePool: 'Resources', folder: n.startsWith('test') ? 'sandbox' : 'workloads',
+        guestFullName: n.includes('win') ? 'Microsoft Windows 11 (64-bit)' : n.includes('rhel') ? 'Red Hat Enterprise Linux 9 (64-bit)' : 'Ubuntu Linux (64-bit)',
+        guestHostname: powered ? `${n}.wld01.vcf.example` : null, guestIp: powered ? `10.16.${20 + hostIdx}.${10 + i}` : null, guestState: powered ? 'running' : 'notRunning',
+        toolsStatus: powered ? (n === 'log02' ? 'toolsNotRunning' : 'toolsOk') : 'toolsNotRunning', toolsVersion: powered && n !== 'log02' ? '12.4.5' : null,
+        numCpu: n.startsWith('db') ? 8 : 4, memoryMB: n.startsWith('db') ? 32768 : 8192, hardwareVersion: 'vmx-21', template: false,
+        cpuReservationMhz: n.startsWith('db') ? 4000 : 0, memReservationMB: n.startsWith('db') ? 32768 : 0, annotation: n === 'gitlab01' ? 'Snapshots taken before 17.x upgrade' : null,
+        snapshotCount: n === 'gitlab01' ? 3 : 0, oldestSnapshotTime: n === 'gitlab01' ? new Date(now - 19 * 86400_000).toISOString() : null,
+        disks: [
+          { label: 'Hard disk 1', capacityBytes: 64 * 1024 ** 3, datastore: ds.name, thin: true },
+          ...(n.startsWith('db') ? [{ label: 'Hard disk 2', capacityBytes: 512 * 1024 ** 3, datastore: ds.name, thin: false }, { label: 'Hard disk 3', capacityBytes: 256 * 1024 ** 3, datastore: ds.name, thin: false }] : []),
+        ],
+        nics: [{ label: 'Network adapter 1', mac: `00:50:56:9a:${(10 + i).toString(16).padStart(2, '0')}:01`, network: seg.name, connected: powered }],
+        networks: [seg.name], datastores: [ds.name],
+        storageCommittedBytes: (n.startsWith('db') ? 700 : 38) * 1024 ** 3,
+        bootTime: powered ? new Date(now - (7 + i) * 86400_000).toISOString() : null, overallStatus: 'green',
       },
       relationships: [
         { kind: 'runs_on', target_id: host.id },
@@ -115,46 +151,60 @@ function buildWorkloadDomain(): MockEstate {
 
   const findings: Finding[] = [
     {
-      id: 'f-esx03-disconnected', check_id: 'host_disconnected', severity: 'critical',
+      id: 'f-esx03-disconnected', check_id: 'HOST_DISCONNECTED', severity: 'critical',
       title: 'esx03 disconnected from vCenter', summary: 'Host esx03.wld01.vcf.example has been in connectionState disconnected since the last scan. 4 VMs restarted elsewhere by HA.',
       resource_id: hosts[2].id, resource_name: hosts[2].name, resource_type: 'host',
       evidence: { connectionState: { old: 'connected', new: 'disconnected' }, powerState: { old: 'poweredOn', new: 'unknown' }, cluster: 'wld01-cl01', vmsAffected: 4, firstDetected: minutesAgo(2) },
       recommendation: 'Check management network reachability to esx03 (vmk0 on VLAN 1611), confirm the host is powered on via iDRAC, then reconnect from vCenter. Verify vSAN resync after reconnect.',
     },
     {
-      id: 'f-vsan01-capacity', check_id: 'datastore_capacity', severity: 'warning',
+      id: 'f-vsan01-capacity', check_id: 'DATASTORE_CAPACITY', severity: 'warning',
       title: 'wld01-cl01-vsan is 91% full', summary: 'vSAN datastore wld01-cl01-vsan has 5.4 TB free of 60 TB. Above the 85% warning threshold; vSAN slack space is under 10%.',
       resource_id: datastores[0].id, resource_name: datastores[0].name, resource_type: 'datastore',
       evidence: { usedPct: { old: 84, new: 91 }, freeGB: { old: 9830, new: 5530 }, capacityGB: 61440, threshold: 85 },
       recommendation: 'vSAN needs 25 to 30% slack for rebuilds. The disconnected host esx03 has removed one third of the cluster capacity; reconnecting it restores headroom. Otherwise migrate or delete the largest VMs and old snapshots.',
     },
     {
-      id: 'f-cl02-ha-disabled', check_id: 'cluster_ha_disabled', severity: 'warning',
+      id: 'f-cl02-ha-disabled', check_id: 'CLUSTER_HA_DISABLED', severity: 'warning',
       title: 'HA disabled on wld01-cl02', summary: 'vSphere HA is disabled on cluster wld01-cl02. A host failure will not restart its 15 VMs automatically.',
       resource_id: clusters[1].id, resource_name: clusters[1].name, resource_type: 'cluster',
       evidence: { haEnabled: { old: true, new: false }, drsBehavior: 'manual', vmCount: 15 },
       recommendation: 'Re-enable vSphere HA on wld01-cl02 and confirm admission control settings match wld01-cl01.',
     },
     {
-      id: 'f-esx05-ntp', check_id: 'host_ntp', severity: 'warning',
-      title: 'esx05 NTP not synchronized', summary: 'Host esx05 reports NTP not synced. Clock drift breaks vSAN, NSX and SSO in unpleasant ways.',
+      id: 'f-esx05-ntp', check_id: 'HOST_NTP_NOT_CONFIGURED', severity: 'warning',
+      title: 'esx05 has no NTP servers configured', summary: 'Host esx05 has an empty NTP server list. Clock drift breaks vSAN, NSX and SSO in unpleasant ways.',
       resource_id: hosts[4].id, resource_name: hosts[4].name, resource_type: 'host',
-      evidence: { ntpSynced: false, ntpServers: ['10.16.0.10', '10.16.0.11'], driftSeconds: 7.4 },
-      recommendation: 'Verify UDP 123 from esx05 to the NTP servers and restart ntpd on the host.',
+      evidence: { ntpServers: { old: ['10.16.0.10', '10.16.0.11'], new: [] }, peers: ['esx04', 'esx06'] },
+      recommendation: 'Add 10.16.0.10 and 10.16.0.11 as NTP servers on esx05 (matching esx04 and esx06) and start ntpd.',
     },
     {
-      id: 'f-gitlab01-snapshots', check_id: 'vm_old_snapshots', severity: 'info',
+      id: 'f-gitlab01-snapshots', check_id: 'VM_SNAPSHOT_STALE', severity: 'info',
       title: 'gitlab01 has a 19 day old snapshot', summary: 'VM gitlab01 carries 3 snapshots; the oldest is 19 days. Snapshot chains consume vSAN capacity and slow the VM.',
       resource_id: vms[24].id, resource_name: 'gitlab01', resource_type: 'vm',
-      evidence: { snapshots: 3, oldestSnapshotDays: 19, datastore: 'wld01-cl01-vsan' },
+      evidence: { snapshotCount: 3, oldestSnapshotTime: new Date(now - 19 * 86400_000).toISOString(), datastore: 'wld01-cl01-vsan' },
       recommendation: 'Consolidate or delete snapshots on gitlab01 after confirming the change window that created them is closed.',
     },
     {
-      id: 'f-log02-tools', check_id: 'vm_tools_not_running', severity: 'info',
+      id: 'f-log02-tools', check_id: 'VM_TOOLS_NOT_RUNNING', severity: 'info',
       title: 'VMware Tools not running on log02', summary: 'log02 is powered on but Tools is not running, so guest IP, heartbeat and graceful shutdown are unavailable.',
       resource_id: vms[18].id, resource_name: 'log02', resource_type: 'vm',
       evidence: { toolsStatus: 'toolsNotRunning', powerState: 'poweredOn' },
       recommendation: 'Start or reinstall open-vm-tools inside log02.',
+    },
+    {
+      id: 'f-cl02-drs-manual', check_id: 'CLUSTER_DRS_DISABLED', severity: 'info',
+      title: 'DRS is manual on wld01-cl02', summary: 'DRS automation level on wld01-cl02 is manual, so vCenter will recommend but never perform balancing moves.',
+      resource_id: clusters[1].id, resource_name: clusters[1].name, resource_type: 'cluster',
+      evidence: { drsEnabled: true, drsAutomationLevel: 'manual' },
+      recommendation: 'Set DRS to fully automated unless a workload on this cluster is pinned by design.',
+    },
+    {
+      id: 'f-cl02-version-mismatch', check_id: 'HOST_VERSION_MISMATCH', severity: 'warning',
+      title: 'Hosts in wld01-cl02 run different builds', summary: 'esx06 is on 9.0.0 build 24755230 while esx04 and esx05 are on 9.0.1 build 24805960. Mixed builds in one cluster complicate vMotion and vSAN.',
+      resource_id: clusters[1].id, resource_name: clusters[1].name, resource_type: 'cluster',
+      evidence: { versions: { '9.0.1 (24805960)': ['esx04', 'esx05'], '9.0.0 (24755230)': ['esx06'] } },
+      recommendation: 'Remediate esx06 with the cluster image so all three hosts match.',
     },
   ]
 
@@ -168,14 +218,56 @@ function buildWorkloadDomain(): MockEstate {
   const changes: Change[] = [
     { change_type: 'modified', resource_id: hosts[2].id, resource_type: 'host', resource_name: hosts[2].name, significance: 'high', summary: 'Host connection state changed', property_changes: { connectionState: { old: 'connected', new: 'disconnected' }, powerState: { old: 'poweredOn', new: 'unknown' } } },
     { change_type: 'modified', resource_id: clusters[1].id, resource_type: 'cluster', resource_name: clusters[1].name, significance: 'high', summary: 'vSphere HA disabled', property_changes: { haEnabled: { old: true, new: false } } },
+    {
+      change_type: 'modified', resource_id: hosts[1].id, resource_type: 'host', resource_name: hosts[1].name, significance: 'high',
+      summary: 'vmkernel vmk1 mtu 1500 -> 9000; vmkernel vmk3 added',
+      property_changes: {
+        vmkernelAdapters: {
+          old: [
+            { device: 'vmk0', ip: '10.16.11.21', mtu: 1500, portgroup: 'wld01-mgmt-vlan1611' },
+            { device: 'vmk1', ip: '10.16.12.21', mtu: 1500, portgroup: 'wld01-vmotion-vlan1612' },
+            { device: 'vmk2', ip: '10.16.13.21', mtu: 9000, portgroup: 'wld01-vsan-vlan1613' },
+          ],
+          new: [
+            { device: 'vmk0', ip: '10.16.11.21', mtu: 1500, portgroup: 'wld01-mgmt-vlan1611' },
+            { device: 'vmk1', ip: '10.16.12.21', mtu: 9000, portgroup: 'wld01-vmotion-vlan1612' },
+            { device: 'vmk2', ip: '10.16.13.21', mtu: 9000, portgroup: 'wld01-vsan-vlan1613' },
+            { device: 'vmk3', ip: '10.16.14.21', mtu: 9000, portgroup: 'wld01-tep-vlan1614' },
+          ],
+        },
+      },
+    },
+    {
+      change_type: 'modified', resource_id: hosts[4].id, resource_type: 'host', resource_name: hosts[4].name, significance: 'medium',
+      summary: 'NTP servers 10.16.0.10, 10.16.0.11 removed',
+      property_changes: { ntpServers: { old: ['10.16.0.10', '10.16.0.11'], new: [] } },
+    },
+    {
+      change_type: 'modified', resource_id: vms[8].id, resource_type: 'vm', resource_name: 'db01', significance: 'medium',
+      summary: 'disk Hard disk 3 added; disk Hard disk 2 thin -> thick',
+      property_changes: {
+        disks: {
+          old: [
+            { label: 'Hard disk 1', capacityBytes: 64 * 1024 ** 3, datastore: 'wld01-cl01-vsan', thin: true },
+            { label: 'Hard disk 2', capacityBytes: 512 * 1024 ** 3, datastore: 'wld01-cl01-vsan', thin: true },
+          ],
+          new: [
+            { label: 'Hard disk 1', capacityBytes: 64 * 1024 ** 3, datastore: 'wld01-cl01-vsan', thin: true },
+            { label: 'Hard disk 2', capacityBytes: 512 * 1024 ** 3, datastore: 'wld01-cl01-vsan', thin: false },
+            { label: 'Hard disk 3', capacityBytes: 256 * 1024 ** 3, datastore: 'wld01-cl01-vsan', thin: false },
+          ],
+        },
+        storageCommittedBytes: { old: 300 * 1024 ** 3, new: 700 * 1024 ** 3 },
+      },
+    },
     { change_type: 'removed', resource_id: id('network', 'seg-legacy-tier'), resource_type: 'network', resource_name: 'seg-legacy-tier', significance: 'high', summary: 'NSX segment removed', property_changes: {} },
     { change_type: 'modified', resource_id: datastores[0].id, resource_type: 'datastore', resource_name: datastores[0].name, significance: 'medium', summary: 'Datastore usage increased', property_changes: { usedPct: { old: 84, new: 91 }, freeGB: { old: 9830, new: 5530 } } },
-    { change_type: 'modified', resource_id: vms[0].id, resource_type: 'vm', resource_name: 'web01', significance: 'medium', summary: 'VM moved host', property_changes: { host: { old: 'esx03.wld01.vcf.example', new: 'esx01.wld01.vcf.example' } } },
+    { change_type: 'modified', resource_id: vms[0].id, resource_type: 'vm', resource_name: 'web01', significance: 'medium', summary: 'VM moved host; nic Network adapter 1 network seg-legacy-tier -> seg-web-tier', property_changes: { host: { old: 'esx03.wld01.vcf.example', new: 'esx01.wld01.vcf.example' }, networks: { old: ['seg-legacy-tier'], new: ['seg-web-tier'] }, nics: { old: [{ label: 'Network adapter 1', mac: '00:50:56:9a:0a:01', network: 'seg-legacy-tier', connected: true }], new: [{ label: 'Network adapter 1', mac: '00:50:56:9a:0a:01', network: 'seg-web-tier', connected: true }] } } },
     { change_type: 'modified', resource_id: vms[4].id, resource_type: 'vm', resource_name: 'app01', significance: 'medium', summary: 'VM moved host', property_changes: { host: { old: 'esx03.wld01.vcf.example', new: 'esx02.wld01.vcf.example' } } },
-    { change_type: 'modified', resource_id: vms[28].id, resource_type: 'vm', resource_name: 'test-win11', significance: 'medium', summary: 'VM powered off', property_changes: { powerState: { old: 'poweredOn', new: 'poweredOff' }, ipAddress: { old: '10.16.24.38', new: null } } },
+    { change_type: 'modified', resource_id: vms[28].id, resource_type: 'vm', resource_name: 'test-win11', significance: 'medium', summary: 'VM powered off', property_changes: { powerState: { old: 'poweredOn', new: 'poweredOff' }, guestIp: { old: '10.16.24.38', new: null } } },
     { change_type: 'added', resource_id: vms[29].id, resource_type: 'vm', resource_name: 'test-rhel9', significance: 'low', summary: 'VM created', property_changes: {} },
     { change_type: 'modified', resource_id: hosts[4].id, resource_type: 'host', resource_name: hosts[4].name, significance: 'low', summary: 'Host resource usage changed', property_changes: { cpuUsagePct: { old: 58, new: 71 }, memUsagePct: { old: 79, new: 84 } } },
-    { change_type: 'modified', resource_id: vms[24].id, resource_type: 'vm', resource_name: 'gitlab01', significance: 'low', summary: 'Snapshot count changed', property_changes: { snapshots: { old: 2, new: 3 } } },
+    { change_type: 'modified', resource_id: vms[24].id, resource_type: 'vm', resource_name: 'gitlab01', significance: 'low', summary: 'snapshotCount 2 -> 3', property_changes: { snapshotCount: { old: 2, new: 3 } } },
     { change_type: 'modified', resource_id: vms[18].id, resource_type: 'vm', resource_name: 'log02', significance: 'low', summary: 'Tools status changed', property_changes: { toolsStatus: { old: 'toolsOk', new: 'toolsNotRunning' } } },
     { change_type: 'modified', resource_id: vc.id, resource_type: 'vcenter', resource_name: vc.name, significance: 'low', summary: 'vCenter build changed', property_changes: { build: { old: '24755230', new: '24805960' } } },
   ]
@@ -202,14 +294,14 @@ function buildManagementDomain(): MockEstate {
   const cl: Resource = { id: id('cluster', 'mgmt-cl01'), type: 'cluster', name: 'mgmt-cl01', source: src, parent_id: dc.id, properties: { haEnabled: true, drsEnabled: true, vsanEnabled: true, numHosts: 4 }, relationships: [] }
   r.push(vc, dc, cl)
   const hosts = ['mgmt-esx01', 'mgmt-esx02', 'mgmt-esx03', 'mgmt-esx04'].map((n, i) => {
-    const h: Resource = { id: id('host', n), type: 'host', name: `${n}.wld01.vcf.example`, source: src, parent_id: cl.id, properties: { connectionState: 'connected', powerState: 'poweredOn', version: '9.0.1', cpuUsagePct: 30 + i * 5, memUsagePct: 50 + i * 4, ntpSynced: true }, relationships: [] }
+    const h: Resource = { id: id('host', n), type: 'host', name: `${n}.wld01.vcf.example`, source: src, parent_id: cl.id, properties: { connectionState: 'connected', powerState: 'poweredOn', maintenanceMode: false, version: '9.0.1', build: '24805960', model: 'PowerEdge R760', vendor: 'Dell Inc.', numCpuCores: 64, memoryBytes: 768 * 1024 ** 3, uptimeSeconds: 120 * 86400 + i * 3600, lockdownMode: 'lockdownNormal', ntpServers: ['10.16.0.10', '10.16.0.11'], dnsServers: ['10.16.0.2'], vmkernelAdapters: [{ device: 'vmk0', ip: `10.16.1.${20 + i}`, mtu: 1500, portgroup: 'mgmt-vlan1600' }], physicalNics: [{ device: 'vmnic0', mac: `3c:ec:ef:2b:00:1${i}`, linkSpeedMb: 25000 }], cpuUsagePct: 30 + i * 5, memUsagePct: 50 + i * 4 }, relationships: [] }
     r.push(h); return h
   })
   const ds: Resource = { id: id('datastore', 'mgmt-vsan'), type: 'datastore', name: 'mgmt-vsan', source: src, parent_id: dc.id, properties: { type: 'vsan', capacityGB: 40960, freeGB: 22000, usedPct: 46, accessible: true }, relationships: [] }
   const net: Resource = { id: id('network', 'mgmt-vlan1600'), type: 'network', name: 'mgmt-vlan1600', source: src, parent_id: dc.id, properties: { kind: 'DistributedVirtualPortgroup', vlanId: 1600 }, relationships: [] }
   r.push(ds, net)
   const vmNames = ['sddc-manager', 'nsx-mgr-01', 'nsx-mgr-02', 'nsx-mgr-03', 'vc01', 'mgmt-vc', 'ops-01', 'aria-lcm']
-  vmNames.forEach((n, i) => r.push({ id: id('vm', n), type: 'vm', name: n, source: src, parent_id: hosts[i % 4].id, properties: { powerState: 'poweredOn', vcpus: 8, memoryGB: 48, toolsStatus: 'toolsOk', datastore: ds.name, network: net.name }, relationships: [{ kind: 'runs_on', target_id: hosts[i % 4].id }] }))
+  vmNames.forEach((n, i) => r.push({ id: id('vm', n), type: 'vm', name: n, source: src, parent_id: hosts[i % 4].id, properties: { powerState: 'poweredOn', host: hosts[i % 4].name, numCpu: 8, memoryMB: 49152, hardwareVersion: 'vmx-21', toolsStatus: 'toolsOk', guestFullName: 'VMware Photon OS (64-bit)', snapshotCount: 0, disks: [{ label: 'Hard disk 1', capacityBytes: 200 * 1024 ** 3, datastore: ds.name, thin: true }], nics: [{ label: 'Network adapter 1', mac: `00:50:56:8b:00:0${i}`, network: net.name, connected: true }], datastores: [ds.name], networks: [net.name] }, relationships: [{ kind: 'runs_on', target_id: hosts[i % 4].id }] }))
   return {
     connection: { id: src, name: 'Management domain', host: 'vc-mgmt.mgmt.vcf.example', username: 'administrator@vsphere.local', verify_tls: true, created_at: minutesAgo(900), kind: 'vcenter' },
     schedule: { connection_id: src, interval_minutes: 15, enabled: true, last_run: minutesAgo(9), next_run: new Date(now + 6 * 60_000).toISOString(), last_status: 'ok' },
@@ -230,7 +322,7 @@ function buildManagementDomain(): MockEstate {
 
 export const mockState = {
   estates: [buildWorkloadDomain(), buildManagementDomain()] as MockEstate[],
-  settings: { retention: 30, assistant: { enabled: true, provider: 'mock', model: 'claude-opus-5', api_key_set: false } } as Settings,
+  settings: { retention: 30, changes_min_significance: 'low', assistant: { enabled: true, provider: 'mock', model: 'claude-opus-5', api_key_set: false } } as Settings,
   assistantStatus: { available: true, provider: 'mock', model: 'claude-opus-5', reason: null } as AssistantStatus,
   nextId: 100,
 }

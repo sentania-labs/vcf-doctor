@@ -39,6 +39,7 @@ export function formatValue(v: unknown): string {
 
 // Property keys whose numeric values are byte counts (freeSpace, capacity, memoryBytes, ...).
 export function isByteKey(k: string): boolean {
+  if (/(GB|MB|Pct)$/.test(k)) return false // capacityGB, memoryMB, usedPct carry their own unit
   return /(freeSpace|capacity|bytes)$/i.test(k) || /^(freeSpace|capacity)/i.test(k)
 }
 
@@ -71,4 +72,65 @@ export function qs(params: Record<string, string | number | boolean | null | und
   }
   const s = p.toString()
   return s ? `?${s}` : ''
+}
+
+// Seconds of uptime as "41d 3h" (or "3h 12m" under a day, "12m" under an hour).
+export function formatUptime(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return String(seconds)
+  const d = Math.floor(seconds / 86400)
+  const h = Math.floor((seconds % 86400) / 3600)
+  const m = Math.floor((seconds % 3600) / 60)
+  if (d > 0) return `${d}d ${h}h`
+  if (h > 0) return `${h}h ${m}m`
+  return `${m}m`
+}
+
+// MHz as GHz once it reads better ("2.40 GHz"), raw MHz below 1000.
+export function formatMhz(mhz: number): string {
+  if (!Number.isFinite(mhz)) return String(mhz)
+  return mhz >= 1000 ? `${(mhz / 1000).toFixed(2)} GHz` : `${mhz} MHz`
+}
+
+// MiB as a byte string via formatBytes (memoryMB, memReservationMB).
+export function formatMiB(mib: number): string {
+  return formatBytes(mib * 1024 * 1024)
+}
+
+// Property keys that carry ISO timestamps.
+export function isTimeKey(k: string): boolean {
+  return /(Time|At)$/.test(k) || k === 'bootTime'
+}
+
+// Property keys that carry MiB counts.
+export function isMiBKey(k: string): boolean {
+  return /MB$/.test(k)
+}
+
+// Property keys that carry MHz.
+export function isMhzKey(k: string): boolean {
+  return /Mhz$/i.test(k)
+}
+
+// Property keys that carry seconds.
+export function isSecondsKey(k: string): boolean {
+  return /Seconds$/.test(k)
+}
+
+// Human rendering of a single scalar property value, keyed so units come out right.
+export function formatProperty(k: string, v: unknown): string {
+  if (v === null || v === undefined) return 'none'
+  if (typeof v === 'number') {
+    if (isByteKey(k)) return formatBytes(v)
+    if (isMiBKey(k)) return formatMiB(v)
+    if (/GB$/.test(k)) return `${formatValue(v)} GB`
+    if (isMhzKey(k)) return formatMhz(v)
+    if (isSecondsKey(k)) return formatUptime(v)
+    if (/Pct$/.test(k)) return `${v}%`
+    return formatValue(v)
+  }
+  if (typeof v === 'string' && isTimeKey(k)) {
+    const d = formatDateTime(v)
+    return d && d !== v ? `${d} (${relativeTime(v)})` : v
+  }
+  return formatValue(v)
 }

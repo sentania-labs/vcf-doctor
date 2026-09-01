@@ -35,6 +35,12 @@ Other changes were recorded between the two snapshots. They are listed here so t
 - `wld01-cl01-vsan01` free space dropped; usage is now about 91%.
 - NSX segment `seg-dmz-10.20.40.0` is no longer present. `dmz-jump01` (resident on `esx03`) and `dmz-lb01` previously used it.
 - `esx07.wld01.vcf.example` (cluster `wld01-edge`) entered maintenance mode.
+- `esx02.wld01.vcf.example` vmk1 (vMotion) MTU dropped from 9000 to 1500.
+- Portgroup `pg-vmotion` VLAN changed from 200 to 201.
+- `esx04.wld01.vcf.example` lost `ntp2.wld01.vcf.example`; one NTP server remains.
+- `app01` gained `Hard disk 3` (100 GiB); `db01` memory grew from 32 GiB to 48 GiB.
+- `web02` was renamed `web02-old`.
+- Cluster `wld01-edge` DRS automation level changed from fully automated to manual.
 
 ### Recommended next probes
 

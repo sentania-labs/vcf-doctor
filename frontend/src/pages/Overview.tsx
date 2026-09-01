@@ -1,6 +1,6 @@
 import { Link, useNavigate } from 'react-router-dom'
 import { ArrowRight, Boxes, HardDrive, MonitorSmartphone, Plug, Server } from 'lucide-react'
-import { getOverview } from '@/api'
+import { getChangesMinSignificance, getOverview } from '@/api'
 import { useAsync } from '@/hooks/useAsync'
 import { useAppState } from '@/state/AppState'
 import { Button, Card, CardHeader, EmptyState, ErrorState, Skeleton } from '@/components/ui'
@@ -28,7 +28,8 @@ function HealthRing({ score }: { score: number }) {
 
 export default function OverviewPage() {
   const { connectionId, refreshKey, connections, connectionsLoading, selected, backend } = useAppState()
-  const ov = useAsync(() => getOverview(connectionId), [connectionId, refreshKey])
+  // Recent changes honour the Settings significance floor; a settings failure falls back to everything.
+  const ov = useAsync(() => getChangesMinSignificance().then(min => getOverview(connectionId, min)), [connectionId, refreshKey])
   const nav = useNavigate()
 
   if (!connectionsLoading && connections.length === 0 && !ov.data && !ov.error && backend !== 'down') {
@@ -92,7 +93,7 @@ export default function OverviewPage() {
           </div>
         </Card>
         <Card>
-          <CardHeader title="Recent changes" subtitle="Since the previous snapshot"
+          <CardHeader title="Recent changes" subtitle="Since the previous snapshot, at the significance set in Settings"
             action={<Link to="/changes" className="text-sm text-accent hover:underline inline-flex items-center gap-1">Time machine <ArrowRight size={14} /></Link>} />
           <div className="px-5 pb-5 space-y-2">
             {!d ? [0, 1, 2].map(i => <Skeleton key={i} className="h-16" />)
