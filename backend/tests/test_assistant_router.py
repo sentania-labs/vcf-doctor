@@ -134,3 +134,13 @@ def test_api_error_detail_uses_body_message():
     e = APIStatusError("400", response=resp, body=body)
     assert _api_error_detail(e) == "invalid_request_error: fallbacks: nope"
     assert "sk-" not in _api_error_detail(e)
+
+
+def test_fallbacks_only_for_supporting_models():
+    from app.assistant.providers.anthropic_provider import supports_fallbacks
+
+    assert supports_fallbacks("claude-opus-5")
+    assert supports_fallbacks("claude-fable-5")
+    assert not supports_fallbacks("claude-sonnet-5")
+    assert not supports_fallbacks("claude-haiku-4-5")
+    assert not supports_fallbacks("claude-opus-4-8")
