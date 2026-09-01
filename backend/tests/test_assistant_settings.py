@@ -35,10 +35,12 @@ def test_roundtrip_never_returns_key():
     assert assistant_settings.get_provider().name == "anthropic"
 
 
-def test_env_key_wins_over_db(monkeypatch):
-    assistant_settings.update_settings({"api_key": SECRET})
+def test_gui_key_wins_over_env(monkeypatch):
+    """A key entered in Settings must take effect even when the deployment set one."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-env-0000")
     assert assistant_settings.resolve_api_key() == "sk-ant-env-0000"
+    assistant_settings.update_settings({"api_key": SECRET})
+    assert assistant_settings.resolve_api_key() == SECRET
     assert assistant_settings.get_settings().api_key_set is True
 
 

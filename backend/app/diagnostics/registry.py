@@ -1,8 +1,12 @@
 """Check registry: the one place the rest of the app calls into for diagnostics."""
 
+import logging
+
 from app.diagnostics.base import DiagnosticCheck
 from app.diagnostics.checks import ALL_CHECKS
 from app.models import Finding, Resource
+
+log = logging.getLogger(__name__)
 
 _SEVERITY_RANK = {"critical": 0, "warning": 1, "info": 2}
 
@@ -25,6 +29,7 @@ def run_all(resources: list[Resource], previous: list[Resource] | None = None) -
         try:
             results = check.evaluate(resources, previous)
         except Exception:  # noqa: BLE001 - one bad check must not sink the scan
+            log.exception("check %s failed; skipping", check.id)
             continue
         for f in results:
             if f.id in seen:

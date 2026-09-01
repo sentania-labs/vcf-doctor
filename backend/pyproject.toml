@@ -9,8 +9,8 @@ dependencies = [
     "pydantic>=2.8",
     "pydantic-settings>=2.4",
     "apscheduler>=3.10,<4",
-    "pyvmomi>=8.0",
-    "anthropic>=0.40",
+    "pyvmomi>=9.0,<10",
+    "anthropic>=1.2,<2",
     "sse-starlette>=2.1",
 ]
 

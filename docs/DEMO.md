@@ -33,7 +33,9 @@ VCF_DOCTOR_DEMO_MODE=true docker compose up
 Startup creates "Demo Workload Domain" and captures snapshot A (healthy).
 Every later Scan Now captures snapshot B (degraded): esx03 disconnected,
 an NSX segment removed, a vSAN datastore at 91%, esx07 in maintenance,
-web03 powered off, app02 migrated. The assistant answers from the mock
+web03 powered off, app02 migrated. Every scan after the first returns the
+same degraded state, so after two scans the default Changes view (latest two
+snapshots) is empty; pick the initial capture as FROM to show the delta. The assistant answers from the mock
 provider unless an Anthropic key is configured.
 
 ## Assistant
