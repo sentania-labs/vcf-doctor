@@ -52,18 +52,30 @@ class AnthropicProvider(LLMProvider):
         client = self._client()
         self.last_stop_reason = None
         try:
-            async with client.beta.messages.stream(
+            kwargs = dict(
                 model=self.model,
                 max_tokens=MAX_TOKENS,
                 system=build_system_prompt(request),
                 messages=[{"role": "user", "content": build_user_message(request)}],
                 thinking={"type": "adaptive"},
-                betas=[FALLBACK_BETA],
-                fallbacks="default",
-            ) as stream:
-                async for text in stream.text_stream:
-                    yield text
-                final = await stream.get_final_message()
+            )
+            use_fallbacks = supports_fallbacks(self.model)
+            try:
+                async with client.beta.messages.stream(
+                    **kwargs, **(fallback_kwargs() if use_fallbacks else {})
+                ) as stream:
+                    async for text in stream.text_stream:
+                        yield text
+                    final = await stream.get_final_message()
+            except anthropic.BadRequestError as e:
+                # A model we thought supported fallbacks said otherwise: retry once without.
+                if not (use_fallbacks and "fallbacks" in _api_error_detail(e)):
+                    raise
+                log.warning("assistant: %s rejected fallbacks; retrying without", self.model)
+                async with client.beta.messages.stream(**kwargs) as stream:
+                    async for text in stream.text_stream:
+                        yield text
+                    final = await stream.get_final_message()
         except anthropic.AuthenticationError as e:
             raise ProviderUnavailable(
                 "Anthropic rejected the API key. Check the key on the Settings page."
@@ -114,6 +126,19 @@ class AnthropicProvider(LLMProvider):
         if msg.stop_reason == "refusal":
             return False, "The model refused the test prompt."
         return True, f"Connected. Model {msg.model} answered."
+
+
+# Server-side refusal fallbacks exist on the Opus 5 and Fable 5 tier only;
+# Sonnet 5 and older models reject the parameter with a 400.
+FALLBACK_MODEL_PREFIXES = ("claude-opus-5", "claude-fable-5", "claude-mythos-5")
+
+
+def supports_fallbacks(model: str) -> bool:
+    return model.startswith(FALLBACK_MODEL_PREFIXES)
+
+
+def fallback_kwargs() -> dict:
+    return {"betas": [FALLBACK_BETA], "fallbacks": "default"}
 
 
 def _api_error_detail(e: "anthropic.APIStatusError") -> str:

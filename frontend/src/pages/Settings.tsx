@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { CheckCircle2, KeyRound, ShieldCheck } from 'lucide-react'
 import type { AssistantSettings, Settings } from '@/types'
-import { getSettings, updateSettings, getAssistantStatus, changePassword } from '@/api'
+import { getSettings, updateSettings, getAssistantStatus, changePassword, getAssistantModels, type AssistantModel } from '@/api'
 import { useAuth } from '@/state/AuthState'
 import { useAsync } from '@/hooks/useAsync'
 import { Badge, Button, Card, CardHeader, ErrorState, Field, Input, PageHeader, Select, Skeleton, Toggle } from '@/components/ui'
@@ -68,6 +68,13 @@ export default function SettingsPage() {
   const status = useAsync(() => getAssistantStatus(), [s.data])
   const [retention, setRetention] = useState(96)
   const [assistant, setAssistant] = useState<AssistantSettings>({ enabled: true, provider: 'anthropic', model: 'claude-opus-5', api_key_set: false })
+  const [models, setModels] = useState<AssistantModel[]>([])
+  const [modelSource, setModelSource] = useState<'live' | 'curated' | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    getAssistantModels().then(r => { if (!cancelled) { setModels(r.models); setModelSource(r.source) } }).catch(() => { if (!cancelled) setModels([]) })
+    return () => { cancelled = true }
+  }, [assistant.api_key_set])
   const [apiKey, setApiKey] = useState('')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -117,8 +124,13 @@ export default function SettingsPage() {
                     <option value="mock">Mock</option>
                   </Select>
                 </Field>
-                <Field label="Model">
-                  <Input value={assistant.model} onChange={e => setAssistant(a => ({ ...a, model: e.target.value }))} placeholder="claude-opus-5" disabled={assistant.provider === 'mock'} />
+                <Field label="Model" hint={modelSource === 'live' ? 'List comes from your Anthropic account.' : 'Add an API key to list the models available to your account.'}>
+                  <Select value={assistant.model} onChange={e => setAssistant(a => ({ ...a, model: e.target.value }))} disabled={assistant.provider === 'mock'}>
+                    {(models.length ? models : [{ id: assistant.model, display_name: assistant.model, recommended: false }]).map(m => (
+                      <option key={m.id} value={m.id}>{m.display_name}{m.recommended ? ' (recommended)' : ''}</option>
+                    ))}
+                    {models.length > 0 && !models.some(m => m.id === assistant.model) && <option value={assistant.model}>{assistant.model}</option>}
+                  </Select>
                 </Field>
               </div>
               <Field label="Anthropic API key" hint="Write-only. The key is stored on the server and never shown again. A key saved here takes precedence over the ANTHROPIC_API_KEY environment variable; clear it to fall back to the environment.">
