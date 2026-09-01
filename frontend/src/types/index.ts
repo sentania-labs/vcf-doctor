@@ -1,0 +1,50 @@
+// Mirrors backend/app/models. Keep in sync; do not rename fields.
+export type Severity = 'info' | 'warning' | 'critical'
+export type Significance = 'low' | 'medium' | 'high'
+export type ChangeType = 'added' | 'removed' | 'modified'
+export type ScanStatus = 'running' | 'ok' | 'error' | 'skipped'
+
+export interface Relationship { kind: string; target_id: string }
+export interface Resource {
+  id: string; type: string; name: string; source: string
+  parent_id: string | null; properties: Record<string, unknown>; relationships: Relationship[]
+}
+export interface Finding {
+  id: string; check_id: string; severity: Severity; title: string; summary: string
+  resource_id: string | null; resource_name: string | null; resource_type: string | null
+  evidence: Record<string, unknown>; recommendation: string | null
+}
+export interface PropertyChange { old: unknown; new: unknown }
+export interface Change {
+  change_type: ChangeType; resource_id: string; resource_type: string; resource_name: string
+  property_changes: Record<string, PropertyChange>; significance: Significance; summary: string
+}
+export interface SnapshotSummary {
+  id: string; created_at: string; label: string; connection_id: string
+  scheduled: boolean; resource_count: number
+}
+export interface Snapshot extends SnapshotSummary { resources: Resource[] }
+export interface ConnectionPublic {
+  id: string; name: string; host: string; username: string; verify_tls: boolean
+  created_at: string; kind: string
+}
+export interface ConnectionCreate {
+  name: string; host: string; username: string; password: string
+  verify_tls: boolean; interval_minutes: number; enabled: boolean
+}
+export interface Schedule {
+  connection_id: string; interval_minutes: number; enabled: boolean
+  last_run: string | null; next_run: string | null; last_status: ScanStatus | null
+}
+export interface ScanRun {
+  id: string; connection_id: string; started: string; finished: string | null
+  status: ScanStatus; error: string | null; snapshot_id: string | null; trigger: 'scheduled' | 'manual'
+}
+export type AssistantTask = 'explain' | 'investigate' | 'generate-script' | 'ask'
+export type ScriptFormat = 'powercli' | 'python' | 'shell' | 'rest'
+export interface AssistantContext {
+  question: string; findings: Finding[]; changes: Change[]; resources: Resource[]; allowed_actions: string[]
+}
+export interface AssistantRequest { task: AssistantTask; script_format?: ScriptFormat; context: AssistantContext }
+export interface AssistantSettings { enabled: boolean; provider: 'anthropic' | 'mock'; model: string; api_key_set: boolean }
+export interface AssistantStatus { available: boolean; provider: string; model: string; reason: string | null }
