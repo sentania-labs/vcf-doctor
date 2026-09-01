@@ -108,7 +108,7 @@ def test_host_connection_state_change_is_high_with_arrow_summary():
     assert c.significance == "high"
     assert c.property_changes["connectionState"].old == "connected"
     assert c.property_changes["connectionState"].new == "disconnected"
-    assert c.summary == "connected -> disconnected"
+    assert c.summary == "connectionState connected -> disconnected"
 
 
 def test_host_maintenance_mode_is_medium():
@@ -140,7 +140,7 @@ def test_host_cluster_move_is_medium():
     changes = diff(old, new)
     c = only(changes, "host:vc01:esx02")
     assert c.significance == "medium"
-    assert c.summary == "wld01 -> wld02"
+    assert c.summary == "cluster wld01 -> wld02"
     assert {x.resource_id for x in changes if x.resource_type == "cluster"} == {
         "cluster:vc01:wld01",
         "cluster:vc01:wld02",
@@ -151,7 +151,7 @@ def test_cluster_membership_from_hosts_property():
     old = [cluster("mgmt", hosts=["host:vc01:a"])]
     new = [cluster("mgmt", hosts=["host:vc01:a", "host:vc01:b"])]
     c = only(diff(old, new), "cluster:vc01:mgmt")
-    assert c.significance == "medium" and c.summary == "added b"
+    assert c.significance == "medium" and c.summary == "hosts added b"
 
 
 # ------------------------------------------------------------------ vms
@@ -162,7 +162,7 @@ def test_vm_migration_is_low():
     new[3] = vm("web01", "esx02")
     c = only(diff(base(), new), "vm:vc01:web01")
     assert c.significance == "low"
-    assert c.summary == "esx01 -> esx02"
+    assert c.summary == "host esx01 -> esx02"
     assert c.property_changes["host"].old == "host:vc01:esx01"
 
 
@@ -171,7 +171,7 @@ def test_vm_power_change_is_medium():
     new[3].properties["powerState"] = "poweredOff"
     c = only(diff(base(), new), "vm:vc01:web01")
     assert c.significance == "medium"
-    assert c.summary == "poweredOn -> poweredOff"
+    assert c.summary == "powerState poweredOn -> poweredOff"
 
 
 def test_vm_migration_plus_power_change_takes_highest_significance():
@@ -249,7 +249,7 @@ def test_datastore_free_space_crossing_95_is_high():
     assert c.significance == "high"
 
 
-def test_datastore_capacity_change_is_low():
+def test_datastore_capacity_change_is_medium():
     old = [datastore("vsan", 1000, 500)]
     new = [
         datastore("vsan", 2000, 1500)
@@ -261,16 +261,24 @@ def test_datastore_capacity_change_is_low():
     new2 = [datastore("vsan", 1010, 505)]  # capacity only, usage unchanged
     c2 = only(diff(old2, new2), "ds:vc01:vsan")
     assert set(c2.property_changes) == {"capacity"}
-    assert c2.significance == "low"
+    assert c2.significance == "medium"  # docs/PROPERTIES.md: datastore capacity is medium
 
 
 # ------------------------------------------------------------------ networks / other
 
 
-def test_network_property_changes_are_ignored_only_existence_matters():
+def test_network_untracked_property_changes_are_ignored():
+    old = [network("vlan10", vlan=10, exists=True, foo=1)]
+    new = [network("vlan10", vlan=10, exists=True, foo=2)]
+    assert diff(old, new) == []
+
+
+def test_network_vlan_change_is_high():
     old = [network("vlan10", vlan=10)]
     new = [network("vlan10", vlan=20)]
-    assert diff(old, new) == []
+    c = only(diff(old, new), "net:vc01:vlan10")
+    assert c.significance == "high"
+    assert c.summary == "vlan 10 -> 20"
 
 
 def test_other_added_is_low():

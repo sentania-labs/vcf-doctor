@@ -64,7 +64,42 @@ def _latest_findings(connection_id: str | None) -> list[Finding]:
     return out
 
 
-def _changes(connection_id: str | None, from_id: str | None, to_id: str | None) -> list:
+SIGNIFICANCE_LEVELS = ("low", "medium", "high")
+CHANGES_MIN_SIGNIFICANCE_KEY = "changes_min_significance"
+
+
+def changes_min_significance() -> str:
+    """Stored floor for the changes list; anything unexpected falls back to low."""
+    value = db.get_setting(CHANGES_MIN_SIGNIFICANCE_KEY, "low")
+    return value if value in SIGNIFICANCE_LEVELS else "low"
+
+
+def _resolve_min_significance(requested: str | None) -> str:
+    if requested is None or requested == "":
+        return changes_min_significance()
+    if requested not in SIGNIFICANCE_LEVELS:
+        raise HTTPException(400, "min_significance must be one of low, medium, high")
+    return requested
+
+
+def _at_least(changes: list, min_significance: str) -> list:
+    floor = SIGNIFICANCE_RANK.get(min_significance, 9)
+    return [
+        c for c in changes if SIGNIFICANCE_RANK.get(getattr(c, "significance", "low"), 9) <= floor
+    ]
+
+
+def _changes(
+    connection_id: str | None,
+    from_id: str | None,
+    to_id: str | None,
+    min_significance: str | None = None,
+) -> list:
+    floor = _resolve_min_significance(min_significance)
+    return _at_least(_all_changes(connection_id, from_id, to_id), floor)
+
+
+def _all_changes(connection_id: str | None, from_id: str | None, to_id: str | None) -> list:
     if from_id or to_id:
         to_snap = store.get_snapshot(to_id) if to_id else None
         from_snap = store.get_snapshot(from_id) if from_id else None
@@ -80,7 +115,8 @@ def _changes(connection_id: str | None, from_id: str | None, to_id: str | None) 
             to_snap = store.latest_snapshot(cid)
         if from_snap is None:
             older = [
-                s for s in store.list_snapshots(cid)
+                s
+                for s in store.list_snapshots(cid)
                 if to_snap and s.created_at < to_snap.created_at
             ]
             from_snap = store.get_snapshot(older[0].id) if older else None
@@ -168,9 +204,13 @@ def get_changes(
     connection_id: str | None = None,
     from_id: str | None = Query(default=None, alias="from"),
     to_id: str | None = Query(default=None, alias="to"),
+    min_significance: str | None = None,
 ) -> list[Any]:
-    return [c.model_dump(mode="json") if hasattr(c, "model_dump") else c
-            for c in _changes(connection_id, from_id, to_id)]
+    """min_significance (low|medium|high) defaults to the changes_min_significance setting."""
+    return [
+        c.model_dump(mode="json") if hasattr(c, "model_dump") else c
+        for c in _changes(connection_id, from_id, to_id, min_significance)
+    ]
 
 
 # --- scans ---------------------------------------------------------------
@@ -297,11 +337,13 @@ class AppSettings(BaseModel):
     min_interval_minutes: int
     demo_mode: bool
     scheduler_running: bool
+    changes_min_significance: str
     assistant: AssistantSettings
 
 
 class AppSettingsUpdate(BaseModel):
     retention: int | None = None
+    changes_min_significance: str | None = None
     # Partial assistant update; may carry "api_key", which is stored and never echoed.
     assistant: dict[str, Any] | None = None
 
@@ -313,6 +355,7 @@ def get_settings():
         min_interval_minutes=settings.min_interval_minutes,
         demo_mode=settings.demo_mode,
         scheduler_running=scheduler.running(),
+        changes_min_significance=changes_min_significance(),
         assistant=assistant_settings.get_settings(),
     )
 
@@ -323,6 +366,10 @@ def put_settings(body: AppSettingsUpdate):
         if body.retention < 1:
             raise HTTPException(400, "retention must be at least 1")
         db.set_setting("retention", body.retention)
+    if body.changes_min_significance is not None:
+        if body.changes_min_significance not in SIGNIFICANCE_LEVELS:
+            raise HTTPException(400, "changes_min_significance must be one of low, medium, high")
+        db.set_setting(CHANGES_MIN_SIGNIFICANCE_KEY, body.changes_min_significance)
     if body.assistant:
         assistant_settings.update_settings(body.assistant)
     return get_settings()
@@ -332,10 +379,12 @@ def put_settings(body: AppSettingsUpdate):
 
 
 @router.get("/overview")
-def overview(connection_id: str | None = None) -> dict[str, Any]:
+def overview(
+    connection_id: str | None = None, min_significance: str | None = None
+) -> dict[str, Any]:
     resources = _latest_resources(connection_id)
     findings = _latest_findings(connection_id)
-    changes = _changes(connection_id, None, None)
+    changes = _changes(connection_id, None, None, min_significance)
 
     by_sev = {"critical": 0, "warning": 0, "info": 0}
     for f in findings:
@@ -368,9 +417,7 @@ def overview(connection_id: str | None = None) -> dict[str, Any]:
         "vms_on": sum(1 for v in vms if v.properties.get("powerState") == "poweredOn"),
         "vms_total": len(vms),
         "storage_free_pct": storage_free_pct,
-        "last_scan": (
-            (last_scan.finished or last_scan.started).isoformat() if last_scan else None
-        ),
+        "last_scan": ((last_scan.finished or last_scan.started).isoformat() if last_scan else None),
         "last_run": last_scan.model_dump(mode="json") if last_scan else None,
         "top_findings": [f.model_dump(mode="json") for f in findings[:5]],
         "recent_changes": [

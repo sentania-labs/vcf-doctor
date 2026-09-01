@@ -207,3 +207,103 @@ def test_settings_carries_assistant_and_never_echoes_key(client):
     assert body["assistant"]["provider"] == "mock"
     assert body["assistant"]["api_key_set"] is True
     assert "sk-secret" not in r.text
+
+
+# --- changes_min_significance setting and ?min_significance= ---------------
+
+
+def test_settings_changes_min_significance_roundtrip_and_validation(client):
+    assert client.get("/api/settings").json()["changes_min_significance"] == "low"
+    r = client.put("/api/settings", json={"changes_min_significance": "medium"})
+    assert r.status_code == 200 and r.json()["changes_min_significance"] == "medium"
+    assert client.get("/api/settings").json()["changes_min_significance"] == "medium"
+    r = client.put("/api/settings", json={"changes_min_significance": "urgent"})
+    assert r.status_code == 400
+    assert client.get("/api/settings").json()["changes_min_significance"] == "medium"
+    # A partial update that omits the key leaves it alone.
+    client.put("/api/settings", json={"retention": 5})
+    assert client.get("/api/settings").json()["changes_min_significance"] == "medium"
+
+
+def test_changes_min_significance_param_and_setting(client, monkeypatch):
+    from app.models import Change
+
+    cid = _add(client)
+    client.post("/api/scan", json={"connection_id": cid})
+    client.post("/api/scan", json={"connection_id": cid})
+    assert len(client.get(f"/api/snapshots?connection_id={cid}").json()) == 2
+
+    def fake_changes(old, new):
+        return [
+            Change(
+                change_type="modified",
+                resource_id="host:x:a",
+                resource_type="host",
+                resource_name="a",
+                significance="high",
+                summary="high one",
+            ),
+            Change(
+                change_type="modified",
+                resource_id="vm:x:b",
+                resource_type="vm",
+                resource_name="b",
+                significance="medium",
+                summary="medium one",
+            ),
+            Change(
+                change_type="added",
+                resource_id="vm:x:c",
+                resource_type="vm",
+                resource_name="c",
+                significance="low",
+                summary="low one",
+            ),
+        ]
+
+    monkeypatch.setattr(scheduler, "compute_changes", fake_changes)
+    base = f"/api/changes?connection_id={cid}"
+    assert [c["significance"] for c in client.get(base).json()] == ["high", "medium", "low"]
+    assert [c["significance"] for c in client.get(base + "&min_significance=medium").json()] == [
+        "high",
+        "medium",
+    ]
+    assert [c["significance"] for c in client.get(base + "&min_significance=high").json()] == [
+        "high",
+    ]
+    assert client.get(base + "&min_significance=bogus").status_code == 400
+
+    # The setting is the default when no param is given; an explicit param overrides it.
+    client.put("/api/settings", json={"changes_min_significance": "high"})
+    assert [c["significance"] for c in client.get(base).json()] == ["high"]
+    assert [c["significance"] for c in client.get(base + "&min_significance=low").json()] == [
+        "high",
+        "medium",
+        "low",
+    ]
+
+    # Overview recent_changes honours the same floor.
+    ov = client.get(f"/api/overview?connection_id={cid}").json()
+    assert [c["significance"] for c in ov["recent_changes"]] == ["high"]
+    ov = client.get(f"/api/overview?connection_id={cid}&min_significance=low").json()
+    assert [c["significance"] for c in ov["recent_changes"]] == ["high", "medium", "low"]
+    assert client.get(f"/api/overview?connection_id={cid}&min_significance=nope").status_code == 400
+
+
+def test_changes_min_significance_against_real_fixture_scans(client):
+    cid = _add(client)
+    client.post("/api/scan", json={"connection_id": cid})
+    client.post("/api/scan", json={"connection_id": cid})
+    everything = client.get(f"/api/changes?connection_id={cid}").json()
+    high_only = client.get(f"/api/changes?connection_id={cid}&min_significance=high").json()
+    assert everything, "fixture A -> B should produce changes"
+    assert high_only and all(c["significance"] == "high" for c in high_only)
+    assert len(high_only) == sum(1 for c in everything if c["significance"] == "high")
+    for c in everything:
+        assert set(c) >= {
+            "change_type",
+            "resource_id",
+            "significance",
+            "summary",
+            "property_changes",
+        }

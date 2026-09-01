@@ -8,10 +8,12 @@
       "source": "vcenter:vc-wld01",
       "parent_id": null,
       "properties": {
+        "name": "VMware vCenter Server",
         "version": "8.0.3",
         "build": "24322831",
+        "apiVersion": "8.0.3.0",
         "instanceUuid": "3f1b6c2a-7d0e-4c5b-9a21-5e8f0c1d2b47",
-        "apiType": "VirtualCenter"
+        "osType": "linux-x64"
       },
       "relationships": []
     },
@@ -32,9 +34,23 @@
       "parent_id": "datacenter:vc-wld01:wld01-dc",
       "properties": {
         "hostCount": 4,
+        "hosts": [
+          "host:vc-wld01:esx01",
+          "host:vc-wld01:esx02",
+          "host:vc-wld01:esx03",
+          "host:vc-wld01:esx04"
+        ],
         "drsEnabled": true,
+        "drsAutomationLevel": "fullyAutomated",
         "haEnabled": true,
-        "vsanEnabled": true
+        "haAdmissionControl": true,
+        "evcMode": "intel-sapphirerapids",
+        "vsanEnabled": true,
+        "ruleCount": 2,
+        "totalCpuMhz": 665600,
+        "totalMemoryBytes": 4398046511104,
+        "numVms": 24,
+        "overallStatus": "green"
       },
       "relationships": []
     },
@@ -46,9 +62,22 @@
       "parent_id": "datacenter:vc-wld01:wld01-dc",
       "properties": {
         "hostCount": 3,
+        "hosts": [
+          "host:vc-wld01:esx05",
+          "host:vc-wld01:esx06",
+          "host:vc-wld01:esx07"
+        ],
         "drsEnabled": true,
+        "drsAutomationLevel": "fullyAutomated",
         "haEnabled": true,
-        "vsanEnabled": true
+        "haAdmissionControl": true,
+        "evcMode": "intel-sapphirerapids",
+        "vsanEnabled": false,
+        "ruleCount": 2,
+        "totalCpuMhz": 230400,
+        "totalMemoryBytes": 1649267441664,
+        "numVms": 4,
+        "overallStatus": "green"
       },
       "relationships": []
     },
@@ -62,7 +91,18 @@
         "capacity": 43980465111040,
         "freeSpace": 18471795346636,
         "accessible": true,
-        "type": "vsan"
+        "type": "vsan",
+        "url": "ds:///vmfs/volumes/vsan:52a1b2c3d4e5f607-0819a2b3c4d5e6f7/",
+        "hosts": [
+          "esx01.wld01.vcf.example",
+          "esx02.wld01.vcf.example",
+          "esx03.wld01.vcf.example",
+          "esx04.wld01.vcf.example"
+        ],
+        "multipleHostAccess": true,
+        "maintenanceMode": false,
+        "vmfsVersion": null,
+        "overallStatus": "green"
       },
       "relationships": []
     },
@@ -76,21 +116,42 @@
         "capacity": 21990232555520,
         "freeSpace": 12974237207756,
         "accessible": true,
-        "type": "vsan"
+        "type": "vsan",
+        "url": "ds:///vmfs/volumes/vsan:52a1b2c3d4e5f607-1a2b3c4d5e6f7081/",
+        "hosts": [
+          "esx01.wld01.vcf.example",
+          "esx02.wld01.vcf.example",
+          "esx03.wld01.vcf.example",
+          "esx04.wld01.vcf.example"
+        ],
+        "multipleHostAccess": true,
+        "maintenanceMode": false,
+        "vmfsVersion": null,
+        "overallStatus": "green"
       },
       "relationships": []
     },
     {
-      "id": "datastore:vc-wld01:wld01-edge-vsan01",
+      "id": "datastore:vc-wld01:wld01-edge-vmfs01",
       "type": "datastore",
-      "name": "wld01-edge-vsan01",
+      "name": "wld01-edge-vmfs01",
       "source": "vcenter:vc-wld01",
       "parent_id": "datacenter:vc-wld01:wld01-dc",
       "properties": {
         "capacity": 8796093022208,
         "freeSpace": 6860952557322,
         "accessible": true,
-        "type": "vsan"
+        "type": "VMFS",
+        "url": "ds:///vmfs/volumes/66b0c1d2-3e4f5a6b-7c8d-3cecef1a0500/",
+        "hosts": [
+          "esx05.wld01.vcf.example",
+          "esx06.wld01.vcf.example",
+          "esx07.wld01.vcf.example"
+        ],
+        "multipleHostAccess": true,
+        "maintenanceMode": false,
+        "vmfsVersion": "6.82",
+        "overallStatus": "green"
       },
       "relationships": []
     },
@@ -104,7 +165,21 @@
         "capacity": 4398046511104,
         "freeSpace": 1627277209108,
         "accessible": true,
-        "type": "NFS41"
+        "type": "NFS41",
+        "url": "ds:///vmfs/volumes/9f8e7d6c-5b4a3928/",
+        "hosts": [
+          "esx01.wld01.vcf.example",
+          "esx02.wld01.vcf.example",
+          "esx03.wld01.vcf.example",
+          "esx04.wld01.vcf.example",
+          "esx05.wld01.vcf.example",
+          "esx06.wld01.vcf.example",
+          "esx07.wld01.vcf.example"
+        ],
+        "multipleHostAccess": true,
+        "maintenanceMode": false,
+        "vmfsVersion": null,
+        "overallStatus": "green"
       },
       "relationships": []
     },
@@ -115,8 +190,44 @@
       "source": "vcenter:vc-wld01",
       "parent_id": "datacenter:vc-wld01:wld01-dc",
       "properties": {
-        "type": "DistributedVirtualPortgroup",
-        "vlanId": 1611
+        "type": "dvportgroup",
+        "vlan": 1611,
+        "numPorts": 32,
+        "switch": "wld01-vds01",
+        "hosts": null,
+        "exists": true
+      },
+      "relationships": []
+    },
+    {
+      "id": "network:vc-wld01:pg-vmotion",
+      "type": "network",
+      "name": "pg-vmotion",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "datacenter:vc-wld01:wld01-dc",
+      "properties": {
+        "type": "dvportgroup",
+        "vlan": 200,
+        "numPorts": 32,
+        "switch": "wld01-vds01",
+        "hosts": null,
+        "exists": true
+      },
+      "relationships": []
+    },
+    {
+      "id": "network:vc-wld01:pg-vsan",
+      "type": "network",
+      "name": "pg-vsan",
+      "source": "vcenter:vc-wld01",
+      "parent_id": "datacenter:vc-wld01:wld01-dc",
+      "properties": {
+        "type": "dvportgroup",
+        "vlan": 300,
+        "numPorts": 32,
+        "switch": "wld01-vds01",
+        "hosts": null,
+        "exists": true
       },
       "relationships": []
     },
@@ -127,8 +238,12 @@
       "source": "vcenter:vc-wld01",
       "parent_id": "datacenter:vc-wld01:wld01-dc",
       "properties": {
-        "type": "DistributedVirtualPortgroup",
-        "vlanId": 1614
+        "type": "dvportgroup",
+        "vlan": "trunk 0-4094",
+        "numPorts": 16,
+        "switch": "wld01-vds01",
+        "hosts": null,
+        "exists": true
       },
       "relationships": []
     },
@@ -139,8 +254,12 @@
       "source": "vcenter:vc-wld01",
       "parent_id": "datacenter:vc-wld01:wld01-dc",
       "properties": {
-        "type": "NsxSegment",
-        "transportZone": "wld01-overlay-tz"
+        "type": "opaque",
+        "vlan": null,
+        "numPorts": null,
+        "switch": null,
+        "hosts": null,
+        "exists": true
       },
       "relationships": []
     },
@@ -151,8 +270,12 @@
       "source": "vcenter:vc-wld01",
       "parent_id": "datacenter:vc-wld01:wld01-dc",
       "properties": {
-        "type": "NsxSegment",
-        "transportZone": "wld01-overlay-tz"
+        "type": "opaque",
+        "vlan": null,
+        "numPorts": null,
+        "switch": null,
+        "hosts": null,
+        "exists": true
       },
       "relationships": []
     },
@@ -163,8 +286,12 @@
       "source": "vcenter:vc-wld01",
       "parent_id": "datacenter:vc-wld01:wld01-dc",
       "properties": {
-        "type": "NsxSegment",
-        "transportZone": "wld01-overlay-tz"
+        "type": "opaque",
+        "vlan": null,
+        "numPorts": null,
+        "switch": null,
+        "hosts": null,
+        "exists": true
       },
       "relationships": []
     },
@@ -175,8 +302,12 @@
       "source": "vcenter:vc-wld01",
       "parent_id": "datacenter:vc-wld01:wld01-dc",
       "properties": {
-        "type": "NsxSegment",
-        "transportZone": "wld01-overlay-tz"
+        "type": "opaque",
+        "vlan": null,
+        "numPorts": null,
+        "switch": null,
+        "hosts": null,
+        "exists": true
       },
       "relationships": []
     },
@@ -191,11 +322,66 @@
         "powerState": "poweredOn",
         "maintenanceMode": false,
         "cluster": "wld01-cl01",
+        "datacenter": "wld01-dc",
+        "version": "8.0.3",
+        "build": "24022510",
+        "model": "PowerEdge R760",
+        "vendor": "Dell Inc.",
+        "biosVersion": "2.3.4",
         "cpuMhz": 2600,
         "numCpuCores": 64,
         "memoryBytes": 1099511627776,
-        "version": "8.0.3",
-        "build": "24280767"
+        "uptimeSeconds": 4060800,
+        "bootTime": "2026-07-15T06:00:00Z",
+        "lockdownMode": "lockdownNormal",
+        "ntpServers": [
+          "ntp1.wld01.vcf.example",
+          "ntp2.wld01.vcf.example"
+        ],
+        "dnsServers": [
+          "172.16.11.10",
+          "172.16.11.11"
+        ],
+        "vmkernelAdapters": [
+          {
+            "device": "vmk0",
+            "ip": "172.16.11.101",
+            "mtu": 1500,
+            "portgroup": "wld01-vds01-mgmt"
+          },
+          {
+            "device": "vmk1",
+            "ip": "172.16.12.101",
+            "mtu": 9000,
+            "portgroup": "pg-vmotion"
+          },
+          {
+            "device": "vmk2",
+            "ip": "172.16.13.101",
+            "mtu": 9000,
+            "portgroup": "pg-vsan"
+          }
+        ],
+        "physicalNics": [
+          {
+            "device": "vmnic0",
+            "mac": "3c:ec:ef:1a:01:00",
+            "linkSpeedMb": 25000
+          },
+          {
+            "device": "vmnic1",
+            "mac": "3c:ec:ef:1a:01:01",
+            "linkSpeedMb": 25000
+          }
+        ],
+        "standardSwitches": [],
+        "numVms": 7,
+        "datastores": [
+          "nfs01-iso-templates",
+          "wld01-cl01-vsan01",
+          "wld01-cl01-vsan02"
+        ],
+        "overallStatus": "green"
       },
       "relationships": [
         {
@@ -227,11 +413,66 @@
         "powerState": "poweredOn",
         "maintenanceMode": false,
         "cluster": "wld01-cl01",
+        "datacenter": "wld01-dc",
+        "version": "8.0.3",
+        "build": "24022510",
+        "model": "PowerEdge R760",
+        "vendor": "Dell Inc.",
+        "biosVersion": "2.3.4",
         "cpuMhz": 2600,
         "numCpuCores": 64,
         "memoryBytes": 1099511627776,
-        "version": "8.0.3",
-        "build": "24280767"
+        "uptimeSeconds": 4060800,
+        "bootTime": "2026-07-15T06:00:00Z",
+        "lockdownMode": "lockdownNormal",
+        "ntpServers": [
+          "ntp1.wld01.vcf.example",
+          "ntp2.wld01.vcf.example"
+        ],
+        "dnsServers": [
+          "172.16.11.10",
+          "172.16.11.11"
+        ],
+        "vmkernelAdapters": [
+          {
+            "device": "vmk0",
+            "ip": "172.16.11.102",
+            "mtu": 1500,
+            "portgroup": "wld01-vds01-mgmt"
+          },
+          {
+            "device": "vmk1",
+            "ip": "172.16.12.102",
+            "mtu": 9000,
+            "portgroup": "pg-vmotion"
+          },
+          {
+            "device": "vmk2",
+            "ip": "172.16.13.102",
+            "mtu": 9000,
+            "portgroup": "pg-vsan"
+          }
+        ],
+        "physicalNics": [
+          {
+            "device": "vmnic0",
+            "mac": "3c:ec:ef:1a:02:00",
+            "linkSpeedMb": 25000
+          },
+          {
+            "device": "vmnic1",
+            "mac": "3c:ec:ef:1a:02:01",
+            "linkSpeedMb": 25000
+          }
+        ],
+        "standardSwitches": [],
+        "numVms": 6,
+        "datastores": [
+          "nfs01-iso-templates",
+          "wld01-cl01-vsan01",
+          "wld01-cl01-vsan02"
+        ],
+        "overallStatus": "green"
       },
       "relationships": [
         {
@@ -263,11 +504,66 @@
         "powerState": "poweredOn",
         "maintenanceMode": false,
         "cluster": "wld01-cl01",
+        "datacenter": "wld01-dc",
+        "version": "8.0.3",
+        "build": "24022510",
+        "model": "PowerEdge R760",
+        "vendor": "Dell Inc.",
+        "biosVersion": "2.3.4",
         "cpuMhz": 2600,
         "numCpuCores": 64,
         "memoryBytes": 1099511627776,
-        "version": "8.0.3",
-        "build": "24280767"
+        "uptimeSeconds": 3974400,
+        "bootTime": "2026-07-16T06:00:00Z",
+        "lockdownMode": "lockdownNormal",
+        "ntpServers": [
+          "ntp1.wld01.vcf.example",
+          "ntp2.wld01.vcf.example"
+        ],
+        "dnsServers": [
+          "172.16.11.10",
+          "172.16.11.11"
+        ],
+        "vmkernelAdapters": [
+          {
+            "device": "vmk0",
+            "ip": "172.16.11.103",
+            "mtu": 1500,
+            "portgroup": "wld01-vds01-mgmt"
+          },
+          {
+            "device": "vmk1",
+            "ip": "172.16.12.103",
+            "mtu": 9000,
+            "portgroup": "pg-vmotion"
+          },
+          {
+            "device": "vmk2",
+            "ip": "172.16.13.103",
+            "mtu": 9000,
+            "portgroup": "pg-vsan"
+          }
+        ],
+        "physicalNics": [
+          {
+            "device": "vmnic0",
+            "mac": "3c:ec:ef:1a:03:00",
+            "linkSpeedMb": 25000
+          },
+          {
+            "device": "vmnic1",
+            "mac": "3c:ec:ef:1a:03:01",
+            "linkSpeedMb": 25000
+          }
+        ],
+        "standardSwitches": [],
+        "numVms": 7,
+        "datastores": [
+          "nfs01-iso-templates",
+          "wld01-cl01-vsan01",
+          "wld01-cl01-vsan02"
+        ],
+        "overallStatus": "green"
       },
       "relationships": [
         {
@@ -299,11 +595,66 @@
         "powerState": "poweredOn",
         "maintenanceMode": false,
         "cluster": "wld01-cl01",
+        "datacenter": "wld01-dc",
+        "version": "8.0.3",
+        "build": "24022510",
+        "model": "PowerEdge R760",
+        "vendor": "Dell Inc.",
+        "biosVersion": "2.3.4",
         "cpuMhz": 2600,
         "numCpuCores": 64,
         "memoryBytes": 1099511627776,
-        "version": "8.0.3",
-        "build": "24280767"
+        "uptimeSeconds": 3974400,
+        "bootTime": "2026-07-16T06:00:00Z",
+        "lockdownMode": "lockdownNormal",
+        "ntpServers": [
+          "ntp1.wld01.vcf.example",
+          "ntp2.wld01.vcf.example"
+        ],
+        "dnsServers": [
+          "172.16.11.10",
+          "172.16.11.11"
+        ],
+        "vmkernelAdapters": [
+          {
+            "device": "vmk0",
+            "ip": "172.16.11.104",
+            "mtu": 1500,
+            "portgroup": "wld01-vds01-mgmt"
+          },
+          {
+            "device": "vmk1",
+            "ip": "172.16.12.104",
+            "mtu": 9000,
+            "portgroup": "pg-vmotion"
+          },
+          {
+            "device": "vmk2",
+            "ip": "172.16.13.104",
+            "mtu": 9000,
+            "portgroup": "pg-vsan"
+          }
+        ],
+        "physicalNics": [
+          {
+            "device": "vmnic0",
+            "mac": "3c:ec:ef:1a:04:00",
+            "linkSpeedMb": 25000
+          },
+          {
+            "device": "vmnic1",
+            "mac": "3c:ec:ef:1a:04:01",
+            "linkSpeedMb": 25000
+          }
+        ],
+        "standardSwitches": [],
+        "numVms": 4,
+        "datastores": [
+          "nfs01-iso-templates",
+          "wld01-cl01-vsan01",
+          "wld01-cl01-vsan02"
+        ],
+        "overallStatus": "green"
       },
       "relationships": [
         {
@@ -335,11 +686,65 @@
         "powerState": "poweredOn",
         "maintenanceMode": false,
         "cluster": "wld01-edge",
+        "datacenter": "wld01-dc",
+        "version": "8.0.3",
+        "build": "24022510",
+        "model": "PowerEdge R760",
+        "vendor": "Dell Inc.",
+        "biosVersion": "2.3.4",
         "cpuMhz": 2400,
         "numCpuCores": 32,
         "memoryBytes": 549755813888,
-        "version": "8.0.3",
-        "build": "24280767"
+        "uptimeSeconds": 2851200,
+        "bootTime": "2026-07-29T06:00:00Z",
+        "lockdownMode": "lockdownNormal",
+        "ntpServers": [
+          "ntp1.wld01.vcf.example",
+          "ntp2.wld01.vcf.example"
+        ],
+        "dnsServers": [
+          "172.16.11.10",
+          "172.16.11.11"
+        ],
+        "vmkernelAdapters": [
+          {
+            "device": "vmk0",
+            "ip": "172.16.11.105",
+            "mtu": 1500,
+            "portgroup": "wld01-vds01-mgmt"
+          },
+          {
+            "device": "vmk1",
+            "ip": "172.16.12.105",
+            "mtu": 9000,
+            "portgroup": "pg-vmotion"
+          },
+          {
+            "device": "vmk2",
+            "ip": "172.16.13.105",
+            "mtu": 9000,
+            "portgroup": "pg-vsan"
+          }
+        ],
+        "physicalNics": [
+          {
+            "device": "vmnic0",
+            "mac": "3c:ec:ef:1a:05:00",
+            "linkSpeedMb": 25000
+          },
+          {
+            "device": "vmnic1",
+            "mac": "3c:ec:ef:1a:05:01",
+            "linkSpeedMb": 25000
+          }
+        ],
+        "standardSwitches": [],
+        "numVms": 2,
+        "datastores": [
+          "nfs01-iso-templates",
+          "wld01-edge-vmfs01"
+        ],
+        "overallStatus": "green"
       },
       "relationships": [
         {
@@ -348,7 +753,7 @@
         },
         {
           "kind": "uses_datastore",
-          "target_id": "datastore:vc-wld01:wld01-edge-vsan01"
+          "target_id": "datastore:vc-wld01:wld01-edge-vmfs01"
         },
         {
           "kind": "uses_datastore",
@@ -367,11 +772,65 @@
         "powerState": "poweredOn",
         "maintenanceMode": false,
         "cluster": "wld01-edge",
+        "datacenter": "wld01-dc",
+        "version": "8.0.3",
+        "build": "24022510",
+        "model": "PowerEdge R760",
+        "vendor": "Dell Inc.",
+        "biosVersion": "2.3.4",
         "cpuMhz": 2400,
         "numCpuCores": 32,
         "memoryBytes": 549755813888,
-        "version": "8.0.3",
-        "build": "24280767"
+        "uptimeSeconds": 2851200,
+        "bootTime": "2026-07-29T06:00:00Z",
+        "lockdownMode": "lockdownNormal",
+        "ntpServers": [
+          "ntp1.wld01.vcf.example",
+          "ntp2.wld01.vcf.example"
+        ],
+        "dnsServers": [
+          "172.16.11.10",
+          "172.16.11.11"
+        ],
+        "vmkernelAdapters": [
+          {
+            "device": "vmk0",
+            "ip": "172.16.11.106",
+            "mtu": 1500,
+            "portgroup": "wld01-vds01-mgmt"
+          },
+          {
+            "device": "vmk1",
+            "ip": "172.16.12.106",
+            "mtu": 9000,
+            "portgroup": "pg-vmotion"
+          },
+          {
+            "device": "vmk2",
+            "ip": "172.16.13.106",
+            "mtu": 9000,
+            "portgroup": "pg-vsan"
+          }
+        ],
+        "physicalNics": [
+          {
+            "device": "vmnic0",
+            "mac": "3c:ec:ef:1a:06:00",
+            "linkSpeedMb": 25000
+          },
+          {
+            "device": "vmnic1",
+            "mac": "3c:ec:ef:1a:06:01",
+            "linkSpeedMb": 25000
+          }
+        ],
+        "standardSwitches": [],
+        "numVms": 2,
+        "datastores": [
+          "nfs01-iso-templates",
+          "wld01-edge-vmfs01"
+        ],
+        "overallStatus": "green"
       },
       "relationships": [
         {
@@ -380,7 +839,7 @@
         },
         {
           "kind": "uses_datastore",
-          "target_id": "datastore:vc-wld01:wld01-edge-vsan01"
+          "target_id": "datastore:vc-wld01:wld01-edge-vmfs01"
         },
         {
           "kind": "uses_datastore",
@@ -399,11 +858,65 @@
         "powerState": "poweredOn",
         "maintenanceMode": false,
         "cluster": "wld01-edge",
+        "datacenter": "wld01-dc",
+        "version": "8.0.3",
+        "build": "24022510",
+        "model": "PowerEdge R760",
+        "vendor": "Dell Inc.",
+        "biosVersion": "2.3.4",
         "cpuMhz": 2400,
         "numCpuCores": 32,
         "memoryBytes": 549755813888,
-        "version": "8.0.3",
-        "build": "24280767"
+        "uptimeSeconds": 1036800,
+        "bootTime": "2026-08-19T06:00:00Z",
+        "lockdownMode": "lockdownNormal",
+        "ntpServers": [
+          "ntp1.wld01.vcf.example",
+          "ntp2.wld01.vcf.example"
+        ],
+        "dnsServers": [
+          "172.16.11.10",
+          "172.16.11.11"
+        ],
+        "vmkernelAdapters": [
+          {
+            "device": "vmk0",
+            "ip": "172.16.11.107",
+            "mtu": 1500,
+            "portgroup": "wld01-vds01-mgmt"
+          },
+          {
+            "device": "vmk1",
+            "ip": "172.16.12.107",
+            "mtu": 9000,
+            "portgroup": "pg-vmotion"
+          },
+          {
+            "device": "vmk2",
+            "ip": "172.16.13.107",
+            "mtu": 9000,
+            "portgroup": "pg-vsan"
+          }
+        ],
+        "physicalNics": [
+          {
+            "device": "vmnic0",
+            "mac": "3c:ec:ef:1a:07:00",
+            "linkSpeedMb": 25000
+          },
+          {
+            "device": "vmnic1",
+            "mac": "3c:ec:ef:1a:07:01",
+            "linkSpeedMb": 25000
+          }
+        ],
+        "standardSwitches": [],
+        "numVms": 0,
+        "datastores": [
+          "nfs01-iso-templates",
+          "wld01-edge-vmfs01"
+        ],
+        "overallStatus": "green"
       },
       "relationships": [
         {
@@ -412,7 +925,7 @@
         },
         {
           "kind": "uses_datastore",
-          "target_id": "datastore:vc-wld01:wld01-edge-vsan01"
+          "target_id": "datastore:vc-wld01:wld01-edge-vmfs01"
         },
         {
           "kind": "uses_datastore",
@@ -428,18 +941,50 @@
       "parent_id": "host:vc-wld01:esx01",
       "properties": {
         "powerState": "poweredOn",
+        "connectionState": "connected",
         "host": "esx01.wld01.vcf.example",
         "cluster": "wld01-cl01",
+        "resourcePool": "Resources",
+        "folder": "web",
+        "guestFullName": "Ubuntu Linux (64-bit)",
+        "guestHostname": "web01.wld01.vcf.example",
+        "guestIp": "10.20.10.11",
+        "guestState": "running",
+        "toolsStatus": "toolsOk",
+        "toolsVersion": "12448",
+        "numCpu": 2,
+        "memoryMB": 4096,
+        "hardwareVersion": "vmx-21",
+        "template": false,
+        "cpuReservationMhz": 0,
+        "memReservationMB": 0,
+        "annotation": "",
+        "snapshotCount": 0,
+        "oldestSnapshotTime": null,
+        "disks": [
+          {
+            "label": "Hard disk 1",
+            "capacityBytes": 68719476736,
+            "datastore": "wld01-cl01-vsan01",
+            "thin": true
+          }
+        ],
+        "nics": [
+          {
+            "label": "Network adapter 1",
+            "mac": "00:50:56:8a:00:00",
+            "network": "seg-web-10.20.10.0",
+            "connected": true
+          }
+        ],
         "networks": [
           "seg-web-10.20.10.0"
         ],
         "datastores": [
           "wld01-cl01-vsan01"
         ],
-        "guestFullName": "Ubuntu Linux (64-bit)",
-        "numCpu": 2,
-        "memoryMB": 4096,
-        "template": false,
+        "storageCommittedBytes": 27487790694,
+        "bootTime": "2026-07-15T12:00:00Z",
         "overallStatus": "green"
       },
       "relationships": [
@@ -465,18 +1010,50 @@
       "parent_id": "host:vc-wld01:esx01",
       "properties": {
         "powerState": "poweredOn",
+        "connectionState": "connected",
         "host": "esx01.wld01.vcf.example",
         "cluster": "wld01-cl01",
+        "resourcePool": "Resources",
+        "folder": "web",
+        "guestFullName": "Ubuntu Linux (64-bit)",
+        "guestHostname": "web03.wld01.vcf.example",
+        "guestIp": "10.20.10.13",
+        "guestState": "running",
+        "toolsStatus": "toolsOk",
+        "toolsVersion": "12448",
+        "numCpu": 2,
+        "memoryMB": 4096,
+        "hardwareVersion": "vmx-21",
+        "template": false,
+        "cpuReservationMhz": 0,
+        "memReservationMB": 0,
+        "annotation": "",
+        "snapshotCount": 0,
+        "oldestSnapshotTime": null,
+        "disks": [
+          {
+            "label": "Hard disk 1",
+            "capacityBytes": 68719476736,
+            "datastore": "wld01-cl01-vsan01",
+            "thin": true
+          }
+        ],
+        "nics": [
+          {
+            "label": "Network adapter 1",
+            "mac": "00:50:56:8a:01:00",
+            "network": "seg-web-10.20.10.0",
+            "connected": true
+          }
+        ],
         "networks": [
           "seg-web-10.20.10.0"
         ],
         "datastores": [
           "wld01-cl01-vsan01"
         ],
-        "guestFullName": "Ubuntu Linux (64-bit)",
-        "numCpu": 2,
-        "memoryMB": 4096,
-        "template": false,
+        "storageCommittedBytes": 27487790694,
+        "bootTime": "2026-07-15T15:07:00Z",
         "overallStatus": "green"
       },
       "relationships": [
@@ -502,18 +1079,56 @@
       "parent_id": "host:vc-wld01:esx01",
       "properties": {
         "powerState": "poweredOn",
+        "connectionState": "connected",
         "host": "esx01.wld01.vcf.example",
         "cluster": "wld01-cl01",
+        "resourcePool": "Resources",
+        "folder": "app",
+        "guestFullName": "Red Hat Enterprise Linux 9 (64-bit)",
+        "guestHostname": "app01.wld01.vcf.example",
+        "guestIp": "10.20.20.11",
+        "guestState": "running",
+        "toolsStatus": "toolsOk",
+        "toolsVersion": "12448",
+        "numCpu": 4,
+        "memoryMB": 8192,
+        "hardwareVersion": "vmx-21",
+        "template": false,
+        "cpuReservationMhz": 0,
+        "memReservationMB": 0,
+        "annotation": "",
+        "snapshotCount": 0,
+        "oldestSnapshotTime": null,
+        "disks": [
+          {
+            "label": "Hard disk 1",
+            "capacityBytes": 68719476736,
+            "datastore": "wld01-cl01-vsan01",
+            "thin": true
+          },
+          {
+            "label": "Hard disk 2",
+            "capacityBytes": 214748364800,
+            "datastore": "wld01-cl01-vsan01",
+            "thin": true
+          }
+        ],
+        "nics": [
+          {
+            "label": "Network adapter 1",
+            "mac": "00:50:56:8a:02:00",
+            "network": "seg-app-10.20.20.0",
+            "connected": true
+          }
+        ],
         "networks": [
           "seg-app-10.20.20.0"
         ],
         "datastores": [
           "wld01-cl01-vsan01"
         ],
-        "guestFullName": "Red Hat Enterprise Linux 9 (64-bit)",
-        "numCpu": 4,
-        "memoryMB": 8192,
-        "template": false,
+        "storageCommittedBytes": 113387136614,
+        "bootTime": "2026-07-15T18:14:00Z",
         "overallStatus": "green"
       },
       "relationships": [
@@ -539,18 +1154,56 @@
       "parent_id": "host:vc-wld01:esx01",
       "properties": {
         "powerState": "poweredOn",
+        "connectionState": "connected",
         "host": "esx01.wld01.vcf.example",
         "cluster": "wld01-cl01",
+        "resourcePool": "Resources",
+        "folder": "db",
+        "guestFullName": "Red Hat Enterprise Linux 9 (64-bit)",
+        "guestHostname": "db01.wld01.vcf.example",
+        "guestIp": "10.20.30.11",
+        "guestState": "running",
+        "toolsStatus": "toolsOk",
+        "toolsVersion": "12448",
+        "numCpu": 8,
+        "memoryMB": 32768,
+        "hardwareVersion": "vmx-21",
+        "template": false,
+        "cpuReservationMhz": 0,
+        "memReservationMB": 16384,
+        "annotation": "",
+        "snapshotCount": 0,
+        "oldestSnapshotTime": null,
+        "disks": [
+          {
+            "label": "Hard disk 1",
+            "capacityBytes": 68719476736,
+            "datastore": "wld01-cl01-vsan01",
+            "thin": true
+          },
+          {
+            "label": "Hard disk 2",
+            "capacityBytes": 536870912000,
+            "datastore": "wld01-cl01-vsan01",
+            "thin": false
+          }
+        ],
+        "nics": [
+          {
+            "label": "Network adapter 1",
+            "mac": "00:50:56:8a:03:00",
+            "network": "seg-db-10.20.30.0",
+            "connected": true
+          }
+        ],
         "networks": [
           "seg-db-10.20.30.0"
         ],
         "datastores": [
           "wld01-cl01-vsan01"
         ],
-        "guestFullName": "Red Hat Enterprise Linux 9 (64-bit)",
-        "numCpu": 8,
-        "memoryMB": 32768,
-        "template": false,
+        "storageCommittedBytes": 564358702694,
+        "bootTime": "2026-07-15T21:21:00Z",
         "overallStatus": "green"
       },
       "relationships": [
@@ -576,18 +1229,50 @@
       "parent_id": "host:vc-wld01:esx01",
       "properties": {
         "powerState": "poweredOn",
+        "connectionState": "connected",
         "host": "esx01.wld01.vcf.example",
         "cluster": "wld01-cl01",
+        "resourcePool": "Resources",
+        "folder": "infra",
+        "guestFullName": "Ubuntu Linux (64-bit)",
+        "guestHostname": "dns01.wld01.vcf.example",
+        "guestIp": "172.16.11.10",
+        "guestState": "running",
+        "toolsStatus": "toolsOk",
+        "toolsVersion": "12448",
+        "numCpu": 2,
+        "memoryMB": 2048,
+        "hardwareVersion": "vmx-21",
+        "template": false,
+        "cpuReservationMhz": 0,
+        "memReservationMB": 0,
+        "annotation": "",
+        "snapshotCount": 0,
+        "oldestSnapshotTime": null,
+        "disks": [
+          {
+            "label": "Hard disk 1",
+            "capacityBytes": 68719476736,
+            "datastore": "wld01-cl01-vsan01",
+            "thin": true
+          }
+        ],
+        "nics": [
+          {
+            "label": "Network adapter 1",
+            "mac": "00:50:56:8a:04:00",
+            "network": "wld01-vds01-mgmt",
+            "connected": true
+          }
+        ],
         "networks": [
           "wld01-vds01-mgmt"
         ],
         "datastores": [
           "wld01-cl01-vsan01"
         ],
-        "guestFullName": "Ubuntu Linux (64-bit)",
-        "numCpu": 2,
-        "memoryMB": 2048,
-        "template": false,
+        "storageCommittedBytes": 27487790694,
+        "bootTime": "2026-07-16T00:28:00Z",
         "overallStatus": "green"
       },
       "relationships": [
@@ -613,18 +1298,50 @@
       "parent_id": "host:vc-wld01:esx01",
       "properties": {
         "powerState": "poweredOff",
+        "connectionState": "connected",
         "host": "esx01.wld01.vcf.example",
         "cluster": "wld01-cl01",
+        "resourcePool": "Resources",
+        "folder": "templates",
+        "guestFullName": "Ubuntu Linux (64-bit)",
+        "guestHostname": null,
+        "guestIp": null,
+        "guestState": "notRunning",
+        "toolsStatus": "toolsNotRunning",
+        "toolsVersion": "12448",
+        "numCpu": 2,
+        "memoryMB": 2048,
+        "hardwareVersion": "vmx-21",
+        "template": true,
+        "cpuReservationMhz": 0,
+        "memReservationMB": 0,
+        "annotation": "Ubuntu 22.04 LTS golden image, built 2026-06-14",
+        "snapshotCount": 0,
+        "oldestSnapshotTime": null,
+        "disks": [
+          {
+            "label": "Hard disk 1",
+            "capacityBytes": 68719476736,
+            "datastore": "nfs01-iso-templates",
+            "thin": true
+          }
+        ],
+        "nics": [
+          {
+            "label": "Network adapter 1",
+            "mac": "00:50:56:8a:05:00",
+            "network": "wld01-vds01-mgmt",
+            "connected": false
+          }
+        ],
         "networks": [
           "wld01-vds01-mgmt"
         ],
         "datastores": [
           "nfs01-iso-templates"
         ],
-        "guestFullName": "Ubuntu Linux (64-bit)",
-        "numCpu": 2,
-        "memoryMB": 2048,
-        "template": true,
+        "storageCommittedBytes": 17179869184,
+        "bootTime": null,
         "overallStatus": "green"
       },
       "relationships": [
@@ -650,16 +1367,41 @@
       "parent_id": "host:vc-wld01:esx01",
       "properties": {
         "powerState": "poweredOn",
+        "connectionState": "connected",
         "host": "esx01.wld01.vcf.example",
         "cluster": "wld01-cl01",
+        "resourcePool": "Resources",
+        "folder": "vCLS",
+        "guestFullName": "VMware Photon OS (64-bit)",
+        "guestHostname": null,
+        "guestIp": null,
+        "guestState": "running",
+        "toolsStatus": "toolsOk",
+        "toolsVersion": "12448",
+        "numCpu": 1,
+        "memoryMB": 128,
+        "hardwareVersion": "vmx-21",
+        "template": false,
+        "cpuReservationMhz": 100,
+        "memReservationMB": 128,
+        "annotation": "",
+        "snapshotCount": 0,
+        "oldestSnapshotTime": null,
+        "disks": [
+          {
+            "label": "Hard disk 1",
+            "capacityBytes": 2147483648,
+            "datastore": "wld01-cl01-vsan01",
+            "thin": true
+          }
+        ],
+        "nics": [],
         "networks": [],
         "datastores": [
           "wld01-cl01-vsan01"
         ],
-        "guestFullName": "VMware Photon OS (64-bit)",
-        "numCpu": 1,
-        "memoryMB": 128,
-        "template": false,
+        "storageCommittedBytes": 858993459,
+        "bootTime": "2026-07-16T06:42:00Z",
         "overallStatus": "green"
       },
       "relationships": [
@@ -681,18 +1423,50 @@
       "parent_id": "host:vc-wld01:esx02",
       "properties": {
         "powerState": "poweredOn",
+        "connectionState": "connected",
         "host": "esx02.wld01.vcf.example",
         "cluster": "wld01-cl01",
+        "resourcePool": "Resources",
+        "folder": "web",
+        "guestFullName": "Ubuntu Linux (64-bit)",
+        "guestHostname": "web02.wld01.vcf.example",
+        "guestIp": "10.20.10.12",
+        "guestState": "running",
+        "toolsStatus": "toolsOk",
+        "toolsVersion": "12448",
+        "numCpu": 2,
+        "memoryMB": 4096,
+        "hardwareVersion": "vmx-21",
+        "template": false,
+        "cpuReservationMhz": 0,
+        "memReservationMB": 0,
+        "annotation": "",
+        "snapshotCount": 0,
+        "oldestSnapshotTime": null,
+        "disks": [
+          {
+            "label": "Hard disk 1",
+            "capacityBytes": 68719476736,
+            "datastore": "wld01-cl01-vsan01",
+            "thin": true
+          }
+        ],
+        "nics": [
+          {
+            "label": "Network adapter 1",
+            "mac": "00:50:56:8a:07:00",
+            "network": "seg-web-10.20.10.0",
+            "connected": true
+          }
+        ],
         "networks": [
           "seg-web-10.20.10.0"
         ],
         "datastores": [
           "wld01-cl01-vsan01"
         ],
-        "guestFullName": "Ubuntu Linux (64-bit)",
-        "numCpu": 2,
-        "memoryMB": 4096,
-        "template": false,
+        "storageCommittedBytes": 27487790694,
+        "bootTime": "2026-07-16T09:49:00Z",
         "overallStatus": "green"
       },
       "relationships": [
@@ -718,18 +1492,56 @@
       "parent_id": "host:vc-wld01:esx02",
       "properties": {
         "powerState": "poweredOn",
+        "connectionState": "connected",
         "host": "esx02.wld01.vcf.example",
         "cluster": "wld01-cl01",
+        "resourcePool": "Resources",
+        "folder": "app",
+        "guestFullName": "Red Hat Enterprise Linux 9 (64-bit)",
+        "guestHostname": "app02.wld01.vcf.example",
+        "guestIp": "10.20.20.12",
+        "guestState": "running",
+        "toolsStatus": "toolsOk",
+        "toolsVersion": "12448",
+        "numCpu": 4,
+        "memoryMB": 8192,
+        "hardwareVersion": "vmx-21",
+        "template": false,
+        "cpuReservationMhz": 0,
+        "memReservationMB": 0,
+        "annotation": "",
+        "snapshotCount": 0,
+        "oldestSnapshotTime": null,
+        "disks": [
+          {
+            "label": "Hard disk 1",
+            "capacityBytes": 68719476736,
+            "datastore": "wld01-cl01-vsan01",
+            "thin": true
+          },
+          {
+            "label": "Hard disk 2",
+            "capacityBytes": 214748364800,
+            "datastore": "wld01-cl01-vsan01",
+            "thin": true
+          }
+        ],
+        "nics": [
+          {
+            "label": "Network adapter 1",
+            "mac": "00:50:56:8a:08:00",
+            "network": "seg-app-10.20.20.0",
+            "connected": true
+          }
+        ],
         "networks": [
           "seg-app-10.20.20.0"
         ],
         "datastores": [
           "wld01-cl01-vsan01"
         ],
-        "guestFullName": "Red Hat Enterprise Linux 9 (64-bit)",
-        "numCpu": 4,
-        "memoryMB": 8192,
-        "template": false,
+        "storageCommittedBytes": 113387136614,
+        "bootTime": "2026-07-16T12:56:00Z",
         "overallStatus": "green"
       },
       "relationships": [
@@ -755,8 +1567,48 @@
       "parent_id": "host:vc-wld01:esx02",
       "properties": {
         "powerState": "poweredOn",
+        "connectionState": "connected",
         "host": "esx02.wld01.vcf.example",
         "cluster": "wld01-cl01",
+        "resourcePool": "Resources",
+        "folder": "dmz",
+        "guestFullName": "Ubuntu Linux (64-bit)",
+        "guestHostname": "dmz-lb01.wld01.vcf.example",
+        "guestIp": "10.20.40.21",
+        "guestState": "running",
+        "toolsStatus": "toolsOk",
+        "toolsVersion": "12448",
+        "numCpu": 2,
+        "memoryMB": 4096,
+        "hardwareVersion": "vmx-21",
+        "template": false,
+        "cpuReservationMhz": 0,
+        "memReservationMB": 0,
+        "annotation": "",
+        "snapshotCount": 0,
+        "oldestSnapshotTime": null,
+        "disks": [
+          {
+            "label": "Hard disk 1",
+            "capacityBytes": 68719476736,
+            "datastore": "wld01-cl01-vsan01",
+            "thin": true
+          }
+        ],
+        "nics": [
+          {
+            "label": "Network adapter 1",
+            "mac": "00:50:56:8a:09:00",
+            "network": "seg-dmz-10.20.40.0",
+            "connected": true
+          },
+          {
+            "label": "Network adapter 2",
+            "mac": "00:50:56:8a:09:01",
+            "network": "seg-web-10.20.10.0",
+            "connected": true
+          }
+        ],
         "networks": [
           "seg-dmz-10.20.40.0",
           "seg-web-10.20.10.0"
@@ -764,10 +1616,8 @@
         "datastores": [
           "wld01-cl01-vsan01"
         ],
-        "guestFullName": "Ubuntu Linux (64-bit)",
-        "numCpu": 2,
-        "memoryMB": 4096,
-        "template": false,
+        "storageCommittedBytes": 27487790694,
+        "bootTime": "2026-07-16T16:03:00Z",
         "overallStatus": "green"
       },
       "relationships": [
@@ -797,18 +1647,56 @@
       "parent_id": "host:vc-wld01:esx02",
       "properties": {
         "powerState": "poweredOn",
+        "connectionState": "connected",
         "host": "esx02.wld01.vcf.example",
         "cluster": "wld01-cl01",
+        "resourcePool": "Resources",
+        "folder": "infra",
+        "guestFullName": "Ubuntu Linux (64-bit)",
+        "guestHostname": "monitoring01.wld01.vcf.example",
+        "guestIp": "172.16.11.20",
+        "guestState": "running",
+        "toolsStatus": "toolsOk",
+        "toolsVersion": "12448",
+        "numCpu": 4,
+        "memoryMB": 16384,
+        "hardwareVersion": "vmx-21",
+        "template": false,
+        "cpuReservationMhz": 0,
+        "memReservationMB": 0,
+        "annotation": "",
+        "snapshotCount": 1,
+        "oldestSnapshotTime": "2026-08-10T06:00:00Z",
+        "disks": [
+          {
+            "label": "Hard disk 1",
+            "capacityBytes": 68719476736,
+            "datastore": "wld01-cl01-vsan01",
+            "thin": true
+          },
+          {
+            "label": "Hard disk 2",
+            "capacityBytes": 429496729600,
+            "datastore": "wld01-cl01-vsan01",
+            "thin": true
+          }
+        ],
+        "nics": [
+          {
+            "label": "Network adapter 1",
+            "mac": "00:50:56:8a:0a:00",
+            "network": "wld01-vds01-mgmt",
+            "connected": true
+          }
+        ],
         "networks": [
           "wld01-vds01-mgmt"
         ],
         "datastores": [
           "wld01-cl01-vsan01"
         ],
-        "guestFullName": "Ubuntu Linux (64-bit)",
-        "numCpu": 4,
-        "memoryMB": 16384,
-        "template": false,
+        "storageCommittedBytes": 199286482534,
+        "bootTime": "2026-07-16T19:10:00Z",
         "overallStatus": "green"
       },
       "relationships": [
@@ -834,18 +1722,50 @@
       "parent_id": "host:vc-wld01:esx02",
       "properties": {
         "powerState": "poweredOn",
+        "connectionState": "connected",
         "host": "esx02.wld01.vcf.example",
         "cluster": "wld01-cl01",
+        "resourcePool": "ws-ns01",
+        "folder": "ws-ns01",
+        "guestFullName": "VMware Photon OS (64-bit)",
+        "guestHostname": "ws-cp01.wld01.vcf.example",
+        "guestIp": "10.20.20.50",
+        "guestState": "running",
+        "toolsStatus": "toolsOk",
+        "toolsVersion": "12448",
+        "numCpu": 4,
+        "memoryMB": 16384,
+        "hardwareVersion": "vmx-21",
+        "template": false,
+        "cpuReservationMhz": 0,
+        "memReservationMB": 0,
+        "annotation": "",
+        "snapshotCount": 0,
+        "oldestSnapshotTime": null,
+        "disks": [
+          {
+            "label": "Hard disk 1",
+            "capacityBytes": 17179869184,
+            "datastore": "wld01-cl01-vsan01",
+            "thin": true
+          }
+        ],
+        "nics": [
+          {
+            "label": "Network adapter 1",
+            "mac": "00:50:56:8a:0b:00",
+            "network": "seg-app-10.20.20.0",
+            "connected": true
+          }
+        ],
         "networks": [
           "seg-app-10.20.20.0"
         ],
         "datastores": [
           "wld01-cl01-vsan01"
         ],
-        "guestFullName": "VMware Photon OS (64-bit)",
-        "numCpu": 4,
-        "memoryMB": 16384,
-        "template": false,
+        "storageCommittedBytes": 6871947673,
+        "bootTime": "2026-07-16T22:17:00Z",
         "overallStatus": "green"
       },
       "relationships": [
@@ -871,16 +1791,41 @@
       "parent_id": "host:vc-wld01:esx02",
       "properties": {
         "powerState": "poweredOn",
+        "connectionState": "connected",
         "host": "esx02.wld01.vcf.example",
         "cluster": "wld01-cl01",
+        "resourcePool": "Resources",
+        "folder": "vCLS",
+        "guestFullName": "VMware Photon OS (64-bit)",
+        "guestHostname": null,
+        "guestIp": null,
+        "guestState": "running",
+        "toolsStatus": "toolsOk",
+        "toolsVersion": "12448",
+        "numCpu": 1,
+        "memoryMB": 128,
+        "hardwareVersion": "vmx-21",
+        "template": false,
+        "cpuReservationMhz": 100,
+        "memReservationMB": 128,
+        "annotation": "",
+        "snapshotCount": 0,
+        "oldestSnapshotTime": null,
+        "disks": [
+          {
+            "label": "Hard disk 1",
+            "capacityBytes": 2147483648,
+            "datastore": "wld01-cl01-vsan01",
+            "thin": true
+          }
+        ],
+        "nics": [],
         "networks": [],
         "datastores": [
           "wld01-cl01-vsan01"
         ],
-        "guestFullName": "VMware Photon OS (64-bit)",
-        "numCpu": 1,
-        "memoryMB": 128,
-        "template": false,
+        "storageCommittedBytes": 858993459,
+        "bootTime": "2026-07-17T01:24:00Z",
         "overallStatus": "green"
       },
       "relationships": [
@@ -902,18 +1847,50 @@
       "parent_id": "host:vc-wld01:esx03",
       "properties": {
         "powerState": "poweredOn",
+        "connectionState": "connected",
         "host": "esx03.wld01.vcf.example",
         "cluster": "wld01-cl01",
+        "resourcePool": "Resources",
+        "folder": "web",
+        "guestFullName": "Ubuntu Linux (64-bit)",
+        "guestHostname": "web04.wld01.vcf.example",
+        "guestIp": "10.20.10.14",
+        "guestState": "running",
+        "toolsStatus": "toolsOk",
+        "toolsVersion": "12448",
+        "numCpu": 2,
+        "memoryMB": 4096,
+        "hardwareVersion": "vmx-21",
+        "template": false,
+        "cpuReservationMhz": 0,
+        "memReservationMB": 0,
+        "annotation": "",
+        "snapshotCount": 0,
+        "oldestSnapshotTime": null,
+        "disks": [
+          {
+            "label": "Hard disk 1",
+            "capacityBytes": 68719476736,
+            "datastore": "wld01-cl01-vsan01",
+            "thin": true
+          }
+        ],
+        "nics": [
+          {
+            "label": "Network adapter 1",
+            "mac": "00:50:56:8a:0d:00",
+            "network": "seg-web-10.20.10.0",
+            "connected": true
+          }
+        ],
         "networks": [
           "seg-web-10.20.10.0"
         ],
         "datastores": [
           "wld01-cl01-vsan01"
         ],
-        "guestFullName": "Ubuntu Linux (64-bit)",
-        "numCpu": 2,
-        "memoryMB": 4096,
-        "template": false,
+        "storageCommittedBytes": 27487790694,
+        "bootTime": "2026-07-18T04:31:00Z",
         "overallStatus": "green"
       },
       "relationships": [
@@ -939,18 +1916,56 @@
       "parent_id": "host:vc-wld01:esx03",
       "properties": {
         "powerState": "poweredOn",
+        "connectionState": "connected",
         "host": "esx03.wld01.vcf.example",
         "cluster": "wld01-cl01",
+        "resourcePool": "Resources",
+        "folder": "app",
+        "guestFullName": "Red Hat Enterprise Linux 9 (64-bit)",
+        "guestHostname": "app03.wld01.vcf.example",
+        "guestIp": "10.20.20.13",
+        "guestState": "running",
+        "toolsStatus": "toolsOk",
+        "toolsVersion": "12448",
+        "numCpu": 4,
+        "memoryMB": 8192,
+        "hardwareVersion": "vmx-21",
+        "template": false,
+        "cpuReservationMhz": 0,
+        "memReservationMB": 0,
+        "annotation": "",
+        "snapshotCount": 0,
+        "oldestSnapshotTime": null,
+        "disks": [
+          {
+            "label": "Hard disk 1",
+            "capacityBytes": 68719476736,
+            "datastore": "wld01-cl01-vsan01",
+            "thin": true
+          },
+          {
+            "label": "Hard disk 2",
+            "capacityBytes": 214748364800,
+            "datastore": "wld01-cl01-vsan01",
+            "thin": true
+          }
+        ],
+        "nics": [
+          {
+            "label": "Network adapter 1",
+            "mac": "00:50:56:8a:0e:00",
+            "network": "seg-app-10.20.20.0",
+            "connected": true
+          }
+        ],
         "networks": [
           "seg-app-10.20.20.0"
         ],
         "datastores": [
           "wld01-cl01-vsan01"
         ],
-        "guestFullName": "Red Hat Enterprise Linux 9 (64-bit)",
-        "numCpu": 4,
-        "memoryMB": 8192,
-        "template": false,
+        "storageCommittedBytes": 113387136614,
+        "bootTime": "2026-07-18T07:38:00Z",
         "overallStatus": "green"
       },
       "relationships": [
@@ -976,18 +1991,56 @@
       "parent_id": "host:vc-wld01:esx03",
       "properties": {
         "powerState": "poweredOn",
+        "connectionState": "connected",
         "host": "esx03.wld01.vcf.example",
         "cluster": "wld01-cl01",
+        "resourcePool": "Resources",
+        "folder": "db",
+        "guestFullName": "Red Hat Enterprise Linux 9 (64-bit)",
+        "guestHostname": "db02.wld01.vcf.example",
+        "guestIp": "10.20.30.12",
+        "guestState": "running",
+        "toolsStatus": "toolsOk",
+        "toolsVersion": "12448",
+        "numCpu": 8,
+        "memoryMB": 32768,
+        "hardwareVersion": "vmx-21",
+        "template": false,
+        "cpuReservationMhz": 0,
+        "memReservationMB": 16384,
+        "annotation": "",
+        "snapshotCount": 0,
+        "oldestSnapshotTime": null,
+        "disks": [
+          {
+            "label": "Hard disk 1",
+            "capacityBytes": 68719476736,
+            "datastore": "wld01-cl01-vsan01",
+            "thin": true
+          },
+          {
+            "label": "Hard disk 2",
+            "capacityBytes": 536870912000,
+            "datastore": "wld01-cl01-vsan01",
+            "thin": false
+          }
+        ],
+        "nics": [
+          {
+            "label": "Network adapter 1",
+            "mac": "00:50:56:8a:0f:00",
+            "network": "seg-db-10.20.30.0",
+            "connected": true
+          }
+        ],
         "networks": [
           "seg-db-10.20.30.0"
         ],
         "datastores": [
           "wld01-cl01-vsan01"
         ],
-        "guestFullName": "Red Hat Enterprise Linux 9 (64-bit)",
-        "numCpu": 8,
-        "memoryMB": 32768,
-        "template": false,
+        "storageCommittedBytes": 564358702694,
+        "bootTime": "2026-07-18T10:45:00Z",
         "overallStatus": "green"
       },
       "relationships": [
@@ -1013,18 +2066,50 @@
       "parent_id": "host:vc-wld01:esx03",
       "properties": {
         "powerState": "poweredOn",
+        "connectionState": "connected",
         "host": "esx03.wld01.vcf.example",
         "cluster": "wld01-cl01",
+        "resourcePool": "Resources",
+        "folder": "dmz",
+        "guestFullName": "Microsoft Windows Server 2022 (64-bit)",
+        "guestHostname": "dmz-jump01.wld01.vcf.example",
+        "guestIp": "10.20.40.22",
+        "guestState": "running",
+        "toolsStatus": "toolsOk",
+        "toolsVersion": "12448",
+        "numCpu": 2,
+        "memoryMB": 8192,
+        "hardwareVersion": "vmx-21",
+        "template": false,
+        "cpuReservationMhz": 0,
+        "memReservationMB": 0,
+        "annotation": "",
+        "snapshotCount": 0,
+        "oldestSnapshotTime": null,
+        "disks": [
+          {
+            "label": "Hard disk 1",
+            "capacityBytes": 96636764160,
+            "datastore": "wld01-cl01-vsan01",
+            "thin": true
+          }
+        ],
+        "nics": [
+          {
+            "label": "Network adapter 1",
+            "mac": "00:50:56:8a:10:00",
+            "network": "seg-dmz-10.20.40.0",
+            "connected": true
+          }
+        ],
         "networks": [
           "seg-dmz-10.20.40.0"
         ],
         "datastores": [
           "wld01-cl01-vsan01"
         ],
-        "guestFullName": "Microsoft Windows Server 2022 (64-bit)",
-        "numCpu": 2,
-        "memoryMB": 8192,
-        "template": false,
+        "storageCommittedBytes": 38654705664,
+        "bootTime": "2026-07-18T13:52:00Z",
         "overallStatus": "green"
       },
       "relationships": [
@@ -1050,18 +2135,50 @@
       "parent_id": "host:vc-wld01:esx03",
       "properties": {
         "powerState": "poweredOn",
+        "connectionState": "connected",
         "host": "esx03.wld01.vcf.example",
         "cluster": "wld01-cl01",
+        "resourcePool": "ws-ns01",
+        "folder": "ws-ns01",
+        "guestFullName": "VMware Photon OS (64-bit)",
+        "guestHostname": "ws-w01.wld01.vcf.example",
+        "guestIp": "10.20.20.51",
+        "guestState": "running",
+        "toolsStatus": "toolsOk",
+        "toolsVersion": "12448",
+        "numCpu": 8,
+        "memoryMB": 32768,
+        "hardwareVersion": "vmx-21",
+        "template": false,
+        "cpuReservationMhz": 0,
+        "memReservationMB": 0,
+        "annotation": "",
+        "snapshotCount": 0,
+        "oldestSnapshotTime": null,
+        "disks": [
+          {
+            "label": "Hard disk 1",
+            "capacityBytes": 17179869184,
+            "datastore": "wld01-cl01-vsan01",
+            "thin": true
+          }
+        ],
+        "nics": [
+          {
+            "label": "Network adapter 1",
+            "mac": "00:50:56:8a:11:00",
+            "network": "seg-app-10.20.20.0",
+            "connected": true
+          }
+        ],
         "networks": [
           "seg-app-10.20.20.0"
         ],
         "datastores": [
           "wld01-cl01-vsan01"
         ],
-        "guestFullName": "VMware Photon OS (64-bit)",
-        "numCpu": 8,
-        "memoryMB": 32768,
-        "template": false,
+        "storageCommittedBytes": 6871947673,
+        "bootTime": "2026-07-18T16:59:00Z",
         "overallStatus": "green"
       },
       "relationships": [
@@ -1087,18 +2204,56 @@
       "parent_id": "host:vc-wld01:esx03",
       "properties": {
         "powerState": "poweredOn",
+        "connectionState": "connected",
         "host": "esx03.wld01.vcf.example",
         "cluster": "wld01-cl01",
+        "resourcePool": "Resources",
+        "folder": "infra",
+        "guestFullName": "Ubuntu Linux (64-bit)",
+        "guestHostname": "logs01.wld01.vcf.example",
+        "guestIp": "172.16.11.21",
+        "guestState": "running",
+        "toolsStatus": "toolsOk",
+        "toolsVersion": "12448",
+        "numCpu": 4,
+        "memoryMB": 16384,
+        "hardwareVersion": "vmx-21",
+        "template": false,
+        "cpuReservationMhz": 0,
+        "memReservationMB": 0,
+        "annotation": "",
+        "snapshotCount": 0,
+        "oldestSnapshotTime": null,
+        "disks": [
+          {
+            "label": "Hard disk 1",
+            "capacityBytes": 68719476736,
+            "datastore": "wld01-cl01-vsan02",
+            "thin": true
+          },
+          {
+            "label": "Hard disk 2",
+            "capacityBytes": 1099511627776,
+            "datastore": "wld01-cl01-vsan02",
+            "thin": true
+          }
+        ],
+        "nics": [
+          {
+            "label": "Network adapter 1",
+            "mac": "00:50:56:8a:12:00",
+            "network": "wld01-vds01-mgmt",
+            "connected": true
+          }
+        ],
         "networks": [
           "wld01-vds01-mgmt"
         ],
         "datastores": [
           "wld01-cl01-vsan02"
         ],
-        "guestFullName": "Ubuntu Linux (64-bit)",
-        "numCpu": 4,
-        "memoryMB": 16384,
-        "template": false,
+        "storageCommittedBytes": 467292441804,
+        "bootTime": "2026-07-18T20:06:00Z",
         "overallStatus": "green"
       },
       "relationships": [
@@ -1124,16 +2279,41 @@
       "parent_id": "host:vc-wld01:esx03",
       "properties": {
         "powerState": "poweredOn",
+        "connectionState": "connected",
         "host": "esx03.wld01.vcf.example",
         "cluster": "wld01-cl01",
+        "resourcePool": "Resources",
+        "folder": "vCLS",
+        "guestFullName": "VMware Photon OS (64-bit)",
+        "guestHostname": null,
+        "guestIp": null,
+        "guestState": "running",
+        "toolsStatus": "toolsOk",
+        "toolsVersion": "12448",
+        "numCpu": 1,
+        "memoryMB": 128,
+        "hardwareVersion": "vmx-21",
+        "template": false,
+        "cpuReservationMhz": 100,
+        "memReservationMB": 128,
+        "annotation": "",
+        "snapshotCount": 0,
+        "oldestSnapshotTime": null,
+        "disks": [
+          {
+            "label": "Hard disk 1",
+            "capacityBytes": 2147483648,
+            "datastore": "wld01-cl01-vsan01",
+            "thin": true
+          }
+        ],
+        "nics": [],
         "networks": [],
         "datastores": [
           "wld01-cl01-vsan01"
         ],
-        "guestFullName": "VMware Photon OS (64-bit)",
-        "numCpu": 1,
-        "memoryMB": 128,
-        "template": false,
+        "storageCommittedBytes": 858993459,
+        "bootTime": "2026-07-18T23:13:00Z",
         "overallStatus": "green"
       },
       "relationships": [
@@ -1155,18 +2335,56 @@
       "parent_id": "host:vc-wld01:esx04",
       "properties": {
         "powerState": "poweredOn",
+        "connectionState": "connected",
         "host": "esx04.wld01.vcf.example",
         "cluster": "wld01-cl01",
+        "resourcePool": "Resources",
+        "folder": "app",
+        "guestFullName": "Red Hat Enterprise Linux 9 (64-bit)",
+        "guestHostname": "app04.wld01.vcf.example",
+        "guestIp": "10.20.20.14",
+        "guestState": "running",
+        "toolsStatus": "toolsOk",
+        "toolsVersion": "12448",
+        "numCpu": 4,
+        "memoryMB": 8192,
+        "hardwareVersion": "vmx-21",
+        "template": false,
+        "cpuReservationMhz": 0,
+        "memReservationMB": 0,
+        "annotation": "",
+        "snapshotCount": 0,
+        "oldestSnapshotTime": null,
+        "disks": [
+          {
+            "label": "Hard disk 1",
+            "capacityBytes": 68719476736,
+            "datastore": "wld01-cl01-vsan01",
+            "thin": true
+          },
+          {
+            "label": "Hard disk 2",
+            "capacityBytes": 214748364800,
+            "datastore": "wld01-cl01-vsan01",
+            "thin": true
+          }
+        ],
+        "nics": [
+          {
+            "label": "Network adapter 1",
+            "mac": "00:50:56:8a:14:00",
+            "network": "seg-app-10.20.20.0",
+            "connected": true
+          }
+        ],
         "networks": [
           "seg-app-10.20.20.0"
         ],
         "datastores": [
           "wld01-cl01-vsan01"
         ],
-        "guestFullName": "Red Hat Enterprise Linux 9 (64-bit)",
-        "numCpu": 4,
-        "memoryMB": 8192,
-        "template": false,
+        "storageCommittedBytes": 113387136614,
+        "bootTime": "2026-07-19T02:20:00Z",
         "overallStatus": "green"
       },
       "relationships": [
@@ -1192,18 +2410,56 @@
       "parent_id": "host:vc-wld01:esx04",
       "properties": {
         "powerState": "poweredOn",
+        "connectionState": "connected",
         "host": "esx04.wld01.vcf.example",
         "cluster": "wld01-cl01",
+        "resourcePool": "Resources",
+        "folder": "infra",
+        "guestFullName": "Microsoft Windows Server 2022 (64-bit)",
+        "guestHostname": "backup-proxy01.wld01.vcf.example",
+        "guestIp": "172.16.11.22",
+        "guestState": "running",
+        "toolsStatus": "toolsOk",
+        "toolsVersion": "12448",
+        "numCpu": 4,
+        "memoryMB": 16384,
+        "hardwareVersion": "vmx-21",
+        "template": false,
+        "cpuReservationMhz": 0,
+        "memReservationMB": 0,
+        "annotation": "",
+        "snapshotCount": 4,
+        "oldestSnapshotTime": "2026-08-29T06:00:00Z",
+        "disks": [
+          {
+            "label": "Hard disk 1",
+            "capacityBytes": 96636764160,
+            "datastore": "wld01-cl01-vsan02",
+            "thin": true
+          },
+          {
+            "label": "Hard disk 2",
+            "capacityBytes": 2199023255552,
+            "datastore": "wld01-cl01-vsan02",
+            "thin": true
+          }
+        ],
+        "nics": [
+          {
+            "label": "Network adapter 1",
+            "mac": "00:50:56:8a:15:00",
+            "network": "wld01-vds01-mgmt",
+            "connected": true
+          }
+        ],
         "networks": [
           "wld01-vds01-mgmt"
         ],
         "datastores": [
           "wld01-cl01-vsan02"
         ],
-        "guestFullName": "Microsoft Windows Server 2022 (64-bit)",
-        "numCpu": 4,
-        "memoryMB": 16384,
-        "template": false,
+        "storageCommittedBytes": 918264007884,
+        "bootTime": "2026-07-19T05:27:00Z",
         "overallStatus": "green"
       },
       "relationships": [
@@ -1222,43 +2478,6 @@
       ]
     },
     {
-      "id": "vm:vc-wld01:harbor01",
-      "type": "vm",
-      "name": "harbor01",
-      "source": "vcenter:vc-wld01",
-      "parent_id": "host:vc-wld01:esx04",
-      "properties": {
-        "powerState": "poweredOn",
-        "host": "esx04.wld01.vcf.example",
-        "cluster": "wld01-cl01",
-        "networks": [
-          "seg-web-10.20.10.0"
-        ],
-        "datastores": [
-          "wld01-cl01-vsan02"
-        ],
-        "guestFullName": "Ubuntu Linux (64-bit)",
-        "numCpu": 4,
-        "memoryMB": 8192,
-        "template": false,
-        "overallStatus": "green"
-      },
-      "relationships": [
-        {
-          "kind": "runs_on",
-          "target_id": "host:vc-wld01:esx04"
-        },
-        {
-          "kind": "uses_network",
-          "target_id": "network:vc-wld01:seg-web-10.20.10.0"
-        },
-        {
-          "kind": "uses_datastore",
-          "target_id": "datastore:vc-wld01:wld01-cl01-vsan02"
-        }
-      ]
-    },
-    {
       "id": "vm:vc-wld01:ws-w02",
       "type": "vm",
       "name": "ws-w02",
@@ -1266,18 +2485,50 @@
       "parent_id": "host:vc-wld01:esx04",
       "properties": {
         "powerState": "poweredOn",
+        "connectionState": "connected",
         "host": "esx04.wld01.vcf.example",
         "cluster": "wld01-cl01",
+        "resourcePool": "ws-ns01",
+        "folder": "ws-ns01",
+        "guestFullName": "VMware Photon OS (64-bit)",
+        "guestHostname": "ws-w02.wld01.vcf.example",
+        "guestIp": "10.20.20.52",
+        "guestState": "running",
+        "toolsStatus": "toolsOk",
+        "toolsVersion": "12448",
+        "numCpu": 8,
+        "memoryMB": 32768,
+        "hardwareVersion": "vmx-21",
+        "template": false,
+        "cpuReservationMhz": 0,
+        "memReservationMB": 0,
+        "annotation": "",
+        "snapshotCount": 0,
+        "oldestSnapshotTime": null,
+        "disks": [
+          {
+            "label": "Hard disk 1",
+            "capacityBytes": 17179869184,
+            "datastore": "wld01-cl01-vsan01",
+            "thin": true
+          }
+        ],
+        "nics": [
+          {
+            "label": "Network adapter 1",
+            "mac": "00:50:56:8a:16:00",
+            "network": "seg-app-10.20.20.0",
+            "connected": true
+          }
+        ],
         "networks": [
           "seg-app-10.20.20.0"
         ],
         "datastores": [
           "wld01-cl01-vsan01"
         ],
-        "guestFullName": "VMware Photon OS (64-bit)",
-        "numCpu": 8,
-        "memoryMB": 32768,
-        "template": false,
+        "storageCommittedBytes": 6871947673,
+        "bootTime": "2026-07-19T08:34:00Z",
         "overallStatus": "green"
       },
       "relationships": [
@@ -1296,43 +2547,6 @@
       ]
     },
     {
-      "id": "vm:vc-wld01:ops-proxy01",
-      "type": "vm",
-      "name": "ops-proxy01",
-      "source": "vcenter:vc-wld01",
-      "parent_id": "host:vc-wld01:esx04",
-      "properties": {
-        "powerState": "poweredOn",
-        "host": "esx04.wld01.vcf.example",
-        "cluster": "wld01-cl01",
-        "networks": [
-          "wld01-vds01-mgmt"
-        ],
-        "datastores": [
-          "wld01-cl01-vsan01"
-        ],
-        "guestFullName": "VMware Photon OS (64-bit)",
-        "numCpu": 2,
-        "memoryMB": 4096,
-        "template": false,
-        "overallStatus": "green"
-      },
-      "relationships": [
-        {
-          "kind": "runs_on",
-          "target_id": "host:vc-wld01:esx04"
-        },
-        {
-          "kind": "uses_network",
-          "target_id": "network:vc-wld01:wld01-vds01-mgmt"
-        },
-        {
-          "kind": "uses_datastore",
-          "target_id": "datastore:vc-wld01:wld01-cl01-vsan01"
-        }
-      ]
-    },
-    {
       "id": "vm:vc-wld01:tpl-win2022",
       "type": "vm",
       "name": "tpl-win2022",
@@ -1340,18 +2554,50 @@
       "parent_id": "host:vc-wld01:esx04",
       "properties": {
         "powerState": "poweredOff",
+        "connectionState": "connected",
         "host": "esx04.wld01.vcf.example",
         "cluster": "wld01-cl01",
+        "resourcePool": "Resources",
+        "folder": "templates",
+        "guestFullName": "Microsoft Windows Server 2022 (64-bit)",
+        "guestHostname": null,
+        "guestIp": null,
+        "guestState": "notRunning",
+        "toolsStatus": "toolsNotRunning",
+        "toolsVersion": "12448",
+        "numCpu": 2,
+        "memoryMB": 4096,
+        "hardwareVersion": "vmx-21",
+        "template": true,
+        "cpuReservationMhz": 0,
+        "memReservationMB": 0,
+        "annotation": "Windows Server 2022 golden image, patched 2026-07",
+        "snapshotCount": 0,
+        "oldestSnapshotTime": null,
+        "disks": [
+          {
+            "label": "Hard disk 1",
+            "capacityBytes": 96636764160,
+            "datastore": "nfs01-iso-templates",
+            "thin": true
+          }
+        ],
+        "nics": [
+          {
+            "label": "Network adapter 1",
+            "mac": "00:50:56:8a:17:00",
+            "network": "wld01-vds01-mgmt",
+            "connected": false
+          }
+        ],
         "networks": [
           "wld01-vds01-mgmt"
         ],
         "datastores": [
           "nfs01-iso-templates"
         ],
-        "guestFullName": "Microsoft Windows Server 2022 (64-bit)",
-        "numCpu": 2,
-        "memoryMB": 4096,
-        "template": true,
+        "storageCommittedBytes": 24159191040,
+        "bootTime": null,
         "overallStatus": "green"
       },
       "relationships": [
@@ -1377,19 +2623,57 @@
       "parent_id": "host:vc-wld01:esx05",
       "properties": {
         "powerState": "poweredOn",
+        "connectionState": "connected",
         "host": "esx05.wld01.vcf.example",
         "cluster": "wld01-edge",
-        "networks": [
-          "wld01-vds01-mgmt",
-          "wld01-vds01-edge-uplink"
-        ],
-        "datastores": [
-          "wld01-edge-vsan01"
-        ],
+        "resourcePool": "Resources",
+        "folder": "nsx-edges",
         "guestFullName": "Ubuntu Linux (64-bit)",
+        "guestHostname": "wld01-en01.wld01.vcf.example",
+        "guestIp": "172.16.14.31",
+        "guestState": "running",
+        "toolsStatus": "toolsOk",
+        "toolsVersion": "12448",
         "numCpu": 8,
         "memoryMB": 32768,
+        "hardwareVersion": "vmx-21",
         "template": false,
+        "cpuReservationMhz": 0,
+        "memReservationMB": 32768,
+        "annotation": "",
+        "snapshotCount": 0,
+        "oldestSnapshotTime": null,
+        "disks": [
+          {
+            "label": "Hard disk 1",
+            "capacityBytes": 214748364800,
+            "datastore": "wld01-edge-vmfs01",
+            "thin": true
+          }
+        ],
+        "nics": [
+          {
+            "label": "Network adapter 1",
+            "mac": "00:50:56:8a:18:00",
+            "network": "wld01-vds01-edge-uplink",
+            "connected": true
+          },
+          {
+            "label": "Network adapter 2",
+            "mac": "00:50:56:8a:18:01",
+            "network": "wld01-vds01-mgmt",
+            "connected": true
+          }
+        ],
+        "networks": [
+          "wld01-vds01-edge-uplink",
+          "wld01-vds01-mgmt"
+        ],
+        "datastores": [
+          "wld01-edge-vmfs01"
+        ],
+        "storageCommittedBytes": 85899345920,
+        "bootTime": "2026-08-01T14:48:00Z",
         "overallStatus": "green"
       },
       "relationships": [
@@ -1399,15 +2683,15 @@
         },
         {
           "kind": "uses_network",
-          "target_id": "network:vc-wld01:wld01-vds01-mgmt"
-        },
-        {
-          "kind": "uses_network",
           "target_id": "network:vc-wld01:wld01-vds01-edge-uplink"
         },
         {
+          "kind": "uses_network",
+          "target_id": "network:vc-wld01:wld01-vds01-mgmt"
+        },
+        {
           "kind": "uses_datastore",
-          "target_id": "datastore:vc-wld01:wld01-edge-vsan01"
+          "target_id": "datastore:vc-wld01:wld01-edge-vmfs01"
         }
       ]
     },
@@ -1419,16 +2703,41 @@
       "parent_id": "host:vc-wld01:esx05",
       "properties": {
         "powerState": "poweredOn",
+        "connectionState": "connected",
         "host": "esx05.wld01.vcf.example",
         "cluster": "wld01-edge",
-        "networks": [],
-        "datastores": [
-          "wld01-edge-vsan01"
-        ],
+        "resourcePool": "Resources",
+        "folder": "vCLS",
         "guestFullName": "VMware Photon OS (64-bit)",
+        "guestHostname": null,
+        "guestIp": null,
+        "guestState": "running",
+        "toolsStatus": "toolsOk",
+        "toolsVersion": "12448",
         "numCpu": 1,
         "memoryMB": 128,
+        "hardwareVersion": "vmx-21",
         "template": false,
+        "cpuReservationMhz": 100,
+        "memReservationMB": 128,
+        "annotation": "",
+        "snapshotCount": 0,
+        "oldestSnapshotTime": null,
+        "disks": [
+          {
+            "label": "Hard disk 1",
+            "capacityBytes": 2147483648,
+            "datastore": "wld01-edge-vmfs01",
+            "thin": true
+          }
+        ],
+        "nics": [],
+        "networks": [],
+        "datastores": [
+          "wld01-edge-vmfs01"
+        ],
+        "storageCommittedBytes": 858993459,
+        "bootTime": "2026-08-01T17:55:00Z",
         "overallStatus": "green"
       },
       "relationships": [
@@ -1438,7 +2747,7 @@
         },
         {
           "kind": "uses_datastore",
-          "target_id": "datastore:vc-wld01:wld01-edge-vsan01"
+          "target_id": "datastore:vc-wld01:wld01-edge-vmfs01"
         }
       ]
     },
@@ -1450,19 +2759,57 @@
       "parent_id": "host:vc-wld01:esx06",
       "properties": {
         "powerState": "poweredOn",
+        "connectionState": "connected",
         "host": "esx06.wld01.vcf.example",
         "cluster": "wld01-edge",
-        "networks": [
-          "wld01-vds01-mgmt",
-          "wld01-vds01-edge-uplink"
-        ],
-        "datastores": [
-          "wld01-edge-vsan01"
-        ],
+        "resourcePool": "Resources",
+        "folder": "nsx-edges",
         "guestFullName": "Ubuntu Linux (64-bit)",
+        "guestHostname": "wld01-en02.wld01.vcf.example",
+        "guestIp": "172.16.14.32",
+        "guestState": "running",
+        "toolsStatus": "toolsOk",
+        "toolsVersion": "12448",
         "numCpu": 8,
         "memoryMB": 32768,
+        "hardwareVersion": "vmx-21",
         "template": false,
+        "cpuReservationMhz": 0,
+        "memReservationMB": 32768,
+        "annotation": "",
+        "snapshotCount": 0,
+        "oldestSnapshotTime": null,
+        "disks": [
+          {
+            "label": "Hard disk 1",
+            "capacityBytes": 214748364800,
+            "datastore": "wld01-edge-vmfs01",
+            "thin": true
+          }
+        ],
+        "nics": [
+          {
+            "label": "Network adapter 1",
+            "mac": "00:50:56:8a:1a:00",
+            "network": "wld01-vds01-edge-uplink",
+            "connected": true
+          },
+          {
+            "label": "Network adapter 2",
+            "mac": "00:50:56:8a:1a:01",
+            "network": "wld01-vds01-mgmt",
+            "connected": true
+          }
+        ],
+        "networks": [
+          "wld01-vds01-edge-uplink",
+          "wld01-vds01-mgmt"
+        ],
+        "datastores": [
+          "wld01-edge-vmfs01"
+        ],
+        "storageCommittedBytes": 85899345920,
+        "bootTime": "2026-08-01T21:02:00Z",
         "overallStatus": "green"
       },
       "relationships": [
@@ -1472,15 +2819,15 @@
         },
         {
           "kind": "uses_network",
-          "target_id": "network:vc-wld01:wld01-vds01-mgmt"
-        },
-        {
-          "kind": "uses_network",
           "target_id": "network:vc-wld01:wld01-vds01-edge-uplink"
         },
         {
+          "kind": "uses_network",
+          "target_id": "network:vc-wld01:wld01-vds01-mgmt"
+        },
+        {
           "kind": "uses_datastore",
-          "target_id": "datastore:vc-wld01:wld01-edge-vsan01"
+          "target_id": "datastore:vc-wld01:wld01-edge-vmfs01"
         }
       ]
     },
@@ -1492,16 +2839,41 @@
       "parent_id": "host:vc-wld01:esx06",
       "properties": {
         "powerState": "poweredOn",
+        "connectionState": "connected",
         "host": "esx06.wld01.vcf.example",
         "cluster": "wld01-edge",
-        "networks": [],
-        "datastores": [
-          "wld01-edge-vsan01"
-        ],
+        "resourcePool": "Resources",
+        "folder": "vCLS",
         "guestFullName": "VMware Photon OS (64-bit)",
+        "guestHostname": null,
+        "guestIp": null,
+        "guestState": "running",
+        "toolsStatus": "toolsOk",
+        "toolsVersion": "12448",
         "numCpu": 1,
         "memoryMB": 128,
+        "hardwareVersion": "vmx-21",
         "template": false,
+        "cpuReservationMhz": 100,
+        "memReservationMB": 128,
+        "annotation": "",
+        "snapshotCount": 0,
+        "oldestSnapshotTime": null,
+        "disks": [
+          {
+            "label": "Hard disk 1",
+            "capacityBytes": 2147483648,
+            "datastore": "wld01-edge-vmfs01",
+            "thin": true
+          }
+        ],
+        "nics": [],
+        "networks": [],
+        "datastores": [
+          "wld01-edge-vmfs01"
+        ],
+        "storageCommittedBytes": 858993459,
+        "bootTime": "2026-08-02T00:09:00Z",
         "overallStatus": "green"
       },
       "relationships": [
@@ -1511,7 +2883,7 @@
         },
         {
           "kind": "uses_datastore",
-          "target_id": "datastore:vc-wld01:wld01-edge-vsan01"
+          "target_id": "datastore:vc-wld01:wld01-edge-vmfs01"
         }
       ]
     }

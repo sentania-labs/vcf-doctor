@@ -2,10 +2,10 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AlertTriangle, ArrowDown, Camera, GitCompareArrows } from 'lucide-react'
 import type { Change, Significance } from '@/types'
-import { getChanges, getSnapshots } from '@/api'
+import { getChanges, getChangesMinSignificance, getSnapshots } from '@/api'
 import { useAsync } from '@/hooks/useAsync'
 import { useAppState } from '@/state/AppState'
-import { Button, Card, EmptyState, ErrorState, PageHeader, Select, Skeleton } from '@/components/ui'
+import { Button, Card, EmptyState, ErrorState, PageHeader, Segmented, Select, Skeleton } from '@/components/ui'
 import { ChangeRow, significanceLabel } from '@/components/domain'
 import { formatDateTime, relativeTime } from '@/lib/format'
 import { cn } from '@/lib/cn'
@@ -17,6 +17,13 @@ export default function ChangesPage() {
   const sorted = useMemo(() => (snaps.data ?? []).slice().sort((a, b) => b.created_at.localeCompare(a.created_at)), [snaps.data])
   const [from, setFrom] = useState<string>('')
   const [to, setTo] = useState<string>('')
+  // Significance floor: starts from the Settings default, then follows the control on this page.
+  const [minSig, setMinSig] = useState<Significance | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    getChangesMinSignificance().then(v => { if (!cancelled) setMinSig(v) })
+    return () => { cancelled = true }
+  }, [])
 
   // Default: TO = newest, FROM = the one before it. Keep choices when still valid.
   useEffect(() => {
@@ -32,7 +39,7 @@ export default function ChangesPage() {
   const swapped = !!pickedFrom && !!pickedTo && pickedFrom.created_at > pickedTo.created_at
   const queryFrom = swapped ? to : from
   const queryTo = swapped ? from : to
-  const changes = useAsync(() => getChanges(connectionId as string, queryFrom, queryTo), [connectionId, queryFrom, queryTo], !!connectionId && !!queryFrom && !!queryTo)
+  const changes = useAsync(() => getChanges(connectionId as string, queryFrom, queryTo, minSig as Significance), [connectionId, queryFrom, queryTo, minSig], !!connectionId && !!queryFrom && !!queryTo && minSig !== null)
 
   if (!connectionId) {
     return (
@@ -59,7 +66,14 @@ export default function ChangesPage() {
 
   return (
     <div className="anim-fade-up">
-      <PageHeader title="What Changed?" subtitle="Semantic differences between two snapshots, most important first" />
+      <PageHeader title="What Changed?" subtitle="Semantic differences between two snapshots, most important first"
+        actions={minSig ? (
+          <Segmented value={minSig} onChange={setMinSig} options={[
+            { value: 'low', label: 'All' },
+            { value: 'medium', label: <><span className="h-1.5 w-1.5 rounded-full bg-warning" />Medium and above</> },
+            { value: 'high', label: <><span className="h-1.5 w-1.5 rounded-full bg-critical" />High only</> },
+          ]} />
+        ) : null} />
 
       <Card className="px-5 py-4 mb-6">
         {snaps.loading && !snaps.data ? <Skeleton className="h-9 w-full" />
@@ -93,7 +107,9 @@ export default function ChangesPage() {
               {fromSnap && toSnap ? <span className="text-sm text-muted ml-auto">{formatDateTime(fromSnap.created_at)} to {formatDateTime(toSnap.created_at)}</span> : null}
             </div>
             {total === 0 ? (
-              <Card><EmptyState icon={<GitCompareArrows size={20} />} title="No differences" body={from === to ? 'FROM and TO are the same snapshot.' : 'These two snapshots describe the same environment state.'} /></Card>
+              <Card><EmptyState icon={<GitCompareArrows size={20} />} title={minSig !== 'low' ? 'No changes at this significance' : 'No differences'}
+                body={from === to ? 'FROM and TO are the same snapshot.' : minSig !== 'low' ? 'Lower significance changes may exist. Switch the filter to All to see everything.' : 'These two snapshots describe the same environment state.'}
+                action={minSig !== 'low' ? <Button onClick={() => setMinSig('low')}>Show all</Button> : undefined} /></Card>
             ) : (
               <div className="space-y-8">
                 {(['high', 'medium', 'low'] as Significance[]).map(sig => groups[sig].length === 0 ? null : (

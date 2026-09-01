@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { CheckCircle2, KeyRound, ShieldCheck } from 'lucide-react'
-import type { AssistantSettings, Settings } from '@/types'
+import type { AssistantSettings, Settings, Significance } from '@/types'
 import { getSettings, updateSettings, getAssistantStatus, changePassword, getAssistantModels, type AssistantModel } from '@/api'
 import { useAuth } from '@/state/AuthState'
 import { useAsync } from '@/hooks/useAsync'
@@ -67,6 +67,7 @@ export default function SettingsPage() {
   const s = useAsync(() => getSettings(), [])
   const status = useAsync(() => getAssistantStatus(), [s.data])
   const [retention, setRetention] = useState(96)
+  const [minSig, setMinSig] = useState<Significance>('low')
   const [assistant, setAssistant] = useState<AssistantSettings>({ enabled: true, provider: 'anthropic', model: 'claude-opus-5', api_key_set: false })
   const [models, setModels] = useState<AssistantModel[]>([])
   const [modelSource, setModelSource] = useState<'live' | 'curated' | null>(null)
@@ -80,13 +81,13 @@ export default function SettingsPage() {
   const [saved, setSaved] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
-  useEffect(() => { if (s.data) { setRetention(s.data.retention); setAssistant(s.data.assistant) } }, [s.data])
-  const apply = (d: Settings) => { setRetention(d.retention); setAssistant(d.assistant); setApiKey('') }
+  useEffect(() => { if (s.data) { setRetention(s.data.retention); setAssistant(s.data.assistant); setMinSig(s.data.changes_min_significance ?? 'low') } }, [s.data])
+  const apply = (d: Settings) => { setRetention(d.retention); setAssistant(d.assistant); setMinSig(d.changes_min_significance ?? 'low'); setApiKey('') }
 
   const save = async () => {
     setSaving(true); setErr(null); setSaved(false)
     try {
-      const body = { retention, assistant: { enabled: assistant.enabled, provider: assistant.provider, model: assistant.model.trim() || 'claude-opus-5', ...(apiKey ? { api_key: apiKey } : {}) } }
+      const body = { retention, changes_min_significance: minSig, assistant: { enabled: assistant.enabled, provider: assistant.provider, model: assistant.model.trim() || 'claude-opus-5', ...(apiKey ? { api_key: apiKey } : {}) } }
       apply(await updateSettings(body))
       setSaved(true); setTimeout(() => setSaved(false), 2500)
       status.reload()
@@ -107,6 +108,19 @@ export default function SettingsPage() {
             <div className="px-5 pb-5 grid sm:grid-cols-2 gap-4">
               <Field label="Scheduled snapshots kept (per connection)" hint="A count, not days. The oldest scheduled snapshots beyond this number are pruned after each scan. Manual snapshots are never pruned.">
                 <Input type="number" min={1} max={3650} value={retention} onChange={e => setRetention(Math.max(1, Number(e.target.value) || 1))} />
+              </Field>
+            </div>
+          </Card>
+
+          <Card>
+            <CardHeader title="Changes" subtitle="What the Changes page and the Overview's recent changes show by default" />
+            <div className="px-5 pb-5 grid sm:grid-cols-2 gap-4">
+              <Field label="Minimum significance shown" hint="Low shows everything. Medium hides informational noise such as usage counters. High keeps only outage-grade changes like host disconnects and vmkernel edits. The Changes page can still override this per view.">
+                <Select value={minSig} onChange={e => setMinSig(e.target.value as Significance)} className="w-full">
+                  <option value="low">Low (show everything)</option>
+                  <option value="medium">Medium and above</option>
+                  <option value="high">High only</option>
+                </Select>
               </Field>
             </div>
           </Card>
