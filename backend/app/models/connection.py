@@ -14,6 +14,8 @@ class ConnectionCreate(BaseModel):
     verify_tls: bool = False
     interval_minutes: int = 15
     enabled: bool = True
+    # "vcenter" (live, Agent B collector) or "fixture" (bundled demo data).
+    kind: str = "vcenter"
 
 
 class Connection(ConnectionCreate):
