@@ -4,11 +4,12 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app import db, scheduler
+from app import auth, db, scheduler
+from app.api.auth_router import router as auth_router
 from app.api.router import router as api_router
 from app.config import settings
 from app.models import ConnectionCreate
@@ -37,6 +38,10 @@ def ensure_demo_connection() -> None:
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     db.connect()
+    interrupted = store.reconcile_interrupted_runs()
+    if interrupted:
+        log.warning("marked %d interrupted scan run(s) as error", interrupted)
+    auth.bootstrap_from_env()
     ensure_demo_connection()
     scheduler.start()
     try:
@@ -45,7 +50,24 @@ async def lifespan(application: FastAPI):
         scheduler.shutdown()
 
 
-app = FastAPI(title="VCF Doctor", version="0.1.0", lifespan=lifespan)
+app = FastAPI(
+    title="VCF Doctor",
+    version="0.1.0",
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+    lifespan=lifespan,
+)
+
+
+@app.middleware("http")
+async def require_session(request: Request, call_next):
+    if auth.requires_auth(request.url.path) and not auth.is_authenticated(request):
+        return JSONResponse({"detail": "authentication required"}, status_code=401)
+    return await call_next(request)
+
+
+app.include_router(auth_router)
 
 
 @app.get("/api/health")
@@ -74,12 +96,16 @@ def mount_frontend(application: FastAPI) -> None:
         return
     application.mount("/assets", StaticFiles(directory=static / "assets"), name="assets")
 
+    root = static.resolve()
+
     @application.get("/{full_path:path}", include_in_schema=False)
     def spa(full_path: str) -> FileResponse:
-        candidate = static / full_path
-        if full_path and candidate.is_file():
+        if full_path.startswith("api/"):
+            raise HTTPException(404, "not found")
+        candidate = (root / full_path).resolve()
+        if full_path and candidate.is_relative_to(root) and candidate.is_file():
             return FileResponse(candidate)
-        return FileResponse(static / "index.html")
+        return FileResponse(root / "index.html")
 
 
 mount_frontend(app)

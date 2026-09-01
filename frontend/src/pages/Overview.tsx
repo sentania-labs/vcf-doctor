@@ -57,8 +57,9 @@ export default function OverviewPage() {
       </div>
 
       {/* Hero */}
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,2fr)_repeat(4,minmax(0,1fr))]">
-        <Card className="px-6 py-5 flex items-center gap-8">
+      {/* Below 2xl the hero takes its own row so the verdict and counts never collide with the stat cards. */}
+      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-[minmax(0,2fr)_repeat(4,minmax(0,1fr))]">
+        <Card className="px-6 py-5 flex items-center gap-8 sm:col-span-2 lg:col-span-4 2xl:col-span-1 2xl:min-w-[360px]">
           {d ? <HealthRing score={d.health_score} /> : <Skeleton className="h-32 w-32 rounded-full" />}
           <div className="min-w-0">
             {d ? <>

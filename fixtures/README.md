@@ -12,7 +12,7 @@ provider. Nothing here refers to a real environment: the domain
 | `generate.py` | Produces both snapshot files from fixed tables. Re-run after any tweak. |
 | `snapshot_a.json` | Healthy baseline. 51 resources. |
 | `snapshot_b.json` | Degraded state after six changes. 50 resources. |
-| `assistant/*.md` | Canned markdown the mock assistant provider can return. |
+| `assistant/*.md` | Reference answers grounded in this data. The mock provider synthesizes its own output from the request; these document what a good answer looks like. |
 
 Validation lives in `backend/tests/test_fixtures_valid.py`. It parses every
 resource with the frozen `Resource` model, checks id uniqueness and reference
@@ -91,8 +91,10 @@ management-plane disconnect looks like from vCenter.
 
 ## Assistant fixtures
 
-`assistant/` holds markdown answers the mock provider can return. Each is
-grounded in the fixture data above and invents nothing beyond it.
+`assistant/` holds reference answers grounded in the fixture data above.
+The mock provider does not read them; it builds answers from the request.
+They exist as a written standard for what an evidence-grounded answer
+looks like.
 
 - `explain_host_disconnected.md`: explain task for `HOST_DISCONNECTED` on esx03
 - `investigate_host_disconnected.md`: investigate task, includes the other

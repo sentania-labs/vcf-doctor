@@ -10,7 +10,7 @@ on:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: write
@@ -55,17 +55,28 @@ jobs:
 
       - name: Smoke test (fixture mode, no vCenter)
         run: |
-          docker run -d --name smoke -p 8000:8000 -e VCF_DOCTOR_DEMO_MODE=true vcf-doctor:ci
+          docker run -d --name smoke -p 8000:8000 \
+            -e VCF_DOCTOR_DEMO_MODE=true -e VCF_DOCTOR_ADMIN_PASSWORD=smoke-test-pass \
+            vcf-doctor:ci
           for i in $(seq 1 30); do
             curl -fsS localhost:8000/api/health && break
+            if [ "$i" = 30 ]; then echo "container never became healthy"; exit 1; fi
             sleep 1
           done
           curl -fsS localhost:8000/api/health | grep -q '"status":"ok"'
           curl -fsS localhost:8000/ | grep -q '<title>VCF Doctor</title>'
-          # Fixture inventory must be in the image (51 resources), not the 10-resource fallback.
-          curl -fsS localhost:8000/api/overview | python3 -c 'import json,sys; o=json.load(sys.stdin); assert o["resource_total"] == 51, o["resource_total"]'
-          docker logs smoke
-          docker rm -f smoke
+          # Unauthenticated API access is refused; traversal cannot reach the database.
+          test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8000/api/overview)" = 401
+          curl -s --path-as-is localhost:8000/../data/vcf-doctor.db | grep -q '<title>VCF Doctor</title>'
+          # Log in with the seeded password, then check the fixture inventory (51 resources) is in the image.
+          curl -fsS -c cj -H 'content-type: application/json' -d '{"password":"smoke-test-pass"}' localhost:8000/api/auth/login
+          curl -fsS -b cj localhost:8000/api/overview | python3 -c 'import json,sys; o=json.load(sys.stdin); assert o["resource_total"] == 51, o["resource_total"]'
+          # Runs as a non-root user.
+          test "$(docker exec smoke id -u)" = 10001
+
+      - name: Container logs
+        if: always()
+        run: docker logs smoke || true; docker rm -f smoke || true
 
       - name: Compute tags
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -99,6 +110,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           V="${{ steps.tags.outputs.version }}"
-          git tag "$V" && git push origin "$V"
-          gh release create "$V" --generate-notes --title "$V" \
+          git tag "$V" 2>/dev/null && git push origin "$V" || echo "tag $V exists"
+          gh release view "$V" >/dev/null 2>&1 || gh release create "$V" --generate-notes --title "$V" \
             --notes "Image: $IMAGE:$V (also sha-${GITHUB_SHA::7}, latest)"

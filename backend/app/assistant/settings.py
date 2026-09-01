@@ -1,8 +1,9 @@
 """Assistant settings: GUI-editable, stored in SQLite via db.get_setting.
 
-Key resolution: the ANTHROPIC_API_KEY environment variable wins, then the
-"assistant_api_key" setting row. The key is stored but never returned;
-AssistantSettings.api_key_set reflects whether one resolves.
+Key resolution: a key entered in Settings (the "assistant_api_key" row) wins;
+the ANTHROPIC_API_KEY environment variable is the deployment default. The
+key is stored but never returned; AssistantSettings.api_key_set reflects
+whether one resolves.
 """
 
 import os
@@ -22,13 +23,12 @@ _PERSISTED_FIELDS = ("enabled", "provider", "model")
 
 
 def resolve_api_key() -> str | None:
-    env = os.environ.get(ENV_KEY, "").strip()
-    if env:
-        return env
+    """A key entered in Settings wins; ANTHROPIC_API_KEY is the deployment default."""
     stored = db.get_setting(API_KEY_KEY)
     if isinstance(stored, str) and stored.strip():
         return stored.strip()
-    return None
+    env = os.environ.get(ENV_KEY, "").strip()
+    return env or None
 
 
 def get_settings() -> AssistantSettings:

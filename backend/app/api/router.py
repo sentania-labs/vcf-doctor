@@ -73,6 +73,9 @@ def _changes(connection_id: str | None, from_id: str | None, to_id: str | None) 
         if from_id and from_snap is None:
             raise HTTPException(404, f"snapshot {from_id} not found")
         cid = connection_id or (to_snap or from_snap).connection_id
+        for snap in (from_snap, to_snap):
+            if snap is not None and snap.connection_id != cid:
+                raise HTTPException(400, "snapshots must belong to the same connection")
         if to_snap is None:
             to_snap = store.latest_snapshot(cid)
         if from_snap is None:

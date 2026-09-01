@@ -1,4 +1,4 @@
-import { useEffect, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes } from 'react'
+import { useEffect, useRef, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes } from 'react'
 import { AlertTriangle, Inbox, Loader2, X } from 'lucide-react'
 import { cn } from '@/lib/cn'
 
@@ -124,14 +124,28 @@ export function Segmented<T extends string>({ value, onChange, options }: { valu
   )
 }
 
-/* ---------- Dialog ---------- */
-export function Dialog({ open, onClose, title, children, footer, width = 'max-w-lg' }: { open: boolean; onClose: () => void; title: string; children: ReactNode; footer?: ReactNode; width?: string }) {
+/* ---------- Escape handling: only the topmost open layer (dialog or drawer) closes ---------- */
+const layerStack: symbol[] = []
+function useEscapeToClose(open: boolean, onClose: () => void) {
+  const closeRef = useRef(onClose)
+  closeRef.current = onClose
   useEffect(() => {
     if (!open) return
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    const id = Symbol('layer')
+    layerStack.push(id)
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && layerStack[layerStack.length - 1] === id) closeRef.current() }
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [open, onClose])
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      const i = layerStack.indexOf(id)
+      if (i >= 0) layerStack.splice(i, 1)
+    }
+  }, [open])
+}
+
+/* ---------- Dialog ---------- */
+export function Dialog({ open, onClose, title, children, footer, width = 'max-w-lg' }: { open: boolean; onClose: () => void; title: string; children: ReactNode; footer?: ReactNode; width?: string }) {
+  useEscapeToClose(open, onClose)
   if (!open) return null
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true">
@@ -150,12 +164,7 @@ export function Dialog({ open, onClose, title, children, footer, width = 'max-w-
 
 /* ---------- Drawer (right side) ---------- */
 export function Drawer({ open, onClose, title, children, width = 'w-[520px]', header }: { open: boolean; onClose: () => void; title?: ReactNode; children: ReactNode; width?: string; header?: ReactNode }) {
-  useEffect(() => {
-    if (!open) return
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [open, onClose])
+  useEscapeToClose(open, onClose)
   if (!open) return null
   return (
     <div className="fixed inset-0 z-40">

@@ -63,6 +63,7 @@ PROPERTY_SPECS: dict[str, list[str]] = {
     "VirtualMachine": [
         "name",
         "runtime.powerState",
+        "runtime.connectionState",
         "runtime.host",
         "summary.config.guestFullName",
         "summary.config.numCpu",
@@ -157,9 +158,11 @@ def _as_str(value: Any) -> str | None:
 class Normalizer:
     """Build Resource objects from a RawInventory."""
 
-    def __init__(self, inventory: RawInventory):
+    def __init__(self, inventory: RawInventory, key: str | None = None):
+        """key overrides the id namespace (the connection id in production, so
+        two vCenters sharing a first DNS label never collide)."""
         self.inv = inventory
-        self.vckey = vcenter_key(inventory.host)
+        self.vckey = key or vcenter_key(inventory.host)
         self.source = f"vcenter:{self.vckey}"
         self.vcenter_id = self.source
         self.by_moref: dict[str, RawObject] = {o.moref: o for o in inventory.objects}
@@ -342,6 +345,7 @@ class Normalizer:
                 "numCpu": _as_int(obj.get("summary.config.numCpu")),
                 "memoryMB": _as_int(obj.get("summary.config.memorySizeMB")),
                 "toolsStatus": _as_str(obj.get("guest.toolsStatus")),
+                "connectionState": _as_str(obj.get("runtime.connectionState")),
                 "template": bool(obj.get("summary.config.template") or False),
                 "networks": sorted(filter(None, (self.name_of(n) for n in networks))),
                 "datastores": sorted(filter(None, (self.name_of(d) for d in datastores))),
@@ -388,6 +392,6 @@ class Normalizer:
         )
 
 
-def normalize(inventory: RawInventory) -> list[Resource]:
+def normalize(inventory: RawInventory, key: str | None = None) -> list[Resource]:
     """Convenience wrapper: RawInventory -> list[Resource]."""
-    return Normalizer(inventory).build()
+    return Normalizer(inventory, key).build()

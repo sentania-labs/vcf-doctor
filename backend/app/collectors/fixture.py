@@ -128,4 +128,36 @@ class FixtureCollector(Collector):
         loaded = load_fixture(name)
         if loaded is None and degraded:
             loaded = load_fixture("snapshot_a.json")
-        return loaded if loaded is not None else builtin_resources(degraded)
+        resources = loaded if loaded is not None else builtin_resources(degraded)
+        return namespace_resources(resources, self.connection_id)
+
+
+def namespace_resources(resources: list[Resource], namespace: str) -> list[Resource]:
+    """Rewrite the fixture's vCenter key with the connection id so two fixture
+    connections never share resource ids."""
+    if not resources:
+        return resources
+    key = resources[0].source.split(":", 1)[-1]
+    if not key or key == namespace:
+        return resources
+    old, new = f":{key}", f":{namespace}"
+
+    def fix(value: str | None) -> str | None:
+        return value.replace(old, new, 1) if value else value
+
+    out: list[Resource] = []
+    for r in resources:
+        out.append(
+            r.model_copy(
+                update={
+                    "id": fix(r.id),
+                    "source": fix(r.source),
+                    "parent_id": fix(r.parent_id),
+                    "relationships": [
+                        rel.model_copy(update={"target_id": fix(rel.target_id)})
+                        for rel in r.relationships
+                    ],
+                }
+            )
+        )
+    return out

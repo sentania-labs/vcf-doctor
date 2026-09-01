@@ -73,6 +73,9 @@ class ResourceRemoved(DiagnosticCheck):
         for r in sorted(_removed(resources, previous), key=lambda r: r.id):
             if r.type in NETWORK_TYPES:
                 continue
+            if r.type == "vm" and r.name.startswith("vCLS"):
+                # vSphere recreates vCLS VMs with new morefs; not an operator concern.
+                continue
             out.append(
                 Finding(
                     id=finding_id(self.id, r.id),

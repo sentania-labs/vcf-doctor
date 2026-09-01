@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowDown, Camera, GitCompareArrows } from 'lucide-react'
+import { AlertTriangle, ArrowDown, Camera, GitCompareArrows } from 'lucide-react'
 import type { Change, Significance } from '@/types'
 import { getChanges, getSnapshots } from '@/api'
 import { useAsync } from '@/hooks/useAsync'
@@ -26,7 +26,13 @@ export default function ChangesPage() {
     if (!ids.has(from)) setFrom(sorted[1]?.id ?? sorted[0].id)
   }, [sorted, from, to])
 
-  const changes = useAsync(() => getChanges(connectionId as string, from, to), [connectionId, from, to], !!connectionId && !!from && !!to)
+  // Always compare oldest to newest. If the user picked FROM newer than TO, swap for the query and say so.
+  const pickedFrom = sorted.find(s => s.id === from)
+  const pickedTo = sorted.find(s => s.id === to)
+  const swapped = !!pickedFrom && !!pickedTo && pickedFrom.created_at > pickedTo.created_at
+  const queryFrom = swapped ? to : from
+  const queryTo = swapped ? from : to
+  const changes = useAsync(() => getChanges(connectionId as string, queryFrom, queryTo), [connectionId, queryFrom, queryTo], !!connectionId && !!queryFrom && !!queryTo)
 
   if (!connectionId) {
     return (
@@ -48,8 +54,8 @@ export default function ChangesPage() {
   const groups: Record<Significance, Change[]> = { high: [], medium: [], low: [] }
   for (const c of changes.data ?? []) groups[c.significance].push(c)
   const total = changes.data?.length ?? 0
-  const fromSnap = sorted.find(s => s.id === from)
-  const toSnap = sorted.find(s => s.id === to)
+  const fromSnap = swapped ? pickedTo : pickedFrom
+  const toSnap = swapped ? pickedFrom : pickedTo
 
   return (
     <div className="anim-fade-up">
@@ -69,6 +75,9 @@ export default function ChangesPage() {
               <SnapPicker label="To" value={to} onChange={setTo} snaps={sorted} />
             </div>
           )}
+        {swapped ? (
+          <p role="status" className="mt-3 flex items-center gap-1.5 text-xs text-warning"><AlertTriangle size={13} /> FROM was newer than TO; snapshots swapped so changes read oldest to newest.</p>
+        ) : null}
       </Card>
 
       {sorted.length >= 2 ? (

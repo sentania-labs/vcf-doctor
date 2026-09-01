@@ -25,4 +25,5 @@ def get_collector(connection: Connection) -> Collector:
         username=connection.username,
         password=connection.password,
         verify_tls=connection.verify_tls,
+        namespace=connection.id,
     )

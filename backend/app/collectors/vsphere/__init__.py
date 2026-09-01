@@ -38,12 +38,20 @@ RESOURCE_TYPES = ["vcenter", "datacenter", "cluster", "host", "vm", "datastore",
 class VSphereCollector(Collector):
     resource_types = RESOURCE_TYPES
 
-    def __init__(self, host: str, username: str, password: str, verify_tls: bool = False):
+    def __init__(
+        self,
+        host: str,
+        username: str,
+        password: str,
+        verify_tls: bool = False,
+        namespace: str | None = None,
+    ):
         self.host = host
         self.username = username
         self.password = password
         self.verify_tls = verify_tls
-        self.id = f"vcenter:{vcenter_key(host)}"
+        self.namespace = namespace or vcenter_key(host)
+        self.id = f"vcenter:{self.namespace}"
 
     def _session(self) -> VSphereSession:
         return VSphereSession(self.host, self.username, self.password, self.verify_tls)
@@ -77,7 +85,7 @@ class VSphereCollector(Collector):
             raise
         except Exception as exc:  # noqa: BLE001
             raise classify_exception(exc, self.host) from exc
-        resources = normalize(inventory)
+        resources = normalize(inventory, self.namespace)
         log.info("vsphere collect %s: %d resources", self.host, len(resources))
         return resources
 

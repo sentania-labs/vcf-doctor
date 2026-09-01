@@ -24,7 +24,7 @@ function buildWorkloadDomain(): MockEstate {
   const push = (res: Resource) => { r.push(res); return res }
 
   const vc = push({
-    id: id('vcenter', 'vc01'), type: 'vcenter', name: 'vc01.lab.sentania.net', source: src, parent_id: null,
+    id: id('vcenter', 'vc01'), type: 'vcenter', name: 'vc-wld01.wld01.vcf.example', source: src, parent_id: null,
     properties: { version: '9.0.1', build: '24805960', apiType: 'VirtualCenter', instanceUuid: 'c9b2c5d0-2f0e-4a4e-9f8f-1a2b3c4d5e6f' },
     relationships: [],
   })
@@ -50,7 +50,7 @@ function buildWorkloadDomain(): MockEstate {
     { n: 'esx06', cl: 1, state: 'connected', cpu: 33, mem: 49 },
   ]
   const hosts = hostSpecs.map(h => push({
-    id: id('host', h.n), type: 'host', name: `${h.n}.lab.sentania.net`, source: src, parent_id: clusters[h.cl].id,
+    id: id('host', h.n), type: 'host', name: `${h.n}.wld01.vcf.example`, source: src, parent_id: clusters[h.cl].id,
     properties: {
       connectionState: h.state, powerState: h.state === 'disconnected' ? 'unknown' : 'poweredOn',
       maintenanceMode: false, version: '9.0.1', build: '24805960', model: 'Dell PowerEdge R760',
@@ -116,7 +116,7 @@ function buildWorkloadDomain(): MockEstate {
   const findings: Finding[] = [
     {
       id: 'f-esx03-disconnected', check_id: 'host_disconnected', severity: 'critical',
-      title: 'esx03 disconnected from vCenter', summary: 'Host esx03.lab.sentania.net has been in connectionState disconnected since the last scan. 4 VMs restarted elsewhere by HA.',
+      title: 'esx03 disconnected from vCenter', summary: 'Host esx03.wld01.vcf.example has been in connectionState disconnected since the last scan. 4 VMs restarted elsewhere by HA.',
       resource_id: hosts[2].id, resource_name: hosts[2].name, resource_type: 'host',
       evidence: { connectionState: { old: 'connected', new: 'disconnected' }, powerState: { old: 'poweredOn', new: 'unknown' }, cluster: 'wld01-cl01', vmsAffected: 4, firstDetected: minutesAgo(2) },
       recommendation: 'Check management network reachability to esx03 (vmk0 on VLAN 1611), confirm the host is powered on via iDRAC, then reconnect from vCenter. Verify vSAN resync after reconnect.',
@@ -170,8 +170,8 @@ function buildWorkloadDomain(): MockEstate {
     { change_type: 'modified', resource_id: clusters[1].id, resource_type: 'cluster', resource_name: clusters[1].name, significance: 'high', summary: 'vSphere HA disabled', property_changes: { haEnabled: { old: true, new: false } } },
     { change_type: 'removed', resource_id: id('network', 'seg-legacy-tier'), resource_type: 'network', resource_name: 'seg-legacy-tier', significance: 'high', summary: 'NSX segment removed', property_changes: {} },
     { change_type: 'modified', resource_id: datastores[0].id, resource_type: 'datastore', resource_name: datastores[0].name, significance: 'medium', summary: 'Datastore usage increased', property_changes: { usedPct: { old: 84, new: 91 }, freeGB: { old: 9830, new: 5530 } } },
-    { change_type: 'modified', resource_id: vms[0].id, resource_type: 'vm', resource_name: 'web01', significance: 'medium', summary: 'VM moved host', property_changes: { host: { old: 'esx03.lab.sentania.net', new: 'esx01.lab.sentania.net' } } },
-    { change_type: 'modified', resource_id: vms[4].id, resource_type: 'vm', resource_name: 'app01', significance: 'medium', summary: 'VM moved host', property_changes: { host: { old: 'esx03.lab.sentania.net', new: 'esx02.lab.sentania.net' } } },
+    { change_type: 'modified', resource_id: vms[0].id, resource_type: 'vm', resource_name: 'web01', significance: 'medium', summary: 'VM moved host', property_changes: { host: { old: 'esx03.wld01.vcf.example', new: 'esx01.wld01.vcf.example' } } },
+    { change_type: 'modified', resource_id: vms[4].id, resource_type: 'vm', resource_name: 'app01', significance: 'medium', summary: 'VM moved host', property_changes: { host: { old: 'esx03.wld01.vcf.example', new: 'esx02.wld01.vcf.example' } } },
     { change_type: 'modified', resource_id: vms[28].id, resource_type: 'vm', resource_name: 'test-win11', significance: 'medium', summary: 'VM powered off', property_changes: { powerState: { old: 'poweredOn', new: 'poweredOff' }, ipAddress: { old: '10.16.24.38', new: null } } },
     { change_type: 'added', resource_id: vms[29].id, resource_type: 'vm', resource_name: 'test-rhel9', significance: 'low', summary: 'VM created', property_changes: {} },
     { change_type: 'modified', resource_id: hosts[4].id, resource_type: 'host', resource_name: hosts[4].name, significance: 'low', summary: 'Host resource usage changed', property_changes: { cpuUsagePct: { old: 58, new: 71 }, memUsagePct: { old: 79, new: 84 } } },
@@ -183,11 +183,11 @@ function buildWorkloadDomain(): MockEstate {
   const scans: ScanRun[] = [
     { id: 'scan-vc01-9', connection_id: src, started: minutesAgo(2), finished: minutesAgo(1.7), status: 'ok', error: null, snapshot_id: 'snap-vc01-004', trigger: 'scheduled' },
     { id: 'scan-vc01-8', connection_id: src, started: minutesAgo(22), finished: minutesAgo(21.5), status: 'ok', error: null, snapshot_id: 'snap-vc01-003', trigger: 'manual' },
-    { id: 'scan-vc01-7', connection_id: src, started: minutesAgo(42), finished: minutesAgo(41), status: 'error', error: 'timeout after 60s connecting to vc01.lab.sentania.net:443', snapshot_id: null, trigger: 'scheduled' },
+    { id: 'scan-vc01-7', connection_id: src, started: minutesAgo(42), finished: minutesAgo(41), status: 'error', error: 'timeout after 60s connecting to vc-wld01.wld01.vcf.example:443', snapshot_id: null, trigger: 'scheduled' },
   ]
 
   return {
-    connection: { id: src, name: 'Centennial Lab (wld01)', host: 'vc01.lab.sentania.net', username: 'administrator@vsphere.local', verify_tls: false, created_at: minutesAgo(400), kind: 'vcenter' },
+    connection: { id: src, name: 'Centennial Lab (wld01)', host: 'vc-wld01.wld01.vcf.example', username: 'administrator@vsphere.local', verify_tls: false, created_at: minutesAgo(400), kind: 'vcenter' },
     schedule: { connection_id: src, interval_minutes: 5, enabled: true, last_run: minutesAgo(2), next_run: new Date(now + 3 * 60_000).toISOString(), last_status: 'ok' },
     resources: r, findings, snapshots, changes, scans,
   }
@@ -197,12 +197,12 @@ function buildManagementDomain(): MockEstate {
   const src = 'vc00'
   const id = (type: string, name: string) => `${type}:${src}:${name}`
   const r: Resource[] = []
-  const vc: Resource = { id: id('vcenter', 'mgmt-vc'), type: 'vcenter', name: 'mgmt-vc.lab.sentania.net', source: src, parent_id: null, properties: { version: '9.0.1', build: '24805960' }, relationships: [] }
+  const vc: Resource = { id: id('vcenter', 'mgmt-vc'), type: 'vcenter', name: 'vc-mgmt.mgmt.vcf.example', source: src, parent_id: null, properties: { version: '9.0.1', build: '24805960' }, relationships: [] }
   const dc: Resource = { id: id('datacenter', 'mgmt-dc'), type: 'datacenter', name: 'mgmt-dc', source: src, parent_id: vc.id, properties: {}, relationships: [] }
   const cl: Resource = { id: id('cluster', 'mgmt-cl01'), type: 'cluster', name: 'mgmt-cl01', source: src, parent_id: dc.id, properties: { haEnabled: true, drsEnabled: true, vsanEnabled: true, numHosts: 4 }, relationships: [] }
   r.push(vc, dc, cl)
   const hosts = ['mgmt-esx01', 'mgmt-esx02', 'mgmt-esx03', 'mgmt-esx04'].map((n, i) => {
-    const h: Resource = { id: id('host', n), type: 'host', name: `${n}.lab.sentania.net`, source: src, parent_id: cl.id, properties: { connectionState: 'connected', powerState: 'poweredOn', version: '9.0.1', cpuUsagePct: 30 + i * 5, memUsagePct: 50 + i * 4, ntpSynced: true }, relationships: [] }
+    const h: Resource = { id: id('host', n), type: 'host', name: `${n}.wld01.vcf.example`, source: src, parent_id: cl.id, properties: { connectionState: 'connected', powerState: 'poweredOn', version: '9.0.1', cpuUsagePct: 30 + i * 5, memUsagePct: 50 + i * 4, ntpSynced: true }, relationships: [] }
     r.push(h); return h
   })
   const ds: Resource = { id: id('datastore', 'mgmt-vsan'), type: 'datastore', name: 'mgmt-vsan', source: src, parent_id: dc.id, properties: { type: 'vsan', capacityGB: 40960, freeGB: 22000, usedPct: 46, accessible: true }, relationships: [] }
@@ -211,7 +211,7 @@ function buildManagementDomain(): MockEstate {
   const vmNames = ['sddc-manager', 'nsx-mgr-01', 'nsx-mgr-02', 'nsx-mgr-03', 'vc01', 'mgmt-vc', 'ops-01', 'aria-lcm']
   vmNames.forEach((n, i) => r.push({ id: id('vm', n), type: 'vm', name: n, source: src, parent_id: hosts[i % 4].id, properties: { powerState: 'poweredOn', vcpus: 8, memoryGB: 48, toolsStatus: 'toolsOk', datastore: ds.name, network: net.name }, relationships: [{ kind: 'runs_on', target_id: hosts[i % 4].id }] }))
   return {
-    connection: { id: src, name: 'Management domain', host: 'mgmt-vc.lab.sentania.net', username: 'administrator@vsphere.local', verify_tls: true, created_at: minutesAgo(900), kind: 'vcenter' },
+    connection: { id: src, name: 'Management domain', host: 'vc-mgmt.mgmt.vcf.example', username: 'administrator@vsphere.local', verify_tls: true, created_at: minutesAgo(900), kind: 'vcenter' },
     schedule: { connection_id: src, interval_minutes: 15, enabled: true, last_run: minutesAgo(9), next_run: new Date(now + 6 * 60_000).toISOString(), last_status: 'ok' },
     resources: r,
     findings: [],
@@ -251,23 +251,23 @@ export function mockAssistantText(task: string, format: string | undefined, find
     const code: Record<string, { read: string; modify: string; lang: string }> = {
       powercli: {
         lang: 'powershell',
-        read: `Connect-VIServer vc01.lab.sentania.net\n$h = Get-VMHost esx03.lab.sentania.net\n$h | Select Name, ConnectionState, PowerState, Version, Build\nGet-VM -Location $h | Select Name, PowerState, VMHost\nGet-Datastore wld01-cl01-vsan | Select Name, CapacityGB, FreeSpaceGB`,
-        modify: `# Reconnect the host after confirming management network reachability\n$h = Get-VMHost esx03.lab.sentania.net\nSet-VMHost -VMHost $h -State Connected -Confirm:$true`,
+        read: `Connect-VIServer vc-wld01.wld01.vcf.example\n$h = Get-VMHost esx03.wld01.vcf.example\n$h | Select Name, ConnectionState, PowerState, Version, Build\nGet-VM -Location $h | Select Name, PowerState, VMHost\nGet-Datastore wld01-cl01-vsan | Select Name, CapacityGB, FreeSpaceGB`,
+        modify: `# Reconnect the host after confirming management network reachability\n$h = Get-VMHost esx03.wld01.vcf.example\nSet-VMHost -VMHost $h -State Connected -Confirm:$true`,
       },
       python: {
         lang: 'python',
-        read: `from pyVim.connect import SmartConnect\nfrom pyVmomi import vim\n\nsi = SmartConnect(host="vc01.lab.sentania.net", user=USER, pwd=PWD, disableSslCertValidation=True)\ncontent = si.RetrieveContent()\nview = content.viewManager.CreateContainerView(content.rootFolder, [vim.HostSystem], True)\nfor host in view.view:\n    print(host.name, host.runtime.connectionState, host.runtime.powerState)`,
+        read: `from pyVim.connect import SmartConnect\nfrom pyVmomi import vim\n\nsi = SmartConnect(host="vc-wld01.wld01.vcf.example", user=USER, pwd=PWD, disableSslCertValidation=True)\ncontent = si.RetrieveContent()\nview = content.viewManager.CreateContainerView(content.rootFolder, [vim.HostSystem], True)\nfor host in view.view:\n    print(host.name, host.runtime.connectionState, host.runtime.powerState)`,
         modify: `# Reconnect esx03 once reachable\nhost = next(h for h in view.view if h.name.startswith("esx03"))\ntask = host.ReconnectHost_Task()\n# wait for task and inspect task.info.state`,
       },
       shell: {
         lang: 'bash',
-        read: `# From a jump host on the management VLAN\nping -c 3 esx03.lab.sentania.net\nnc -zv esx03.lab.sentania.net 443 902\n# On the host console (DCUI or SSH if enabled)\nesxcli network ip interface ipv4 get\nesxcli vsan cluster get\nvim-cmd hostsvc/hostsummary | grep -E "connectionState|powerState"`,
+        read: `# From a jump host on the management VLAN\nping -c 3 esx03.wld01.vcf.example\nnc -zv esx03.wld01.vcf.example 443 902\n# On the host console (DCUI or SSH if enabled)\nesxcli network ip interface ipv4 get\nesxcli vsan cluster get\nvim-cmd hostsvc/hostsummary | grep -E "connectionState|powerState"`,
         modify: `# Restart management agents on esx03 (brief loss of vCenter connectivity to this host)\n/etc/init.d/hostd restart\n/etc/init.d/vpxa restart`,
       },
       rest: {
         lang: 'bash',
-        read: `TOKEN=$(curl -sk -u "$USER:$PWD" -X POST https://vc01.lab.sentania.net/api/session | tr -d '"')\ncurl -sk -H "vmware-api-session-id: $TOKEN" https://vc01.lab.sentania.net/api/vcenter/host | jq .\ncurl -sk -H "vmware-api-session-id: $TOKEN" "https://vc01.lab.sentania.net/api/vcenter/datastore?names=wld01-cl01-vsan" | jq .`,
-        modify: `# Reconnect via the host's connect action (vSphere Automation API)\ncurl -sk -H "vmware-api-session-id: $TOKEN" -X POST \\\n  "https://vc01.lab.sentania.net/api/vcenter/host/host-1012?action=connect"`,
+        read: `TOKEN=$(curl -sk -u "$USER:$PWD" -X POST https://vc-wld01.wld01.vcf.example/api/session | tr -d '"')\ncurl -sk -H "vmware-api-session-id: $TOKEN" https://vc-wld01.wld01.vcf.example/api/vcenter/host | jq .\ncurl -sk -H "vmware-api-session-id: $TOKEN" "https://vc-wld01.wld01.vcf.example/api/vcenter/datastore?names=wld01-cl01-vsan" | jq .`,
+        modify: `# Reconnect via the host's connect action (vSphere Automation API)\ncurl -sk -H "vmware-api-session-id: $TOKEN" -X POST \\\n  "https://vc-wld01.wld01.vcf.example/api/vcenter/host/host-1012?action=connect"`,
       },
     }
     const c = code[fmt] ?? code.powercli

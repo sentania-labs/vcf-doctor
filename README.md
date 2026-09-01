@@ -27,7 +27,9 @@ Or with Docker (local convenience only, see below):
 docker compose up --build
 ```
 
-Then open http://localhost:8000, go to Connections, add a vCenter.
+Then open http://localhost:8000. On first run you are asked to set the
+operator password (or seed it with `VCF_DOCTOR_ADMIN_PASSWORD`). Then go to
+Connections and add a vCenter.
 
 Fixture mode with no vCenter: `VCF_DOCTOR_DEMO_MODE=true make run`.
 
@@ -42,11 +44,12 @@ container image; the lab deployment repo and Argo CD own everything else.
 
 | Item | Value |
 |---|---|
-| Image | `ghcr.io/sentania-labs/vcf-doctor:<tag>` |
+| Image | `ghcr.io/sentania-labs/vcf-doctor:<tag>` where tag is `v0.1.N` (release), `sha-<7>` or `latest` |
 | Port | `8000` (HTTP) |
 | Health | `GET /api/health` |
 | Persistent volume | `/data` (SQLite at `/data/vcf-doctor.db`) |
 | Replicas | **exactly 1**, `strategy: Recreate`. Two pods would double-scan and contend for SQLite. |
+| User | runs as uid `10001`; set `fsGroup: 10001` so the volume is writable |
 
 Environment variables (all optional):
 
@@ -54,9 +57,17 @@ Environment variables (all optional):
 |---|---|---|
 | `VCF_DOCTOR_DB_PATH` | `/data/vcf-doctor.db` | SQLite location |
 | `VCF_DOCTOR_DEMO_MODE` | `false` | Load fixture data, no vCenter needed |
-| `ANTHROPIC_API_KEY` | unset | Enables the Claude assistant. Can also be entered in Settings. |
+| `ANTHROPIC_API_KEY` | unset | Enables the Claude assistant. A key entered in Settings takes precedence. |
+| `VCF_DOCTOR_AUTH` | `on` | `off` disables the login page (use only behind ingress auth) |
+| `VCF_DOCTOR_ADMIN_PASSWORD` | unset | Seeds the operator password on first boot; otherwise the UI asks on first visit |
 | `VCF_DOCTOR_LLM_MODEL` | `claude-opus-5` | Default assistant model; changeable in Settings |
 | `VCF_DOCTOR_DEFAULT_RETENTION` | `96` | Scheduled snapshots kept per connection; changeable in Settings |
+| `VCF_DOCTOR_MIN_INTERVAL_MINUTES` | `5` | Floor for scan intervals |
+| `VCF_DOCTOR_SCHEDULER` | `on` | `off` disables scheduled scans (Scan Now still works) |
+| `VCF_DOCTOR_STATIC_DIR` | `/app/static` in the image | Built frontend location |
+| `VCF_DOCTOR_FIXTURES_DIR` | `/app/fixtures` in the image | Fixture data for demo mode |
+
+A key entered on the Settings page takes precedence over `ANTHROPIC_API_KEY`.
 
 vCenter connections, schedules, retention, and assistant settings are
 application state set through the GUI and stored on the volume. Nothing
@@ -64,7 +75,8 @@ about a specific vCenter belongs in a manifest.
 
 ## Security posture (lab-grade)
 
-vCenter passwords and the Anthropic key (when entered via the GUI) are stored
-in SQLite on the persistent volume, protected by filesystem permissions only.
-No authentication on the UI. Generated scripts are never executed.
-Encryption at rest and authentication are tracked as follow-up issues.
+A single shared operator password gates the UI and API (session cookie, 7
+days). vCenter passwords and the Anthropic key (when entered via the GUI) are
+stored in SQLite on the persistent volume, protected by filesystem
+permissions only. Generated scripts are never executed. Encryption at rest
+and per-user accounts are tracked as follow-up issues.
