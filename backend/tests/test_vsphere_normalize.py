@@ -23,8 +23,8 @@ def _inventory() -> RawInventory:
                 "name": "wld01",
                 "parent": "group-h4",
                 "host": ["host-12", "host-13"],
-                "configurationEx.drsConfig.enabled": True,
-                "configurationEx.dasConfig.enabled": False,
+                "configuration.drsConfig.enabled": True,
+                "configuration.dasConfig.enabled": False,
             },
         ),
         RawObject(

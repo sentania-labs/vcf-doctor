@@ -101,6 +101,13 @@ def classify_exception(exc: BaseException, host: str) -> VSphereError:
         return VSphereUnreachableError(f"connection to {host} refused")
     if isinstance(exc, OSError):
         return VSphereUnreachableError(f"cannot reach {host}: {exc.strerror or exc}")
+    if isinstance(exc, vmodl.query.InvalidProperty):
+        # Our property list asked for a path the type does not have. Name it so
+        # the operator sees a collector bug, not a vCenter problem.
+        return VSphereError(
+            f"collector requested an invalid property '{exc.name}' from {host}; "
+            "this is a VCF Doctor bug, please report it"
+        )
     if isinstance(exc, vmodl.MethodFault):
         return VSphereError(f"vCenter {host} returned a fault: {exc.msg or type(exc).__name__}")
     return VSphereError(f"unexpected error talking to {host}: {type(exc).__name__}: {exc}")

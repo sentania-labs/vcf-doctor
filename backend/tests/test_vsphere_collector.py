@@ -194,7 +194,7 @@ def test_session_retrieve_merges_base_and_subclass_views():
             make_oc(
                 "domain-c7",
                 "ClusterComputeResource",
-                {"configurationEx.drsConfig.enabled": True},
+                {"configuration.drsConfig.enabled": True},
             )
         ],
         vim.Network: [make_oc("dvportgroup-1", "DistributedVirtualPortgroup", {"name": "pg"})],
@@ -224,7 +224,7 @@ def test_session_retrieve_merges_base_and_subclass_views():
     assert by["domain-c7"].kind == "ClusterComputeResource"
     assert by["domain-c7"].props == {
         "name": "cl",
-        "configurationEx.drsConfig.enabled": True,
+        "configuration.drsConfig.enabled": True,
     }
     assert by["dvportgroup-1"].kind == "DistributedVirtualPortgroup"
     # one container view per property spec type, each destroyed
