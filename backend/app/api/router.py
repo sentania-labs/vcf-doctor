@@ -6,9 +6,12 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from app import db, scheduler
+from app.assistant import settings as assistant_settings
 from app.collectors.registry import CollectorUnavailable, get_collector
 from app.config import settings
+from app.diagnostics.registry import list_checks
 from app.models import (
+    AssistantSettings,
     Connection,
     ConnectionCreate,
     ConnectionPublic,
@@ -291,10 +294,13 @@ class AppSettings(BaseModel):
     min_interval_minutes: int
     demo_mode: bool
     scheduler_running: bool
+    assistant: AssistantSettings
 
 
 class AppSettingsUpdate(BaseModel):
     retention: int | None = None
+    # Partial assistant update; may carry "api_key", which is stored and never echoed.
+    assistant: dict[str, Any] | None = None
 
 
 @router.get("/settings", response_model=AppSettings)
@@ -304,6 +310,7 @@ def get_settings():
         min_interval_minutes=settings.min_interval_minutes,
         demo_mode=settings.demo_mode,
         scheduler_running=scheduler.running(),
+        assistant=assistant_settings.get_settings(),
     )
 
 
@@ -313,6 +320,8 @@ def put_settings(body: AppSettingsUpdate):
         if body.retention < 1:
             raise HTTPException(400, "retention must be at least 1")
         db.set_setting("retention", body.retention)
+    if body.assistant:
+        assistant_settings.update_settings(body.assistant)
     return get_settings()
 
 
@@ -341,11 +350,14 @@ def overview(connection_id: str | None = None) -> dict[str, Any]:
 
     score = max(0, 100 - 15 * by_sev["critical"] - 5 * by_sev["warning"])
     last_scan = store.latest_run(connection_id)
+    checks_with_findings = {f.check_id for f in findings}
+    by_sev["passed"] = max(0, len(list_checks()) - len(checks_with_findings))
     return {
         "health_score": score,
         "counts": by_sev,
         "resource_counts": by_type,
         "resource_total": len(resources),
+        "resources": {"total": len(resources), "by_type": by_type},
         "hosts_connected": sum(
             1 for h in hosts if h.properties.get("connectionState") == "connected"
         ),
@@ -353,7 +365,10 @@ def overview(connection_id: str | None = None) -> dict[str, Any]:
         "vms_on": sum(1 for v in vms if v.properties.get("powerState") == "poweredOn"),
         "vms_total": len(vms),
         "storage_free_pct": storage_free_pct,
-        "last_scan": last_scan.model_dump(mode="json") if last_scan else None,
+        "last_scan": (
+            (last_scan.finished or last_scan.started).isoformat() if last_scan else None
+        ),
+        "last_run": last_scan.model_dump(mode="json") if last_scan else None,
         "top_findings": [f.model_dump(mode="json") for f in findings[:5]],
         "recent_changes": [
             c.model_dump(mode="json") if hasattr(c, "model_dump") else c for c in changes[:5]

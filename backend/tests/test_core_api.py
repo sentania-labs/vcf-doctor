@@ -111,9 +111,10 @@ def test_overview_shape(client):
             "recent_changes",
         ):
             assert key in o, key
-        assert set(o["counts"]) == {"critical", "warning", "info"}
+        assert set(o["counts"]) == {"critical", "warning", "info", "passed"}
         assert o["hosts_total"] >= 1 and o["vms_total"] >= 1
-        assert o["last_scan"]["status"] == "ok"
+        assert o["last_run"]["status"] == "ok"
+        assert isinstance(o["last_scan"], str)
         assert 0 <= o["health_score"] <= 100
 
 
@@ -193,3 +194,16 @@ def test_demo_mode_does_not_hijack_live_connections(monkeypatch):
     assert not isinstance(registry.get_collector(live), FixtureCollector)
     fixture = live.model_copy(update={"kind": "fixture"})
     assert isinstance(registry.get_collector(fixture), FixtureCollector)
+
+
+def test_settings_carries_assistant_and_never_echoes_key(client):
+    r = client.put(
+        "/api/settings",
+        json={"retention": 50, "assistant": {"provider": "mock", "api_key": "sk-secret"}},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["retention"] == 50
+    assert body["assistant"]["provider"] == "mock"
+    assert body["assistant"]["api_key_set"] is True
+    assert "sk-secret" not in r.text

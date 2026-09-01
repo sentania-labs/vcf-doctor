@@ -48,3 +48,28 @@ export interface AssistantContext {
 export interface AssistantRequest { task: AssistantTask; script_format?: ScriptFormat; context: AssistantContext }
 export interface AssistantSettings { enabled: boolean; provider: 'anthropic' | 'mock'; model: string; api_key_set: boolean }
 export interface AssistantStatus { available: boolean; provider: string; model: string; reason: string | null }
+
+// ---- Frontend-added types (Agent D). Shapes assumed from the API notes; field names above are frozen.
+export interface OverviewCounts { critical: number; warning: number; info: number; passed: number }
+export interface OverviewResources { total: number; by_type: Record<string, number> }
+export interface Overview {
+  health_score: number
+  counts: OverviewCounts
+  resources: OverviewResources
+  hosts_connected: number
+  hosts_total: number
+  vms_on: number
+  vms_total: number
+  storage_free_pct: number | null
+  last_scan: string | null
+  top_findings: Finding[]
+  recent_changes: Change[]
+}
+export interface ConnectionTestResult { ok: boolean; message: string; version?: string | null; build?: string | null }
+export interface Settings { retention: number; assistant: AssistantSettings }
+export interface SettingsUpdate { retention: number; assistant: Partial<AssistantSettings> & { api_key?: string } }
+export interface AssistantEvidenceCount { findings: number; changes: number; resources: number }
+export type AssistantStreamEvent =
+  | { type: 'delta'; text: string }
+  | { type: 'done'; stop_reason: string; evidence: AssistantEvidenceCount }
+  | { type: 'error'; message: string }

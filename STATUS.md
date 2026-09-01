@@ -12,9 +12,15 @@ Updated by the lead agent after every integration.
 - vSphere collector unit tested with mocks; unreachable/refused hosts fail
   fast with readable messages.
 
+- Frontend integrated and seen working against the real API in fixture
+  mode: all eight pages render with zero console errors; scripted walk
+  covers Scan Now, finding drawer, streamed Explain, PowerCLI script with
+  READ ONLY / MODIFIES ENVIRONMENT badges, Changes, Capture Snapshot,
+  Settings save, Add vCenter test (refused host).
+
 ## In progress
-- Frontend (Agent D).
 - Live vCenter verification (Phase 3 step 2) is owed; no vCenter run yet.
+- Live Anthropic call with a real key not yet exercised (mock verified).
 
 ## Broken
 - nothing known
