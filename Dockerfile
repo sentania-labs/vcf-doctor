@@ -12,6 +12,7 @@ COPY backend/pyproject.toml ./
 RUN uv pip install --system --no-cache . || true
 COPY backend/ .
 RUN uv pip install --system --no-cache .
+COPY fixtures/ /app/fixtures/
 COPY --from=frontend /src/dist /app/static
 ENV VCF_DOCTOR_STATIC_DIR=/app/static \
     VCF_DOCTOR_DB_PATH=/data/vcf-doctor.db

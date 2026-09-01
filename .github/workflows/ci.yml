@@ -62,6 +62,8 @@ jobs:
           done
           curl -fsS localhost:8000/api/health | grep -q '"status":"ok"'
           curl -fsS localhost:8000/ | grep -q '<title>VCF Doctor</title>'
+          # Fixture inventory must be in the image (51 resources), not the 10-resource fallback.
+          curl -fsS localhost:8000/api/overview | python3 -c 'import json,sys; o=json.load(sys.stdin); assert o["resource_total"] == 51, o["resource_total"]'
           docker logs smoke
           docker rm -f smoke
 
