@@ -43,6 +43,19 @@ async def status() -> AssistantStatus:
     return await _status()
 
 
+@router.get("/models")
+async def models() -> dict:
+    """Models the operator can pick. Live from the Models API when a key is
+    set, otherwise a curated list. Always includes the configured model."""
+    from app.assistant.models import list_models
+
+    current = assistant_settings.get_settings().model
+    items, source = await list_models()
+    if current and all(m["id"] != current for m in items):
+        items.insert(0, {"id": current, "display_name": current, "recommended": False})
+    return {"models": items, "source": source}
+
+
 @router.get("/settings", response_model=AssistantSettings)
 async def read_settings() -> AssistantSettings:
     return assistant_settings.get_settings()

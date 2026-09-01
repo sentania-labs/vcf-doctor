@@ -90,3 +90,13 @@ async function mockStream(req: AssistantRequest, onEvent: AssistantEventHandler,
   }
   onEvent({ type: 'done', stop_reason: 'end_turn', evidence: { findings: req.context.findings.length, changes: req.context.changes.length, resources: req.context.resources.length } })
 }
+
+export interface AssistantModel { id: string; display_name: string; recommended: boolean }
+export async function getAssistantModels(): Promise<{ models: AssistantModel[]; source: 'live' | 'curated' }> {
+  if (USE_MOCKS) return delay({ models: [
+    { id: 'claude-opus-5', display_name: 'Claude Opus 5', recommended: true },
+    { id: 'claude-sonnet-5', display_name: 'Claude Sonnet 5', recommended: false },
+    { id: 'claude-haiku-4-5', display_name: 'Claude Haiku 4.5', recommended: false },
+  ], source: 'curated' as const }, 80)
+  return apiGet('/assistant/models')
+}

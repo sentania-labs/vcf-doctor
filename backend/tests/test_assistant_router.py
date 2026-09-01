@@ -144,3 +144,26 @@ def test_fallbacks_only_for_supporting_models():
     assert not supports_fallbacks("claude-sonnet-5")
     assert not supports_fallbacks("claude-haiku-4-5")
     assert not supports_fallbacks("claude-opus-4-8")
+
+
+def test_models_endpoint_curated_without_key(monkeypatch, tmp_path):
+    from fastapi.testclient import TestClient
+
+    from app import db
+    from app.config import settings
+
+    db.reset_for_tests(str(tmp_path / "m.db"))
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr(settings, "auth", "off")
+    import importlib
+
+    import app.main as main
+
+    importlib.reload(main)
+    with TestClient(main.app) as c:
+        r = c.get("/api/assistant/models")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["source"] == "curated"
+        ids = [m["id"] for m in body["models"]]
+        assert ids[0] == "claude-opus-5" and "claude-sonnet-5" in ids
