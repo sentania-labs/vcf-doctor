@@ -63,8 +63,24 @@ export interface AssistantStatus { available: boolean; provider: string; model: 
 // ---- Frontend-added types (Agent D). Shapes assumed from the API notes; field names above are frozen.
 export interface OverviewCounts { critical: number; warning: number; info: number; passed: number }
 export interface OverviewResources { total: number; by_type: Record<string, number> }
+// Health score breakdown. weights: per-severity maximum deduction when every evaluated object fails a check.
+export type HealthSeverity = 'critical' | 'warning' | 'info'
+export type HealthWeights = Record<HealthSeverity, number>
+export interface HealthCheckLine { check_id: string; evaluated: number; findings: number; deduction: number }
+export interface HealthBreakdown {
+  score: number
+  passed: number
+  findings: number
+  not_evaluated: number
+  deduction: number
+  weights: HealthWeights
+  formula: string
+  checks: HealthCheckLine[]
+}
+export interface HealthScoreSettings { weights: HealthWeights; defaults: HealthWeights; formula: string }
 export interface Overview {
   health_score: number
+  health: HealthBreakdown
   counts: OverviewCounts
   resources: OverviewResources
   hosts_connected: number

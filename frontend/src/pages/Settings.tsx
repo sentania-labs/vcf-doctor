@@ -5,6 +5,7 @@ import { getSettings, updateSettings, getAssistantStatus, changePassword, getAss
 import { useAuth } from '@/state/AuthState'
 import { useAsync } from '@/hooks/useAsync'
 import { Badge, Button, Card, CardHeader, ErrorState, Field, Input, PageHeader, Select, Skeleton, Toggle } from '@/components/ui'
+import HealthScoreCard from '@/components/settings/HealthScoreCard'
 
 function AccessCard() {
   const { status } = useAuth()
@@ -148,6 +149,7 @@ export default function SettingsPage() {
       {!s.data ? <div className="space-y-5"><Skeleton className="h-40 rounded-xl" /><Skeleton className="h-72 rounded-xl" /></div> : (
         <div className="space-y-5">
           <RetentionCard value={retention} onChange={setRetention} />
+          <HealthScoreCard />
 
           <Card>
             <CardHeader title="Changes" subtitle="What the Changes page and the Overview's recent changes show by default" />

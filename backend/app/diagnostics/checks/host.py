@@ -9,6 +9,7 @@ class HostDisconnected(DiagnosticCheck):
     id = "HOST_DISCONNECTED"
     name = "Host disconnected"
     description = "An ESXi host is disconnected from vCenter."
+    resource_type = "host"
 
     def evaluate(
         self, resources: list[Resource], previous: list[Resource] | None = None
@@ -38,6 +39,7 @@ class HostNotResponding(DiagnosticCheck):
     id = "HOST_NOT_RESPONDING"
     name = "Host not responding"
     description = "An ESXi host is not responding to vCenter heartbeats."
+    resource_type = "host"
 
     def evaluate(
         self, resources: list[Resource], previous: list[Resource] | None = None
@@ -67,6 +69,13 @@ class HostMaintenanceMode(DiagnosticCheck):
     id = "HOST_MAINTENANCE_MODE"
     name = "Host in maintenance mode"
     description = "An ESXi host is in maintenance mode and not running workloads."
+    resource_type = "host"
+
+    def applicable(
+        self, resources: list[Resource], previous: list[Resource] | None = None
+    ) -> list[Resource]:
+        hosts = by_type(resources, "host")
+        return [h for h in hosts if h.properties.get("maintenanceMode") is not None]
 
     def evaluate(
         self, resources: list[Resource], previous: list[Resource] | None = None
@@ -95,6 +104,16 @@ class HostNtpNotConfigured(DiagnosticCheck):
     id = "HOST_NTP_NOT_CONFIGURED"
     name = "Host NTP not configured"
     description = "An ESXi host has no NTP servers configured."
+    resource_type = "host"
+
+    def applicable(
+        self, resources: list[Resource], previous: list[Resource] | None = None
+    ) -> list[Resource]:
+        # Only hosts whose collector reported an NTP list were judged.
+        return [
+            h for h in by_type(resources, "host")
+            if isinstance(h.properties.get("ntpServers"), list | tuple)
+        ]
 
     def evaluate(
         self, resources: list[Resource], previous: list[Resource] | None = None
@@ -128,6 +147,24 @@ class HostVersionMismatch(DiagnosticCheck):
     id = "HOST_VERSION_MISMATCH"
     name = "Host version mismatch in cluster"
     description = "Hosts in one cluster run different ESXi versions or builds."
+    resource_type = "cluster"
+
+    def applicable(
+        self, resources: list[Resource], previous: list[Resource] | None = None
+    ) -> list[Resource]:
+        # A cluster is judged when at least one member host reports a version or build.
+        hosts = by_id(by_type(resources, "host"))
+        members = cluster_members(resources)
+        out: list[Resource] = []
+        for cluster in by_type(resources, "cluster"):
+            for hid in members.get(cluster.id, set()):
+                h = hosts.get(hid)
+                if h is None:
+                    continue
+                if h.properties.get("version") is not None or h.properties.get("build") is not None:
+                    out.append(cluster)
+                    break
+        return out
 
     def evaluate(
         self, resources: list[Resource], previous: list[Resource] | None = None
