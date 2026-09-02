@@ -3,6 +3,7 @@ name = "vcf-doctor"
 version = "0.1.0"
 description = "Deterministic VMware Cloud Foundation diagnostics with optional LLM interpretation"
 requires-python = ">=3.14"
+license = "MIT"
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",

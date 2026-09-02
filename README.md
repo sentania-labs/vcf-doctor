@@ -34,7 +34,8 @@ healthy and never runs anything. The console is read-only by design.
 - **Retention that thins with age.** Every scan for 14 days, hourly for 30,
   daily for a year, all adjustable in Settings. Manual snapshots are kept.
 - **Sensible defaults.** Every setting has a GUI control and a working default.
-  A fresh install runs with nothing pre-configured.
+  A fresh install runs with nothing pre-configured. There is no
+  sample-data mode; it expects a live vCenter.
 
 ## Getting started
 
@@ -54,7 +55,7 @@ click Scan Now.
 |---|---|
 | ![Health page with a finding drawer open](docs/screenshots/health-finding.png) | ![Environment Changes page](docs/screenshots/environment-changes.png) |
 
-![Settings: retention tiers, health score weights, assistant, encryption](docs/screenshots/settings.png)
+![Settings: retention tiers and health score weights, with working defaults](docs/screenshots/settings.png)
 
 ## Documentation
 

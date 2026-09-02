@@ -2,7 +2,9 @@
 
 This is the shortest path from nothing to a VCF Doctor instance scanning a
 vCenter. It assumes you can run a container and can reach a vCenter over
-HTTPS from wherever the container runs. No configuration files are needed;
+HTTPS from wherever the container runs. VCF Doctor expects a live vCenter;
+there is no sample-data mode, and the first useful screen is the one after
+you add a connection. No configuration files are needed;
 everything is set in the GUI.
 
 ## 1. Run the container
@@ -47,14 +49,15 @@ Go to **Connections**, click **Add vCenter**, and fill in:
 - **Name**: what you want to see in the connection selector, for example
   `Workload domain 01`.
 - **vCenter host**: the FQDN or IP of the vCenter.
-- **Username** and **Password**: a read-only vCenter account is enough. VCF
-  Doctor never changes anything in vCenter.
-- **Scan interval**: how often to snapshot this vCenter (15 minutes by
-  default, 5 minutes minimum).
+- **Username** and **Password**: the field is prefilled with
+  `administrator@vsphere.local`; replace it with a read-only vCenter account,
+  which is all VCF Doctor needs. It never changes anything in vCenter.
+- **Scan interval**: how often to snapshot this vCenter (5 minutes by
+  default, which is also the minimum).
 - **Verify TLS certificate**: on if your vCenter certificate is trusted by
   the container, off for self-signed lab certificates.
 
-Use **Test** to check the credentials before saving. The password is
+Use **Test Connection** to check the credentials before saving. The password is
 encrypted before it is stored.
 
 ## 4. Run the first scan
@@ -82,7 +85,8 @@ first Overview will be quieter than the second.
 - **Events**: vCenter events and tasks collected with each scan.
 - **Inventory** and **Snapshots**: browse what was captured and when.
 - **Settings**: retention tiers, health score weights, change significance,
-  the assistant and its API key, encryption status, and the password.
+  the assistant and its API key, encryption status, trusted proxies (set
+  this to your ingress so login lockouts are per visitor), and the password.
 
 ## Before you rely on it: the encryption key
 
@@ -90,8 +94,9 @@ vCenter passwords and the Anthropic API key are encrypted before they are
 written to the database. The encryption key comes from one of two places:
 
 - **`VCF_DOCTOR_SECRET_KEY`** set in the deployment. This is the production
-  path. In Kubernetes keep it in a SealedSecret (or equivalent) in your
-  deployment repository so it survives redeploys and rebuilds.
+  path. Keep it in whatever your deployment tooling uses for secrets (in
+  Kubernetes, a SealedSecret or equivalent in the deployment repository) so
+  it survives redeploys and rebuilds.
 - **A generated key file.** Without the variable, the app creates
   `vcf-doctor.key` next to the database on the volume on first start, with
   owner-only permissions, and reuses it afterwards.
@@ -109,7 +114,8 @@ python3 -c 'import secrets; print(secrets.token_urlsafe(32))'
 
 ## Optional: the assistant
 
-The Claude assistant is off until it has an Anthropic API key. Enter one in
+The Claude assistant is enabled by default but unavailable until it has an
+Anthropic API key; its buttons say so. Enter one in
 Settings, Assistant (stored encrypted, never shown again) or set
 `ANTHROPIC_API_KEY` on the container. A key entered in Settings takes
 precedence. Everything the assistant says is grounded in the evidence on

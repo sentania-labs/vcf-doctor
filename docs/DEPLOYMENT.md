@@ -39,13 +39,15 @@ them.
 | `VCF_DOCTOR_RETENTION_RECENT_DAYS` | `14` | Default retention tier: every scheduled snapshot younger than this is kept; changeable in Settings |
 | `VCF_DOCTOR_RETENTION_HOURLY_DAYS` | `30` | Between recent and this age, one scheduled snapshot per hour is kept |
 | `VCF_DOCTOR_RETENTION_DAILY_DAYS` | `365` | Between hourly and this age, one per day is kept; older scheduled snapshots and change-log rows are pruned. Manual snapshots are never pruned. (`VCF_DOCTOR_DEFAULT_RETENTION`, the old snapshot count, is ignored.) |
+| `VCF_DOCTOR_HEALTH_WEIGHTS` | `critical=40,warning=15,info=0` | Deployment default for the health score weights; the values saved in Settings take precedence |
 | `VCF_DOCTOR_MIN_INTERVAL_MINUTES` | `5` | Floor for scan intervals |
 | `VCF_DOCTOR_SCHEDULER` | `on` | `off` disables scheduled scans (Scan Now still works) |
 | `VCF_DOCTOR_STATIC_DIR` | `/app/static` in the image | Built frontend location |
 
-`VCF_DOCTOR_TEST_FIXTURES` exists for the test suite and the CI smoke test
-only (it allows a connection backed by bundled sample data instead of a
-vCenter). Never set it on a real deployment.
+`VCF_DOCTOR_TEST_FIXTURES` (and `VCF_DOCTOR_FIXTURES_DIR`, which points it
+at a different sample set) exist for the test suite and the CI smoke test
+only: they allow a connection backed by bundled sample data instead of a
+vCenter. Never set them on a real deployment.
 
 ## Verifying a pulled image
 

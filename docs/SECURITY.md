@@ -16,7 +16,7 @@ the ingress and each visitor gets their own.
 
 The console is read-only against vCenter: it only ever reads inventory and
 events, and generated scripts are shown, never executed. Per-user accounts
-are a follow-up issue.
+are not built; see issue #49.
 
 `VCF_DOCTOR_AUTH=off` removes the login page. Use it only behind ingress
 authentication.
