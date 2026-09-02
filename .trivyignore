@@ -1,0 +1,14 @@
+# Trivy findings deliberately accepted for this repository.
+#
+# Empty by design. Every entry needs all three of:
+#   1. the CVE id on its own line (Trivy reads only the id),
+#   2. a comment above it with the reason it does not apply or cannot be fixed
+#      yet (which package, why the code path is unreachable, or which upstream
+#      issue tracks the fix),
+#   3. an expiry: Trivy supports `CVE-XXXX-NNNNN exp:YYYY-MM-DD`; after that
+#      date the finding fails the gate again and the entry must be re-justified
+#      or removed.
+# Unfixed CVEs never belong here: trivy.yaml already sets ignore-unfixed.
+# Example (do not uncomment without a reason and an expiry):
+# # CVE-2099-00001: only reachable via the X module which the image never imports; upstream fix tracked in <link>
+# CVE-2099-00001 exp:2026-12-31
