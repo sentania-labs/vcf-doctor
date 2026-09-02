@@ -2,6 +2,7 @@
 plaintext rows migrate on startup, and a lost key degrades to "re-enter
 credentials" rather than a crash."""
 
+import base64
 import json
 import os
 import stat
@@ -29,9 +30,9 @@ def fresh(tmp_path, monkeypatch):
     vault.reset_for_tests()
 
 
-def _conn(password="p@ss"):
+def _conn(password="p@ss", kind="vcenter"):
     return store.create_connection(
-        ConnectionCreate(name="c", host="fixture", username="u", password=password, kind="fixture")
+        ConnectionCreate(name="c", host="fixture", username="u", password=password, kind=kind)
     )
 
 
@@ -197,6 +198,8 @@ def test_env_fallback_is_reported_not_flagged_as_broken(monkeypatch):
     from app.main import app
 
     assistant_settings.update_settings({"api_key": SECRET})
+    with TestClient(app):
+        pass  # first boot writes the migration marker, as every deployment does
     _rotate_key(monkeypatch)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-env-0000")
     with TestClient(app) as client:
@@ -240,3 +243,49 @@ def test_key_file_write_is_atomic_no_temp_left_behind():
     siblings = path.parent.iterdir()
     leftovers = [p.name for p in siblings if p.name.startswith(path.name) and p != path]
     assert leftovers == []
+
+
+def test_first_migration_handles_legacy_plaintext_that_looks_encrypted():
+    """A legacy plaintext password starting with the prefix is still plaintext."""
+    conn = _conn()
+    with db.transaction() as c:
+        c.execute("UPDATE connections SET password = ? WHERE id = ?", ("enc1:oops", conn.id))
+        c.execute("DELETE FROM settings WHERE key = ?", (vault.MIGRATED_KEY,))
+    assert vault.migrate_plaintext() == 1
+    loaded = store.get_connection(conn.id)
+    assert loaded.password == "enc1:oops" and loaded.credentials_unreadable is False
+    assert db.get_setting(vault.MIGRATED_KEY) == 1
+    assert vault.migrate_plaintext() == 0
+
+
+def test_first_migration_does_not_double_encrypt_genuine_tokens():
+    conn = _conn(password="real")
+    assistant_settings.update_settings({"api_key": SECRET})
+    assert db.get_setting(vault.MIGRATED_KEY) is None
+    assert vault.migrate_plaintext() == 0
+    assert store.get_connection(conn.id).password == "real"
+    assert assistant_settings.resolve_api_key() == SECRET
+
+
+def test_fixture_connection_never_needs_credentials(monkeypatch):
+    conn = _conn(password="", kind="fixture")
+    _rotate_key(monkeypatch)
+    loaded = store.get_connection(conn.id)
+    assert loaded.credentials_unreadable is False and loaded.password == ""
+    assert store.public(loaded).needs_credentials is False
+
+
+def test_passphrase_key_is_stretched_not_hashed_once(monkeypatch):
+    import hashlib
+
+    from cryptography.fernet import Fernet
+
+    monkeypatch.setenv(vault.ENV_KEY, "correct horse battery staple")
+    token = vault.encrypt("x")
+    from cryptography.fernet import InvalidToken
+
+    digest = hashlib.sha256(b"correct horse battery staple").digest()
+    naive = Fernet(base64.urlsafe_b64encode(digest))
+    with pytest.raises(InvalidToken):
+        naive.decrypt(token[len(vault.PREFIX) :].encode())
+    assert vault.decrypt(token) == "x"

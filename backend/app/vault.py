@@ -40,6 +40,12 @@ log = logging.getLogger("vcf_doctor.vault")
 
 ENV_KEY = "VCF_DOCTOR_SECRET_KEY"
 PREFIX = "enc1:"
+# Settings row set once the first migration has run. Before it exists every
+# stored secret is legacy plaintext, whatever it looks like, so a plaintext
+# password that happens to start with the prefix is still migrated correctly.
+MIGRATED_KEY = "vault_migrated"
+_KDF_SALT = b"vcf-doctor-vault-v1"
+_KDF_N = 2**15
 KeySource = Literal["env", "file"]
 
 
@@ -70,8 +76,15 @@ def _normalise(raw: str) -> bytes:
         Fernet(raw.encode())
         return raw.encode()
     except (ValueError, TypeError):
-        # Not a Fernet key: treat it as a passphrase and stretch it.
-        return base64.urlsafe_b64encode(hashlib.sha256(raw.encode()).digest())
+        # Not a Fernet key: treat it as a passphrase. scrypt with a work factor
+        # makes offline guessing against a copied database expensive; the salt
+        # is fixed per application because the only place to keep a random one
+        # would be the same database an attacker already holds. Runs once per
+        # process (the result is cached), so the cost is paid at startup.
+        derived = hashlib.scrypt(
+            raw.encode(), salt=_KDF_SALT, n=_KDF_N, r=8, p=1, maxmem=64 * 1024 * 1024, dklen=32
+        )
+        return base64.urlsafe_b64encode(derived)
 
 
 def _read_key_file(path: Path) -> bytes:
@@ -179,17 +192,40 @@ def readable(stored: str | None) -> bool:
         return False
 
 
+def _genuine_token(stored: str) -> bool:
+    """True only for a value this key produced; a plaintext that merely starts
+    with the prefix fails the authentication check and is treated as plaintext."""
+    if not is_encrypted(stored):
+        return False
+    try:
+        decrypt(stored)
+        return True
+    except SecretUnreadable:
+        return False
+
+
 def migrate_plaintext() -> int:
-    """Encrypt any plaintext secret rows. One transaction, idempotent, safe to
-    run on every startup. Returns the number of rows rewritten."""
+    """Encrypt legacy plaintext secret rows. One transaction, idempotent, safe to
+    run on every startup. Returns the number of rows rewritten.
+
+    First run on a database (no MIGRATED_KEY row): every value that is not a
+    token this key can open is plaintext and gets encrypted, then the marker is
+    written in the same transaction. Later runs only touch unprefixed values,
+    which can only appear if an older build wrote to the database afterwards.
+    """
     import json
 
     from app import db
 
+    first_run = db.get_setting(MIGRATED_KEY) is None
+
+    def needs_encrypting(value: str) -> bool:
+        return not _genuine_token(value) if first_run else not is_encrypted(value)
+
     rewritten = 0
     with db.transaction() as c:
         for row in c.execute("SELECT id, password FROM connections").fetchall():
-            if not is_encrypted(row["password"]):
+            if needs_encrypting(row["password"]):
                 c.execute(
                     "UPDATE connections SET password = ? WHERE id = ?",
                     (encrypt(row["password"]), row["id"]),
@@ -203,12 +239,18 @@ def migrate_plaintext() -> int:
                 value = json.loads(row["value"])
             except ValueError:
                 value = None
-            if isinstance(value, str) and value and not is_encrypted(value):
+            if isinstance(value, str) and value and needs_encrypting(value):
                 c.execute(
                     "UPDATE settings SET value = ? WHERE key = ?",
                     (json.dumps(encrypt(value)), "assistant_api_key"),
                 )
                 rewritten += 1
+        if first_run:
+            c.execute(
+                "INSERT INTO settings(key, value) VALUES(?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (MIGRATED_KEY, json.dumps(1)),
+            )
     if rewritten:
         log.info("encrypted %d plaintext secret row(s)", rewritten)
     return rewritten

@@ -71,7 +71,8 @@ def _row_to_connection(row) -> Connection:
     except vault.SecretUnreadable:
         # Key lost or rotated. Keep the row usable for everything except the
         # password; the operator re-enters it from the Connections page.
-        password, unreadable = "", True
+        # Fixture connections carry no real credential, so nothing to re-enter.
+        password, unreadable = "", row["kind"] != "fixture"
     return Connection(
         id=row["id"],
         name=row["name"],
