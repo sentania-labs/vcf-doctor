@@ -2,11 +2,15 @@
 # and the smoke test needs a real Docker daemon, which the lab pool never has.
 #
 # Gates, in order: checks (lint, tests, frontend build) -> scan (dependency
-# audit, secret scan, repo misconfig/lockfile scan) -> image (build, image
+# audit, secret scan, repo misconfig/lockfile scan) -> image (build once, image
 # scan, smoke test). Only a main-branch push that passed all of them publishes,
-# and the published digest carries a provenance attestation, an SBOM and a
-# keyless cosign signature. Every scanner is invoked through `make`, so a
-# developer runs exactly what CI runs.
+# and what it publishes is the exact image the `image` job scanned and smoke
+# tested: the build is exported once as an OCI tarball, handed over as a run
+# artifact, and pushed byte for byte, so the published digest is the tested
+# digest (the publish job checks this and fails otherwise). The published digest
+# carries a provenance attestation, an SBOM and a keyless cosign signature.
+# Every scanner is invoked through `make`, so a developer runs exactly what CI
+# runs.
 name: ci
 
 on:
@@ -21,6 +25,12 @@ concurrency:
 # Least privilege by default; the image job widens its own scope below.
 permissions:
   contents: read
+
+# bash with -eo pipefail for every run step, so a failing left side of a pipe
+# fails the step instead of feeding an empty string to the next command.
+defaults:
+  run:
+    shell: bash
 
 env:
   IMAGE: ghcr.io/${{ github.repository }}
@@ -88,9 +98,15 @@ jobs:
   # elevated token: id-token/packages/attestations write live only in the
   # push-only `publish` job below, so a same-repo PR can never mint an OIDC
   # certificate through this workflow.
+  #
+  # The image is built exactly once, here, as an OCI tarball. The same tarball
+  # is loaded into the local daemon for the scan and the smoke test, then
+  # uploaded as a run artifact for `publish` to push unchanged.
   image:
     needs: [checks, scan]
     runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.digest.outputs.digest }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
@@ -98,15 +114,41 @@ jobs:
         with:
           version: ${{ env.TRIVY_VERSION }}
           cache: true
+      # skopeo moves the OCI tarball into the daemon (docker load cannot read an
+      # index that carries attestation manifests). GitHub-hosted runner: sudo is fine.
+      - name: Install skopeo
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq skopeo
 
-      - name: Build (local load for scan and smoke)
+      # The only build in this workflow. The OCI index carries a max-mode SLSA
+      # provenance attestation and an SPDX SBOM, both attached to the digest and
+      # readable after publish with `docker buildx imagetools inspect`.
+      - name: Build once (OCI tarball with provenance and SBOM)
+        id: build
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
-          load: true
           tags: vcf-doctor:ci
+          outputs: type=oci,dest=${{ runner.temp }}/image.tar
+          provenance: mode=max
+          sbom: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # The digest under test is the OCI index digest recorded in the tarball.
+      # It must match what buildx reported; the publish job compares against it.
+      - name: Record tested digest and load for scan and smoke
+        id: digest
+        env:
+          BUILD_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          DIGEST="$(tar -xOf "$RUNNER_TEMP/image.tar" index.json | jq -r '.manifests[0].digest')"
+          case "$DIGEST" in sha256:*) ;; *) echo "no index digest in tarball: '$DIGEST'"; exit 1 ;; esac
+          if [ "$DIGEST" != "$BUILD_DIGEST" ]; then
+            echo "tarball index digest $DIGEST differs from buildx digest $BUILD_DIGEST"; exit 1
+          fi
+          echo "tested digest: $DIGEST"
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          skopeo copy "oci-archive:$RUNNER_TEMP/image.tar" docker-daemon:vcf-doctor:ci
 
       # Blocks on: HIGH/CRITICAL CVEs with a fix available in the image
       # (OS packages, bundled Python and npm packages). Unfixed CVEs are
@@ -154,8 +196,24 @@ jobs:
         if: always()
         run: docker logs smoke || true; docker rm -f smoke || true
 
+      # Uploaded only after scan and smoke passed, so the artifact is the
+      # validated image and nothing else. Artifacts are scoped to the run, so a
+      # plain name lets "re-run failed jobs" on publish find the image job's
+      # tarball; overwrite covers a full re-run. Three days covers a publish
+      # re-run the next morning.
+      - name: Upload tested image
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: image-oci
+          path: ${{ runner.temp }}/image.tar
+          retention-days: 3
+          overwrite: true
+          compression-level: 0 # layers are already gzip; recompressing only burns time
+          if-no-files-found: error
+
   # Main-branch pushes only. Split out of `image` so the OIDC token and
-  # write scopes below are never granted to a PR-triggered run.
+  # write scopes below are never granted to a PR-triggered run. Nothing is
+  # built here: the tarball the `image` job tested is pushed as is.
   publish:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: image
@@ -164,19 +222,59 @@ jobs:
       contents: write # tag + release on main
       packages: write # push to GHCR
       id-token: write # keyless cosign (Fulcio/Rekor) needs the OIDC token
-      attestations: write # provenance / SBOM attestations
+      actions: read # download the tested image artifact from this run
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
+      - name: Install skopeo
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq skopeo
+
+      # Next version = highest existing v0.1.N tag on origin + 1, so releases
+      # number one by one regardless of how many PR or cancelled runs happened
+      # in between. First release on a repo with no v0.1.* tag is v0.1.0. A
+      # re-run of a commit that already carries a v0.1.N tag reuses it, so a
+      # publish that failed after tagging does not mint a second version.
+      # origin is the single source of truth (the checkout is shallow and has
+      # no tags); ls-remote failing (network, auth) fails the step.
       - name: Compute tags
         id: tags
         run: |
-          VERSION="v0.1.${{ github.run_number }}"
+          TAGS="$(git ls-remote --tags --refs origin 'refs/tags/v0.1.*' | sed -n 's|^\([0-9a-f]*\)[[:space:]]*refs/tags/\(v0\.1\.[0-9][0-9]*\)$|\1 \2|p')"
+          EXISTING="$(echo "$TAGS" | awk -v sha="$GITHUB_SHA" '$1 == sha { print $2 }' | sort -V | tail -1)"
+          if [ -n "$EXISTING" ]; then
+            VERSION="$EXISTING"
+            echo "commit already tagged $VERSION; reusing it"
+          else
+            LAST="$(echo "$TAGS" | awk '{ print $2 }' | sed 's/^v0\.1\.//' | sort -n | tail -1)"
+            VERSION="v0.1.$(( ${LAST:--1} + 1 ))"
+            echo "highest existing tag: ${LAST:+v0.1.$LAST}${LAST:-(none)}; next: $VERSION"
+          fi
           SHORT="${GITHUB_SHA::7}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "list=$IMAGE:$VERSION,$IMAGE:sha-$SHORT,$IMAGE:latest" >> "$GITHUB_OUTPUT"
+          echo "list=$VERSION sha-$SHORT latest" >> "$GITHUB_OUTPUT"
 
+      - name: Download tested image
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: image-oci
+          path: ${{ runner.temp }}
+
+      # Gate 1 of 2: the tarball we are about to push is the one `image` tested.
+      - name: Verify tarball digest matches the tested digest
+        id: tested
+        env:
+          TESTED: ${{ needs.image.outputs.digest }}
+        run: |
+          test -n "$TESTED" || { echo "image job reported no digest"; exit 1; }
+          LOCAL="$(tar -xOf "$RUNNER_TEMP/image.tar" index.json | jq -r '.manifests[0].digest')"
+          if [ "$LOCAL" != "$TESTED" ]; then
+            echo "artifact digest $LOCAL differs from tested digest $TESTED"; exit 1
+          fi
+          echo "tested digest: $TESTED"
+          echo "digest=$TESTED" >> "$GITHUB_OUTPUT"
+
+      # One login serves skopeo, buildx imagetools and cosign: all three read
+      # the Docker credential store.
       - name: Login to GHCR
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
@@ -184,20 +282,31 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Same build cache as the scanned/smoked image from the `image` job. The
-      # pushed index carries a max-mode SLSA provenance attestation and an SPDX
-      # SBOM, both attached to the digest and readable with
-      # `docker buildx imagetools inspect`.
-      - name: Publish
-        id: publish
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.tags.outputs.list }}
-          cache-from: type=gha
-          provenance: mode=max
-          sbom: true
+      # `--all` copies the whole index (image manifest plus the provenance and
+      # SBOM attestation manifests) byte for byte, so the digest survives.
+      - name: Publish tested tarball
+        env:
+          TAGS: ${{ steps.tags.outputs.list }}
+        run: |
+          for TAG in $TAGS; do
+            skopeo copy --all "oci-archive:$RUNNER_TEMP/image.tar" "docker://$IMAGE:$TAG"
+          done
+
+      # Gate 2 of 2: what the registry now serves under every tag is the tested
+      # digest. A mismatch fails the job before anything is signed or released.
+      - name: Verify published digest equals tested digest
+        env:
+          TESTED: ${{ steps.tested.outputs.digest }}
+          TAGS: ${{ steps.tags.outputs.list }}
+        run: |
+          for TAG in $TAGS; do
+            PUBLISHED="$(docker buildx imagetools inspect "$IMAGE:$TAG" --format '{{json .Manifest}}' | jq -r .digest)"
+            if [ "$PUBLISHED" != "$TESTED" ]; then
+              echo "$IMAGE:$TAG serves $PUBLISHED, tested digest was $TESTED"; exit 1
+            fi
+            echo "$IMAGE:$TAG -> $PUBLISHED (matches tested digest)"
+          done
+          docker buildx imagetools inspect "$IMAGE@$TESTED" | grep -q 'attestation-manifest' || { echo "no attestation manifest on published digest"; exit 1; }
 
       - name: Install cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
@@ -209,14 +318,25 @@ jobs:
       #     --certificate-identity-regexp '^https://github.com/<owner>/vcf-doctor/'
       - name: Sign published digest
         env:
-          DIGEST: ${{ steps.publish.outputs.digest }}
+          DIGEST: ${{ steps.tested.outputs.digest }}
         run: cosign sign --yes "${IMAGE}@${DIGEST}"
 
+      # Idempotent on re-run: an existing tag on this commit is reused above,
+      # and an existing release is left alone. If the tag push is rejected,
+      # something else tagged v0.1.N in between (main pushes serialise through
+      # the concurrency group, so this should not happen); the image and
+      # signature already pushed under that tag then need manual GHCR cleanup.
       - name: Tag release
         env:
           GH_TOKEN: ${{ github.token }}
+          DIGEST: ${{ steps.tested.outputs.digest }}
+          V: ${{ steps.tags.outputs.version }}
         run: |
-          V="${{ steps.tags.outputs.version }}"
-          git tag "$V" 2>/dev/null && git push origin "$V" || echo "tag $V exists"
+          if git ls-remote --exit-code --tags origin "refs/tags/$V" >/dev/null; then
+            echo "tag $V already on origin"
+          else
+            git tag "$V"
+            git push origin "$V"
+          fi
           gh release view "$V" >/dev/null 2>&1 || gh release create "$V" --generate-notes --title "$V" \
-            --notes "Image: $IMAGE:$V (also sha-${GITHUB_SHA::7}, latest). Digest: ${{ steps.publish.outputs.digest }} (cosign keyless signed, SBOM + provenance attached)"
+            --notes "Image: $IMAGE:$V (also sha-${GITHUB_SHA::7}, latest). Digest: $DIGEST (the digest scanned and smoke-tested in this run; cosign keyless signed, SBOM + provenance attached)"
