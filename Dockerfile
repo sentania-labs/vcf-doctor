@@ -7,12 +7,17 @@ RUN npm ci
 COPY frontend/ .
 RUN npm run build
 
-FROM python:3.12-slim@sha256:e5c9fa26ffb76e11e0f054f30dc2523a2f9693f0c36c0cf1e39b27e152d899fc AS backend
+FROM python:3.14-slim@sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6 AS backend
 COPY --from=ghcr.io/astral-sh/uv:0.12.8 /uv /usr/local/bin/uv
 WORKDIR /app
 COPY backend/pyproject.toml ./
 COPY backend/app ./app
 RUN uv pip install --system --no-cache .
+# The base image ships pip only so users can install things; this image never
+# does (uv installed everything above, uvicorn is what runs). pip's vendored
+# copies of msgpack and setuptools are what the image scan flags, and they
+# are only patched when the base image ships a newer pip, so drop pip entirely.
+RUN uv pip uninstall --system pip && rm -f /usr/local/bin/pip
 COPY fixtures/ /app/fixtures/
 COPY --from=frontend /src/dist /app/static
 RUN useradd -r -u 10001 -d /app -s /usr/sbin/nologin app \
