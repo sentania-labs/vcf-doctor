@@ -26,6 +26,12 @@ concurrency:
 permissions:
   contents: read
 
+# bash with -eo pipefail for every run step, so a failing left side of a pipe
+# fails the step instead of feeding an empty string to the next command.
+defaults:
+  run:
+    shell: bash
+
 env:
   IMAGE: ghcr.io/${{ github.repository }}
   TRIVY_VERSION: v0.74.0
@@ -132,11 +138,13 @@ jobs:
       # It must match what buildx reported; the publish job compares against it.
       - name: Record tested digest and load for scan and smoke
         id: digest
+        env:
+          BUILD_DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           DIGEST="$(tar -xOf "$RUNNER_TEMP/image.tar" index.json | jq -r '.manifests[0].digest')"
-          test -n "$DIGEST" && [[ "$DIGEST" == sha256:* ]]
-          if [ "$DIGEST" != "${{ steps.build.outputs.digest }}" ]; then
-            echo "tarball index digest $DIGEST differs from buildx digest ${{ steps.build.outputs.digest }}"; exit 1
+          case "$DIGEST" in sha256:*) ;; *) echo "no index digest in tarball: '$DIGEST'"; exit 1 ;; esac
+          if [ "$DIGEST" != "$BUILD_DIGEST" ]; then
+            echo "tarball index digest $DIGEST differs from buildx digest $BUILD_DIGEST"; exit 1
           fi
           echo "tested digest: $DIGEST"
           echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
@@ -181,14 +189,17 @@ jobs:
         run: docker logs smoke || true; docker rm -f smoke || true
 
       # Uploaded only after scan and smoke passed, so the artifact is the
-      # validated image and nothing else. One day is enough: publish runs in
-      # the same workflow run, minutes later.
+      # validated image and nothing else. Artifacts are scoped to the run, so a
+      # plain name lets "re-run failed jobs" on publish find the image job's
+      # tarball; overwrite covers a full re-run. Three days covers a publish
+      # re-run the next morning.
       - name: Upload tested image
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: image-oci-${{ github.run_id }}-${{ github.run_attempt }}
+          name: image-oci
           path: ${{ runner.temp }}/image.tar
-          retention-days: 1
+          retention-days: 3
+          overwrite: true
           compression-level: 0 # layers are already gzip; recompressing only burns time
           if-no-files-found: error
 
@@ -203,35 +214,41 @@ jobs:
       contents: write # tag + release on main
       packages: write # push to GHCR
       id-token: write # keyless cosign (Fulcio/Rekor) needs the OIDC token
-      attestations: write # provenance / SBOM attestations
+      actions: read # download the tested image artifact from this run
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install skopeo
         run: sudo apt-get update -qq && sudo apt-get install -y -qq skopeo
 
-      # Next version = highest existing v0.1.N tag + 1, so releases number one
-      # by one regardless of how many PR or cancelled runs happened in between.
-      # First release on a repo with no v0.1.* tag is v0.1.0.
+      # Next version = highest existing v0.1.N tag on origin + 1, so releases
+      # number one by one regardless of how many PR or cancelled runs happened
+      # in between. First release on a repo with no v0.1.* tag is v0.1.0. A
+      # re-run of a commit that already carries a v0.1.N tag reuses it, so a
+      # publish that failed after tagging does not mint a second version.
+      # origin is the single source of truth (the checkout is shallow and has
+      # no tags); ls-remote failing (network, auth) fails the step.
       - name: Compute tags
         id: tags
         run: |
-          git fetch --tags --force --quiet origin
-          LAST="$(git tag --list 'v0.1.*' | sed -n 's/^v0\.1\.\([0-9][0-9]*\)$/\1/p' | sort -n | tail -1)"
-          NEXT=$(( ${LAST:--1} + 1 ))
-          VERSION="v0.1.$NEXT"
-          if git ls-remote --exit-code --tags origin "refs/tags/$VERSION" >/dev/null; then
-            echo "computed $VERSION but it already exists on origin"; exit 1
+          TAGS="$(git ls-remote --tags --refs origin 'refs/tags/v0.1.*' | sed -n 's|^\([0-9a-f]*\)[[:space:]]*refs/tags/\(v0\.1\.[0-9][0-9]*\)$|\1 \2|p')"
+          EXISTING="$(echo "$TAGS" | awk -v sha="$GITHUB_SHA" '$1 == sha { print $2 }' | sort -V | tail -1)"
+          if [ -n "$EXISTING" ]; then
+            VERSION="$EXISTING"
+            echo "commit already tagged $VERSION; reusing it"
+          else
+            LAST="$(echo "$TAGS" | awk '{ print $2 }' | sed 's/^v0\.1\.//' | sort -n | tail -1)"
+            VERSION="v0.1.$(( ${LAST:--1} + 1 ))"
+            echo "highest existing tag: ${LAST:+v0.1.$LAST}${LAST:-(none)}; next: $VERSION"
           fi
           SHORT="${GITHUB_SHA::7}"
-          echo "last existing tag: ${LAST:+v0.1.$LAST}${LAST:-(none)}; next: $VERSION"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "list=$VERSION sha-$SHORT latest" >> "$GITHUB_OUTPUT"
 
       - name: Download tested image
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: image-oci-${{ github.run_id }}-${{ github.run_attempt }}
+          name: image-oci
           path: ${{ runner.temp }}
 
       # Gate 1 of 2: the tarball we are about to push is the one `image` tested.
@@ -260,8 +277,10 @@ jobs:
       # `--all` copies the whole index (image manifest plus the provenance and
       # SBOM attestation manifests) byte for byte, so the digest survives.
       - name: Publish tested tarball
+        env:
+          TAGS: ${{ steps.tags.outputs.list }}
         run: |
-          for TAG in ${{ steps.tags.outputs.list }}; do
+          for TAG in $TAGS; do
             skopeo copy --all "oci-archive:$RUNNER_TEMP/image.tar" "docker://$IMAGE:$TAG"
           done
 
@@ -270,8 +289,9 @@ jobs:
       - name: Verify published digest equals tested digest
         env:
           TESTED: ${{ steps.tested.outputs.digest }}
+          TAGS: ${{ steps.tags.outputs.list }}
         run: |
-          for TAG in ${{ steps.tags.outputs.list }}; do
+          for TAG in $TAGS; do
             PUBLISHED="$(docker buildx imagetools inspect "$IMAGE:$TAG" --format '{{json .Manifest}}' | jq -r .digest)"
             if [ "$PUBLISHED" != "$TESTED" ]; then
               echo "$IMAGE:$TAG serves $PUBLISHED, tested digest was $TESTED"; exit 1
@@ -293,16 +313,22 @@ jobs:
           DIGEST: ${{ steps.tested.outputs.digest }}
         run: cosign sign --yes "${IMAGE}@${DIGEST}"
 
-      # The tag was computed from the tags that existed a minute ago; if the
-      # push is rejected something else tagged in between, and that is a
-      # failure to look at, not something to paper over.
+      # Idempotent on re-run: an existing tag on this commit is reused above,
+      # and an existing release is left alone. If the tag push is rejected,
+      # something else tagged v0.1.N in between (main pushes serialise through
+      # the concurrency group, so this should not happen); the image and
+      # signature already pushed under that tag then need manual GHCR cleanup.
       - name: Tag release
         env:
           GH_TOKEN: ${{ github.token }}
           DIGEST: ${{ steps.tested.outputs.digest }}
+          V: ${{ steps.tags.outputs.version }}
         run: |
-          V="${{ steps.tags.outputs.version }}"
-          git tag "$V"
-          git push origin "$V"
-          gh release create "$V" --generate-notes --title "$V" \
+          if git ls-remote --exit-code --tags origin "refs/tags/$V" >/dev/null; then
+            echo "tag $V already on origin"
+          else
+            git tag "$V"
+            git push origin "$V"
+          fi
+          gh release view "$V" >/dev/null 2>&1 || gh release create "$V" --generate-notes --title "$V" \
             --notes "Image: $IMAGE:$V (also sha-${GITHUB_SHA::7}, latest). Digest: $DIGEST (the digest scanned and smoke-tested in this run; cosign keyless signed, SBOM + provenance attached)"
