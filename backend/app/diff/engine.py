@@ -109,13 +109,12 @@ DICT_LISTS: dict[str, str] = {
 _ID_VALUED = frozenset({"host", "cluster", "hosts", "networks", "datastores"})
 # Properties only compared when both sides carry a value (a powered-off VM
 # has no bootTime; that is not a reboot).
-_BOTH_SIDES_REQUIRED = frozenset({"bootTime"})
-
 # Properties where None means "vCenter did not return it" (disconnected host,
 # inaccessible VM, no host reporting). A None on either side is unknown, not a
 # change, so these are skipped rather than reported as removed/added.
 _BOTH_SIDES_REQUIRED = frozenset(
     {
+        "bootTime",
         "vmkernelAdapters",
         "physicalNics",
         "standardSwitches",
