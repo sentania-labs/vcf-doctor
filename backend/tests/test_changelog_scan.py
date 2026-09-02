@@ -3,7 +3,9 @@
 from datetime import timedelta
 
 from app import db, scheduler
+from app.events import store as events_store
 from app.models import ConnectionCreate
+from app.models.event import Event
 from app.models.snapshot import RetentionPolicy
 from app.snapshots import store
 
@@ -80,3 +82,25 @@ def test_deleting_a_connection_removes_its_change_rows(tmp_path):
     store.delete_connection(conn.id)
     assert store.count_changes(conn.id) == 0
     assert store.count_changes(other.id) == 15
+
+
+def test_deleting_a_connection_removes_its_events(tmp_path):
+    db.reset_for_tests(str(tmp_path / "t.db"))
+    conn, other = _conn(), _conn()
+    for c in (conn, other):
+        events_store.upsert_events(
+            [
+                Event(
+                    id=f"{c.id}:e1",
+                    connection_id=c.id,
+                    time=store.now(),
+                    type="VmPoweredOffEvent",
+                    category="info",
+                    message="event",
+                )
+            ]
+        )
+    assert events_store.count_events(conn.id) == events_store.count_events(other.id) == 1
+    assert store.delete_connection(conn.id) is True
+    assert events_store.count_events(conn.id) == 0
+    assert events_store.count_events(other.id) == 1

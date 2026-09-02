@@ -17,6 +17,7 @@ from pydantic import ValidationError
 
 from app import db
 from app.config import settings as cfg
+from app.events import store as events_store
 from app.models import (
     Connection,
     ConnectionCreate,
@@ -173,7 +174,11 @@ def delete_connection(connection_id: str) -> bool:
         c.execute("DELETE FROM scan_runs WHERE connection_id = ?", (connection_id,))
         c.execute("DELETE FROM schedules WHERE connection_id = ?", (connection_id,))
         cur = c.execute("DELETE FROM connections WHERE id = ?", (connection_id,))
-        return cur.rowcount > 0
+        removed = cur.rowcount > 0
+    # Events live in their own lazily created table; drop them alongside the
+    # change log so a deleted connection leaves nothing behind.
+    events_store.delete_events(connection_id)
+    return removed
 
 
 # --- schedules -----------------------------------------------------------
