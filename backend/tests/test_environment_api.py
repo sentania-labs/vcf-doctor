@@ -272,7 +272,8 @@ def test_pruned_snapshots_are_reported_per_section(client):
     sec = _section(client.get("/api/environment/changes").json(), a)
     assert sec["pruned_snapshot_ids"] == []
     older = sec["changes"][0]["from_snapshot_id"]
-    assert client.delete(f"/api/snapshots/{older}").status_code == 200
+    deleted = client.delete(f"/api/snapshots/{older}")
+    assert deleted.status_code == 200
     body = client.get("/api/environment/changes").json()
     sec = _section(body, a)
     # The change rows survive the prune and the section names the missing snapshot.
