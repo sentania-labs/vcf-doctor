@@ -1,6 +1,6 @@
 """Prompt construction for the VCF Doctor assistant.
 
-The system prompt is startup.md section 18 verbatim, followed by task
+The system prompt is docs/ORIGINAL_PLAN.md section 18 verbatim, followed by task
 guidance. The user message is the evidence package serialized as compact
 JSON blocks. Evidence is capped so a huge inventory cannot blow the request
 up; when capped, the model is told the evidence is partial.
@@ -22,7 +22,7 @@ EVIDENCE_RULE = (
     "by the supplied evidence."
 )
 
-# startup.md section 18, verbatim.
+# docs/ORIGINAL_PLAN.md section 18, verbatim.
 SAFETY_PROMPT = """You are the VCF Doctor assistant.
 
 VCF Doctor has supplied deterministic observations from a VMware environment.
