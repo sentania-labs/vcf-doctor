@@ -1,4 +1,4 @@
-"""Validate the demo fixtures in fixtures/ against the frozen Resource model
+"""Validate the test fixtures in fixtures/ against the frozen Resource model
 and the property contract in docs/PROPERTIES.md.
 
 Checks structure (every resource parses, ids unique, parent and relationship

@@ -169,11 +169,10 @@ export default function SettingsPage() {
               {status.data && !status.data.available && status.data.reason ? <p className="text-sm text-warning bg-warning-bg rounded-md px-3 py-2">{status.data.reason}</p> : null}
               <Toggle checked={assistant.enabled} onChange={v => setAssistant(a => ({ ...a, enabled: v }))} label="Assistant enabled" />
               <div className="grid sm:grid-cols-2 gap-4">
-                <Field label="Provider" hint={assistant.provider === 'mock' ? 'Mock answers from canned evidence (test provider). Switch to Anthropic for real answers.' : 'Answers come from the Anthropic API.'}>
+                <Field label="Provider" hint={assistant.provider === 'mock' ? 'Mock answers from canned evidence and needs no key. Not real analysis; switch to Anthropic for real answers.' : 'Answers come from the Anthropic API.'}>
                   <Select value={assistant.provider} onChange={e => setAssistant(a => ({ ...a, provider: e.target.value as AssistantSettings['provider'] }))} className="w-full">
                     <option value="anthropic">Anthropic</option>
-                    {/* The mock provider is for tests; it is only listed when it is already stored so it can be switched off. */}
-                    {assistant.provider === 'mock' ? <option value="mock">Mock (test)</option> : null}
+                    <option value="mock">Mock (no key, canned answers)</option>
                   </Select>
                 </Field>
                 <Field label="Model" hint={modelSource === 'live' ? 'List comes from your Anthropic account.' : 'Add an API key to list the models available to your account.'}>

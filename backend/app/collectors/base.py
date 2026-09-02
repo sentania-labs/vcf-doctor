@@ -1,4 +1,4 @@
-"""Collector interface. Implementations: fixture (Agent A), vsphere (Agent B)."""
+"""Collector interface. Implementations: vsphere (live) and fixture (test-only)."""
 
 from abc import ABC, abstractmethod
 

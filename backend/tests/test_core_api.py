@@ -199,6 +199,14 @@ def test_fixture_kind_never_hijacks_live_connections():
     assert isinstance(registry.get_collector(fixture), FixtureCollector)
 
 
+def test_fixture_hook_is_off_by_default(monkeypatch):
+    """A clean environment never enables the fixture collector."""
+    from app.config import Settings
+
+    monkeypatch.delenv("VCF_DOCTOR_TEST_FIXTURES", raising=False)
+    assert Settings().test_fixtures is False
+
+
 def test_fixture_kind_is_test_only(client, monkeypatch):
     """Without the VCF_DOCTOR_TEST_FIXTURES hook (the production default) a
     fixture connection cannot be created, switched to, tested, or scanned."""
