@@ -761,6 +761,11 @@ def save_findings(snapshot_id: str, findings: list[Finding]) -> None:
         )
 
 
+def findings_cached(snapshot_id: str) -> bool:
+    """True when a findings row exists for the snapshot (an empty list still counts)."""
+    return db.fetchone("SELECT 1 FROM findings WHERE snapshot_id = ?", (snapshot_id,)) is not None
+
+
 def get_findings(snapshot_id: str) -> list[Finding]:
     row = db.fetchone("SELECT findings FROM findings WHERE snapshot_id = ?", (snapshot_id,))
     if row is None:

@@ -31,9 +31,10 @@ class SignificanceCounts(BaseModel):
 
 
 class FindingsDelta(BaseModel):
-    """Findings present at the end of the window but not at its start (appeared),
-    and the reverse (cleared). Derived from the findings cached with the
-    boundary snapshots, keyed by the deterministic finding id."""
+    """Findings present on the end snapshot but not on the baseline (appeared),
+    and the reverse (cleared), keyed by the deterministic finding id. The
+    baseline is the newest snapshot before the window, or the oldest one inside
+    it when nothing earlier exists; the end is the newest snapshot inside it."""
 
     baseline_snapshot_id: str
     baseline_at: datetime
@@ -80,13 +81,20 @@ def _utc(dt: datetime) -> datetime:
 
 def last_cycle_since(until: datetime) -> datetime | None:
     """Start of the most recent scan cycle: the oldest of each connection's
-    newest snapshot at or before `until`. Every connection's latest scan then
-    falls inside [since, until]. None when nothing has been scanned yet."""
-    latest: list[datetime] = []
+    newest snapshot at or before `until`, so every connection's latest scan
+    falls inside [since, until]. Connections whose schedule is paused do not
+    set the start (a month-old paused connection would drag the window back
+    for everyone); they are only considered when nothing is scheduled at all.
+    None when nothing has been scanned yet."""
+    scheduled: list[datetime] = []
+    paused: list[datetime] = []
     for conn in store.list_connections():
         snap = store.snapshot_summary_at(conn.id, at_or_before=until)
-        if snap is not None:
-            latest.append(snap.created_at)
+        if snap is None:
+            continue
+        sched = store.get_schedule(conn.id)
+        (scheduled if sched is not None and sched.enabled else paused).append(snap.created_at)
+    latest = scheduled or paused
     return min(latest) if latest else None
 
 
@@ -105,6 +113,10 @@ def _findings_delta(connection_id: str, since: datetime, until: datetime) -> Fin
     if baseline is None:
         baseline = store.earliest_snapshot_summary_since(connection_id, since, until)
     if baseline is None or baseline.id == end.id:
+        return None
+    # A snapshot without a findings row (older than the cache) would make every
+    # current finding look new; say nothing rather than something wrong.
+    if not (store.findings_cached(baseline.id) and store.findings_cached(end.id)):
         return None
     before = {f.id: f for f in store.get_findings(baseline.id)}
     after = {f.id: f for f in store.get_findings(end.id)}

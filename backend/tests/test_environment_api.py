@@ -198,3 +198,53 @@ def test_validation(client):
     assert client.get(base + "?limit_per_connection=0").status_code == 422
     assert client.get(base + "?limit_per_connection=6000").status_code == 422
     assert client.get(base + "?since=2020-01-01T00:00:00Z").status_code == 200
+
+
+def test_paused_connection_does_not_set_last_cycle_start(client):
+    a = client.post("/api/connections", json=_conn("Alpha")).json()["id"]
+    b = client.post("/api/connections", json=_conn("Beta")).json()["id"]
+    _scan(client, a, 2)
+    _scan(client, b, 2)
+    _shift(b, timedelta(days=-30))
+    client.put(f"/api/connections/{b}/schedule", json={"enabled": False})
+    body = client.get("/api/environment/changes").json()
+    # The window starts at Alpha's latest scan, so Beta (paused, a month old) has no data.
+    assert store._dt(body["since"]) > store.now() - timedelta(hours=1)
+    assert _section(body, b)["has_data"] is False
+    assert _section(body, a)["has_data"] is True
+    # With every schedule paused the paused ones decide the start instead.
+    client.put(f"/api/connections/{a}/schedule", json={"enabled": False})
+    body = client.get("/api/environment/changes").json()
+    assert body["totals"]["covered"] == 2
+
+
+def test_findings_delta_needs_cached_findings_on_both_ends(client):
+    a = client.post("/api/connections", json=_conn("Alpha")).json()["id"]
+    _scan(client, a, 2)
+    sec = _section(client.get("/api/environment/changes").json(), a)
+    assert sec["findings"] is not None and len(sec["findings"]["appeared"]) == 5
+    baseline = sec["findings"]["baseline_snapshot_id"]
+    with db.transaction() as c:
+        c.execute("DELETE FROM findings WHERE snapshot_id = ?", (baseline,))
+    body = client.get("/api/environment/changes").json()
+    assert _section(body, a)["findings"] is None
+    assert body["totals"]["findings_appeared"] == 0
+
+
+def test_findings_baseline_is_newest_snapshot_before_window(client):
+    a = client.post("/api/connections", json=_conn("Alpha")).json()["id"]
+    _scan(client, a, 2)
+    snaps = client.get(f"/api/snapshots?connection_id={a}").json()
+    newest, older = snaps[0], snaps[1]
+    # A window that starts after the older snapshot: it still serves as the baseline.
+    since = quote((store._dt(older["created_at"]) + timedelta(microseconds=1)).isoformat())
+    sec = _section(client.get(f"/api/environment/changes?since={since}").json(), a)
+    assert sec["snapshots_in_window"] == 1
+    assert sec["findings"]["baseline_snapshot_id"] == older["id"]
+    assert sec["findings"]["end_snapshot_id"] == newest["id"]
+    # A window covering only the first scan has nothing to compare against.
+    until = quote(older["created_at"])
+    sec = _section(
+        client.get(f"/api/environment/changes?since=2020-01-01T00:00:00Z&until={until}").json(), a
+    )
+    assert sec["has_data"] is True and sec["findings"] is None and sec["counts"]["total"] == 0

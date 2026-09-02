@@ -5,10 +5,10 @@ import type { EnvironmentConnection, Finding, Significance } from '@/types'
 import { getChangesMinSignificance, getEnvironmentChanges } from '@/api'
 import { useAsync } from '@/hooks/useAsync'
 import { useAppState } from '@/state/AppState'
-import { Badge, Button, Card, EmptyState, ErrorState, Input, PageHeader, Segmented, Skeleton } from '@/components/ui'
+import { Badge, Button, Card, EmptyState, ErrorState, Input, PageHeader, Segmented, Skeleton, Spinner } from '@/components/ui'
 import { FindingRow, StatCard } from '@/components/domain'
 import { ChangeLogRow, SignificanceSummary as Summary } from '@/components/changes/ChangeLogRow'
-import { formatDateTime, groupByDay, relativeTime } from '@/lib/format'
+import { formatDateTime, groupByDay } from '@/lib/format'
 import { cn } from '@/lib/cn'
 
 type Preset = 'cycle' | '24h' | '7d' | 'custom'
@@ -18,7 +18,6 @@ const PRESETS: Array<{ value: Preset; label: string }> = [
   { value: '7d', label: 'Last 7 days' },
   { value: 'custom', label: 'Custom range' },
 ]
-const PER_CONNECTION = 500 // backend default; counts stay complete beyond it
 
 // datetime-local wants local wall-clock "YYYY-MM-DDTHH:mm"; the API wants ISO with an offset.
 function toLocalInput(ms: number): string {
@@ -90,8 +89,9 @@ export default function EnvironmentPage() {
 
       <Card className="px-5 py-4 mb-6">
         <div className="flex flex-wrap items-center gap-3">
-          <Segmented value={preset} onChange={setPreset} options={PRESETS} />
-          {data ? (
+          <Segmented value={preset} onChange={p => { setPreset(p); if (p === 'custom') setApplied(null) }} options={PRESETS} />
+          {result.loading && data ? <span className="ml-auto inline-flex items-center gap-2 text-sm text-muted"><Spinner className="h-4 w-4" /> Loading window</span> : null}
+          {data && !result.loading ? (
             <span className="text-sm text-muted ml-auto tnum" title={`${data.since} to ${data.until}`}>
               {formatDateTime(data.since)} to {formatDateTime(data.until)}
               {data.window === 'last_cycle' ? <span className="text-faint"> (from the oldest of each connection's latest scan)</span> : null}
@@ -115,15 +115,15 @@ export default function EnvironmentPage() {
         ) : null}
       </Card>
 
-      {connections.length === 0 && !data ? (
+      {preset === 'custom' && !applied ? null
+        : connections.length === 0 && !data ? (
         <Card><EmptyState icon={<Plug size={20} />} title="No connections yet" body="Add a vCenter and run a scan. Each scan records what changed, and this page rolls those records up across the estate."
           action={<Button variant="primary" onClick={() => nav('/connections')}>Add vCenter</Button>} /></Card>
       ) : result.error ? <Card><ErrorState title="Environment changes unavailable" error={result.error} onRetry={result.reload} /></Card>
         : !data ? (
-          preset === 'custom' && !applied ? null
-            : <div className="space-y-4"><div className="grid gap-4 md:grid-cols-5">{[0, 1, 2, 3, 4].map(i => <Skeleton key={i} className="h-24" />)}</div>{[0, 1].map(i => <Skeleton key={i} className="h-40" />)}</div>
+          <div className="space-y-4"><div className="grid gap-4 md:grid-cols-5">{[0, 1, 2, 3, 4].map(i => <Skeleton key={i} className="h-24" />)}</div>{[0, 1].map(i => <Skeleton key={i} className="h-40" />)}</div>
         ) : (
-          <>
+          <div className={cn(result.loading && 'opacity-50 transition-opacity')} aria-busy={result.loading}>
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5 mb-8">
               <StatCard label="Connections covered" value={<>{data.totals.covered}<span className="text-lg text-muted font-medium"> of {data.totals.connections}</span></>}
                 sub={data.totals.no_data > 0 ? `${data.totals.no_data} with no data in window` : 'every connection scanned in this window'} icon={<Globe size={16} />}
@@ -150,7 +150,7 @@ export default function EnvironmentPage() {
                 ))}
               </div>
             )}
-          </>
+          </div>
         )}
     </div>
   )
@@ -191,7 +191,9 @@ function ConnectionSection({ section, minSig, since, until, onCompare, onFinding
         <div className="space-y-4">
           {section.changes.length === 0 ? (
             <Card className="px-5 py-4 text-sm text-muted">
-              {minSig !== 'low' ? 'No changes at this significance in the window. Lower significance changes may exist; switch the filter to All.' : 'Scanned in this window and nothing differed from the previous snapshot.'}
+              {minSig !== 'low' ? 'No changes at this significance in the window. Lower significance changes may exist; switch the filter to All.'
+                : section.findings === null ? 'Scanned in this window, but there is no earlier snapshot to compare against yet. The next scan will start recording differences.'
+                : 'Scanned in this window and nothing differed from the previous snapshot.'}
             </Card>
           ) : (
             <Card className="overflow-hidden">
@@ -205,7 +207,7 @@ function ConnectionSection({ section, minSig, since, until, onCompare, onFinding
               ))}
               {section.truncated ? (
                 <div className="px-4 py-2.5 text-xs text-muted border-t border-border flex items-center gap-2">
-                  <AlertTriangle size={13} className="text-warning" /> Showing the newest {PER_CONNECTION} of {section.counts.total} changes. The counts above cover the whole window; open the Changes page for this connection to page through the rest.
+                  <AlertTriangle size={13} className="text-warning" /> Showing the newest {section.changes.length} of {section.counts.total} changes. The counts above cover the whole window; open the Changes page for this connection to page through the rest.
                 </div>
               ) : null}
             </Card>
@@ -213,8 +215,8 @@ function ConnectionSection({ section, minSig, since, until, onCompare, onFinding
 
           {section.findings && (appeared.length > 0 || cleared.length > 0) ? (
             <div className="grid gap-4 lg:grid-cols-2">
-              <FindingsList title="Findings that appeared" findings={appeared} tone="warning" onFinding={onFinding} note={`present ${relativeTime(section.findings.end_at)}, absent at the window start`} />
-              <FindingsList title="Findings that cleared" findings={cleared} tone="ok" onFinding={onFinding} note={`present at ${formatDateTime(section.findings.baseline_at)}, gone by ${formatDateTime(section.findings.end_at)}`} />
+              <FindingsList title="Findings that appeared" findings={appeared} tone="warning" onFinding={onFinding} note={`absent at ${formatDateTime(section.findings.baseline_at)}, present at ${formatDateTime(section.findings.end_at)}`} />
+              <FindingsList title="Findings that cleared" findings={cleared} tone="ok" onFinding={onFinding} note={`present at ${formatDateTime(section.findings.baseline_at)}, gone at ${formatDateTime(section.findings.end_at)}`} />
             </div>
           ) : null}
         </div>
