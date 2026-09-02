@@ -79,10 +79,19 @@ about a specific vCenter belongs in a manifest.
 
 **Access.** A single shared operator password gates the UI and API (session
 cookie, 7 days, PBKDF2 hash, signing secret rotated on password change).
-vCenter passwords and the Anthropic key (when entered via the GUI) are stored
-in SQLite on the persistent volume, protected by filesystem permissions only.
-Generated scripts are never executed. Encryption at rest and per-user accounts
-are tracked as follow-up issues.
+Generated scripts are never executed. Per-user accounts are a follow-up issue.
+
+**Secrets at rest.** vCenter passwords and the Anthropic key (when entered via
+the GUI) are encrypted (Fernet, authenticated) before they reach SQLite. The
+encryption key comes from `VCF_DOCTOR_SECRET_KEY` when set (in the lab a
+sealed Kubernetes secret, so it survives redeploys); otherwise the app
+generates `vcf-doctor.key` next to the database on first start, owner-only
+permissions, and reuses it. Rows written by older builds are encrypted on the
+next startup. Settings shows which key source is active, never the key.
+Losing the key means re-entering the vCenter passwords and the API key,
+nothing worse: affected connections are flagged "Needs password" on the
+Connections page until you do. Rotate the same way: set the new key, restart,
+re-enter.
 
 **Browser headers.** Every response carries `X-Content-Type-Options: nosniff`,
 `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`,

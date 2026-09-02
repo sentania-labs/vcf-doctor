@@ -12,6 +12,7 @@ dependencies = [
     "pyvmomi>=9.0,<10",
     "anthropic>=1.2,<2",
     "sse-starlette>=2.1",
+    "cryptography>=46",
 ]
 
 [project.optional-dependencies]

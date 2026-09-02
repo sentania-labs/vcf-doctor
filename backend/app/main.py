@@ -8,9 +8,10 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app import auth, db, scheduler
+from app import auth, db, scheduler, vault
 from app.api.auth_router import router as auth_router
 from app.api.environment_router import router as environment_router
+from app.api.encryption_router import router as encryption_router
 from app.api.events_router import router as events_router
 from app.api.health_score_router import router as health_score_router
 from app.api.router import router as api_router
@@ -23,6 +24,10 @@ log = logging.getLogger("vcf_doctor")
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     db.connect()
+    try:
+        vault.migrate_plaintext()
+    except Exception:
+        log.exception("startup: secret migration failed; plaintext rows are still readable")
     interrupted = store.reconcile_interrupted_runs()
     if interrupted:
         log.warning("marked %d interrupted scan run(s) as error", interrupted)
@@ -118,6 +123,7 @@ app.include_router(api_router)
 app.include_router(events_router)
 app.include_router(health_score_router)
 app.include_router(environment_router)
+app.include_router(encryption_router)
 
 try:
     from app.assistant.router import router as assistant_router

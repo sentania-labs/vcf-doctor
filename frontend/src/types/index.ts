@@ -38,6 +38,8 @@ export interface Snapshot extends SnapshotSummary { resources: Resource[] }
 export interface ConnectionPublic {
   id: string; name: string; host: string; username: string; verify_tls: boolean
   created_at: string; kind: string
+  // True when the stored password cannot be decrypted (encryption key lost or rotated); re-enter it.
+  needs_credentials?: boolean
 }
 export interface ConnectionCreate {
   name: string; host: string; username: string; password: string
@@ -57,7 +59,7 @@ export interface AssistantContext {
   question: string; findings: Finding[]; changes: Change[]; resources: Resource[]; events: Event[]; allowed_actions: string[]
 }
 export interface AssistantRequest { task: AssistantTask; script_format?: ScriptFormat; context: AssistantContext }
-export interface AssistantSettings { enabled: boolean; provider: 'anthropic' | 'mock'; model: string; api_key_set: boolean }
+export interface AssistantSettings { enabled: boolean; provider: 'anthropic' | 'mock'; model: string; api_key_set: boolean; api_key_unreadable?: boolean }
 export interface AssistantStatus { available: boolean; provider: string; model: string; reason: string | null }
 
 // ---- Frontend-added types (Agent D). Shapes assumed from the API notes; field names above are frozen.
@@ -125,4 +127,9 @@ export interface EnvironmentTotals {
 export interface EnvironmentChanges {
   since: string; until: string; window: 'last_cycle' | 'custom'; min_significance: Significance
   totals: EnvironmentTotals; connections: EnvironmentConnection[]
+}
+// Secrets at rest (Settings > Encryption). Never carries the key itself.
+export interface EncryptionStatus {
+  enabled: boolean; key_source: 'env' | 'file'; key_env_var: string; key_file: string | null
+  unreadable_connections: string[]; assistant_key_unreadable: boolean
 }

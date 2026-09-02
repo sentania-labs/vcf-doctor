@@ -15,7 +15,7 @@ from datetime import UTC, datetime, timedelta
 
 from pydantic import ValidationError
 
-from app import db
+from app import db, vault
 from app.config import settings as cfg
 from app.events import store as events_store
 from app.models import (
@@ -65,12 +65,20 @@ def new_id() -> str:
 
 
 def _row_to_connection(row) -> Connection:
+    try:
+        password = vault.decrypt(row["password"])
+        unreadable = False
+    except vault.SecretUnreadable:
+        # Key lost or rotated. Keep the row usable for everything except the
+        # password; the operator re-enters it from the Connections page.
+        password, unreadable = "", True
     return Connection(
         id=row["id"],
         name=row["name"],
         host=row["host"],
         username=row["username"],
-        password=row["password"],
+        password=password,
+        credentials_unreadable=unreadable,
         verify_tls=bool(row["verify_tls"]),
         kind=row["kind"],
         created_at=_dt(row["created_at"]),
@@ -94,6 +102,7 @@ def public(conn: Connection) -> ConnectionPublic:
         verify_tls=conn.verify_tls,
         created_at=conn.created_at,
         kind=conn.kind,
+        needs_credentials=conn.credentials_unreadable,
     )
 
 
@@ -119,7 +128,7 @@ def create_connection(data: ConnectionCreate) -> Connection:
                 data.name,
                 data.host,
                 data.username,
-                data.password,
+                vault.encrypt(data.password),
                 int(data.verify_tls),
                 data.kind,
                 created.isoformat(),
@@ -141,6 +150,8 @@ def update_connection(connection_id: str, fields: dict) -> Connection | None:
     updates = {k: v for k, v in fields.items() if k in allowed and v is not None}
     if updates.get("password") == "":
         updates.pop("password")
+    if "password" in updates:
+        updates["password"] = vault.encrypt(updates["password"])
     if "verify_tls" in updates:
         updates["verify_tls"] = int(updates["verify_tls"])
     with db.transaction() as c:

@@ -9,7 +9,7 @@ whether one resolves.
 import os
 from typing import Any
 
-from app import db
+from app import db, vault
 from app.assistant.base import LLMProvider
 from app.assistant.providers import AnthropicProvider, MockProvider
 from app.config import settings as cfg
@@ -22,11 +22,23 @@ ENV_KEY = "ANTHROPIC_API_KEY"
 _PERSISTED_FIELDS = ("enabled", "provider", "model")
 
 
+def stored_key_unreadable() -> bool:
+    """True when a key is stored but encrypted under a key we do not have."""
+    stored = db.get_setting(API_KEY_KEY)
+    return isinstance(stored, str) and bool(stored) and not vault.readable(stored)
+
+
 def resolve_api_key() -> str | None:
-    """A key entered in Settings wins; ANTHROPIC_API_KEY is the deployment default."""
+    """A key entered in Settings wins; ANTHROPIC_API_KEY is the deployment default.
+    An unreadable stored key is treated as absent so the env fallback still works."""
     stored = db.get_setting(API_KEY_KEY)
     if isinstance(stored, str) and stored.strip():
-        return stored.strip()
+        try:
+            plain = vault.decrypt(stored).strip()
+        except vault.SecretUnreadable:
+            plain = ""
+        if plain:
+            return plain
     env = os.environ.get(ENV_KEY, "").strip()
     return env or None
 
@@ -36,6 +48,7 @@ def get_settings() -> AssistantSettings:
     merged: dict[str, Any] = {"model": cfg.llm_model}
     merged.update({k: v for k, v in raw.items() if k in _PERSISTED_FIELDS})
     merged["api_key_set"] = resolve_api_key() is not None
+    merged["api_key_unreadable"] = stored_key_unreadable()
     return AssistantSettings(**merged)
 
 
@@ -47,8 +60,9 @@ def update_settings(payload: dict[str, Any]) -> AssistantSettings:
         if key is None or str(key).strip() == "":
             db.set_setting(API_KEY_KEY, "")
         else:
-            db.set_setting(API_KEY_KEY, str(key).strip())
+            db.set_setting(API_KEY_KEY, vault.encrypt(str(key).strip()))
     payload.pop("api_key_set", None)
+    payload.pop("api_key_unreadable", None)
 
     current = get_settings().model_dump()
     current.update({k: v for k, v in payload.items() if k in _PERSISTED_FIELDS})
