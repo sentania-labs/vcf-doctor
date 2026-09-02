@@ -58,11 +58,8 @@ def update_settings(payload: dict[str, Any]) -> AssistantSettings:
 
 
 def get_provider() -> LLMProvider:
-    """Pick the provider. Mock is used only when selected or in demo mode with no key."""
+    """Pick the provider. Mock is used only when the operator selected it."""
     s = get_settings()
     if s.provider == "mock":
         return MockProvider()
-    key = resolve_api_key()
-    if key is None and cfg.demo_mode:
-        return MockProvider()
-    return AnthropicProvider(model=s.model, api_key=key)
+    return AnthropicProvider(model=s.model, api_key=resolve_api_key())

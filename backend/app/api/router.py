@@ -365,8 +365,19 @@ def list_connections():
     return [store.public(c) for c in store.list_connections()]
 
 
+def _check_kind(kind: str | None) -> None:
+    """"vcenter" is the only operator-facing kind. "fixture" (bundled test
+    data) is accepted only when the VCF_DOCTOR_TEST_FIXTURES hook is on."""
+    if kind is None or kind == "vcenter":
+        return
+    if kind == "fixture" and settings.test_fixtures:
+        return
+    raise HTTPException(400, f"unknown connection kind: {kind}")
+
+
 @router.post("/connections", response_model=ConnectionPublic, status_code=201)
 def create_connection(body: ConnectionCreate):
+    _check_kind(body.kind)
     if body.interval_minutes < settings.min_interval_minutes:
         body.interval_minutes = settings.min_interval_minutes
     conn = store.create_connection(body)
@@ -383,6 +394,7 @@ def get_connection(connection_id: str):
 def update_connection(connection_id: str, body: ConnectionUpdate):
     _connection_or_404(connection_id)
     fields = body.model_dump(exclude_unset=True)
+    _check_kind(fields.get("kind"))
     if fields.get("interval_minutes") is not None:
         fields["interval_minutes"] = max(fields["interval_minutes"], settings.min_interval_minutes)
     conn = store.update_connection(connection_id, fields)
@@ -415,6 +427,7 @@ class ConnectionTestBody(ConnectionCreate):
 
 @router.post("/connections/test", response_model=ConnectionResult)
 def test_unsaved_connection(body: ConnectionTestBody):
+    _check_kind(body.kind)
     conn = Connection(id="unsaved", created_at=store.now(), **body.model_dump())
     try:
         return get_collector(conn).test_connection()
@@ -447,7 +460,6 @@ def put_schedule(connection_id: str, body: ScheduleUpdate):
 class AppSettings(BaseModel):
     retention_policy: RetentionPolicy
     min_interval_minutes: int
-    demo_mode: bool
     scheduler_running: bool
     changes_min_significance: str
     assistant: AssistantSettings
@@ -467,7 +479,6 @@ def get_settings():
     return AppSettings(
         retention_policy=scheduler.retention_policy(),
         min_interval_minutes=settings.min_interval_minutes,
-        demo_mode=settings.demo_mode,
         scheduler_running=scheduler.running(),
         changes_min_significance=changes_min_significance(),
         assistant=assistant_settings.get_settings(),

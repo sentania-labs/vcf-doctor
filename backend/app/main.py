@@ -14,27 +14,9 @@ from app.api.events_router import router as events_router
 from app.api.health_score_router import router as health_score_router
 from app.api.router import router as api_router
 from app.config import settings
-from app.models import ConnectionCreate
 from app.snapshots import store
 
 log = logging.getLogger("vcf_doctor")
-
-
-def ensure_demo_connection() -> None:
-    """Demo mode: one fixture connection exists and has been scanned once."""
-    if not settings.demo_mode or store.list_connections():
-        return
-    conn = store.create_connection(
-        ConnectionCreate(
-            name="Demo Workload Domain",
-            host="fixture",
-            username="demo",
-            password="",
-            kind="fixture",
-            interval_minutes=15,
-        )
-    )
-    scheduler.run_scan(conn.id, "manual", label="Initial demo capture")
 
 
 @asynccontextmanager
@@ -45,7 +27,6 @@ async def lifespan(application: FastAPI):
         log.warning("marked %d interrupted scan run(s) as error", interrupted)
     auth.bootstrap_from_env()
     scheduler.startup_maintenance()
-    ensure_demo_connection()
     scheduler.start()
     try:
         yield
@@ -127,7 +108,6 @@ app.include_router(auth_router)
 def health() -> dict:
     return {
         "status": "ok",
-        "demo_mode": settings.demo_mode,
         "version": app.version,
         "scheduler": scheduler.running(),
     }

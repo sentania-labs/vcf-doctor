@@ -7,7 +7,6 @@ def _client(tmp_path, monkeypatch, **env):
 
     db.reset_for_tests(str(tmp_path / "t.db"))
     monkeypatch.setattr(settings, "auth", "on")
-    monkeypatch.setattr(settings, "demo_mode", True)
     for k, v in env.items():
         monkeypatch.setenv(k, v)
     import importlib

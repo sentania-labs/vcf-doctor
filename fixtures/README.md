@@ -1,6 +1,7 @@
 # VCF Doctor fixtures
 
-Deterministic demo data for `VCF_DOCTOR_DEMO_MODE=true`. Two snapshots of one
+Deterministic test data for the fixture collector (backend tests and the CI
+smoke test; not an operator feature). Two snapshots of one
 fictional VCF workload domain, plus canned assistant answers for the mock
 provider. Nothing here refers to a real environment: the domain
 `wld01.vcf.example` and every name in it are invented.

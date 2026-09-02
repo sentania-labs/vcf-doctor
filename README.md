@@ -31,7 +31,8 @@ Then open http://localhost:8000. On first run you are asked to set the
 operator password (or seed it with `VCF_DOCTOR_ADMIN_PASSWORD`). Then go to
 Connections and add a vCenter.
 
-Fixture mode with no vCenter: `VCF_DOCTOR_DEMO_MODE=true make run`.
+VCF Doctor expects a live vCenter. There is no demo or sample-data mode;
+the first useful screen is the one after you add a connection.
 
 ## Checks
 
@@ -57,7 +58,6 @@ Environment variables (all optional):
 | Variable | Default | Purpose |
 |---|---|---|
 | `VCF_DOCTOR_DB_PATH` | `/data/vcf-doctor.db` | SQLite location |
-| `VCF_DOCTOR_DEMO_MODE` | `false` | Load fixture data, no vCenter needed |
 | `ANTHROPIC_API_KEY` | unset | Enables the Claude assistant. A key entered in Settings takes precedence. |
 | `VCF_DOCTOR_AUTH` | `on` | `off` disables the login page (use only behind ingress auth) |
 | `VCF_DOCTOR_ADMIN_PASSWORD` | unset | Seeds the operator password on first boot; otherwise the UI asks on first visit |
@@ -68,7 +68,6 @@ Environment variables (all optional):
 | `VCF_DOCTOR_MIN_INTERVAL_MINUTES` | `5` | Floor for scan intervals |
 | `VCF_DOCTOR_SCHEDULER` | `on` | `off` disables scheduled scans (Scan Now still works) |
 | `VCF_DOCTOR_STATIC_DIR` | `/app/static` in the image | Built frontend location |
-| `VCF_DOCTOR_FIXTURES_DIR` | `/app/fixtures` in the image | Fixture data for demo mode |
 
 A key entered on the Settings page takes precedence over `ANTHROPIC_API_KEY`.
 
@@ -106,7 +105,7 @@ the same command):
 | Image scan | `make scan-image IMAGE=...` | HIGH/CRITICAL fixable CVE in the built image: OS packages, Python and npm packages (trivy) |
 | Dependency review | GitHub action, PRs only | a newly added dependency with a HIGH+ advisory |
 | CodeQL | `codeql.yml` | Python and TypeScript static analysis; PRs, main, weekly |
-| Smoke test | `ci.yml` image job | container does not boot in fixture mode, auth bypass, path traversal, missing headers, or not running as uid 10001 |
+| Smoke test | `ci.yml` image job | container does not boot, fixture scan fails, auth bypass, path traversal, missing headers, or not running as uid 10001 |
 
 Only a main-branch push that passed every gate publishes. Dependabot opens
 weekly grouped PRs for pip, npm, GitHub Actions and the base image digests.

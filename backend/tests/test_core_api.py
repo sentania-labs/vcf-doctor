@@ -177,17 +177,14 @@ def test_scan_lock_under_real_concurrency(tmp_path):
     assert sorted(results) in (["ok", "ok"], ["ok", "skipped"])
 
 
-def test_demo_mode_does_not_hijack_live_connections(monkeypatch):
-    """Demo mode only creates the fixture connection; a vcenter-kind connection
-    must still get the vSphere collector."""
+def test_fixture_kind_never_hijacks_live_connections():
+    """A vcenter-kind connection always gets the vSphere collector."""
     from datetime import UTC, datetime
 
     from app.collectors import registry
     from app.collectors.fixture import FixtureCollector
-    from app.config import settings
     from app.models import Connection
 
-    monkeypatch.setattr(settings, "demo_mode", True)
     live = Connection(
         id="c1",
         name="wld",
@@ -200,6 +197,41 @@ def test_demo_mode_does_not_hijack_live_connections(monkeypatch):
     assert not isinstance(registry.get_collector(live), FixtureCollector)
     fixture = live.model_copy(update={"kind": "fixture"})
     assert isinstance(registry.get_collector(fixture), FixtureCollector)
+
+
+def test_fixture_hook_is_off_by_default(monkeypatch):
+    """A clean environment never enables the fixture collector."""
+    from app.config import Settings
+
+    monkeypatch.delenv("VCF_DOCTOR_TEST_FIXTURES", raising=False)
+    assert Settings().test_fixtures is False
+
+
+def test_fixture_kind_is_test_only(client, monkeypatch):
+    """Without the VCF_DOCTOR_TEST_FIXTURES hook (the production default) a
+    fixture connection cannot be created, switched to, tested, or scanned."""
+    from app.collectors import registry
+    from app.config import settings
+    from app.snapshots import store
+
+    live = {**FIXTURE_CONN, "kind": "vcenter", "host": "vc.example"}
+    cid = client.post("/api/connections", json=live).json()["id"]
+    monkeypatch.setattr(settings, "test_fixtures", False)
+    r = client.post("/api/connections", json=FIXTURE_CONN)
+    assert r.status_code == 400 and "kind" in r.json()["detail"]
+    assert client.put(f"/api/connections/{cid}", json={"kind": "fixture"}).status_code == 400
+    assert client.post("/api/connections/test", json=FIXTURE_CONN).status_code == 400
+    assert client.get(f"/api/connections/{cid}").json()["kind"] == "vcenter"
+    # A leftover fixture connection in the database errors instead of scanning.
+    leftover = store.create_connection(ConnectionCreate(**FIXTURE_CONN))
+    with pytest.raises(registry.CollectorUnavailable):
+        registry.get_collector(leftover)
+    assert client.post(f"/api/connections/{leftover.id}/test").status_code == 503
+    run = client.post("/api/scan", json={"connection_id": leftover.id}).json()[0]
+    assert run["status"] == "error" and "tests only" in run["error"]
+    # Plain unknown kinds are refused too.
+    r = client.post("/api/connections", json={**live, "kind": "nsx"})
+    assert r.status_code == 400
 
 
 def test_settings_carries_assistant_and_never_echoes_key(client):

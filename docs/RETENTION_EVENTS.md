@@ -60,7 +60,7 @@ Stored in an `events` table (dedup on id), retained daily_days.
   newest first, default last 24 h, limit 500.
 - `AssistantContext` gains `events: list[Event] = []` (additive); the prompt
   renders them as an EVENTS block ("what vCenter recorded in the window").
-- Fixture mode: `fixtures/events_b.json` holds about 25 realistic events
+- Fixture collector (tests only): `fixtures/events_b.json` holds about 25 realistic events
   spanning the A -> B changes (power off web03 by an admin, vMotion of
   app02, esx03 disconnect alarm, snapshot creation, host maintenance
   entered, reconfigure of app01, VLAN change task, NTP reconfigure), loaded

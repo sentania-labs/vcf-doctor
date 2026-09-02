@@ -15,6 +15,12 @@ The MVP is done when that sentence is true against a real vCenter and against
 fixture data with no vCenter at all, and the pages still render when no LLM
 is configured.
 
+> Note (2026-09-02): the hackathon is over and demo mode has been removed.
+> `VCF_DOCTOR_DEMO_MODE` no longer exists; the product expects a live
+> vCenter. The fixture collector survives only as a test hook
+> (`VCF_DOCTOR_TEST_FIXTURES`, used by the backend tests and the CI smoke
+> test). References to demo mode below are kept as history of the plan.
+
 ## Demo posture
 
 The hackathon demo runs **live** against one of Scott's VCF workload-domain

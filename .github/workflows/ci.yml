@@ -114,10 +114,12 @@ jobs:
       - name: Scan image
         run: make scan-image IMAGE=vcf-doctor:ci
 
-      - name: Smoke test (fixture mode, no vCenter)
+      # VCF_DOCTOR_TEST_FIXTURES is the test-only hook that lets a connection
+      # of kind "fixture" (bundled snapshot data) stand in for a vCenter.
+      - name: Smoke test (fixture collector, no vCenter)
         run: |
           docker run -d --name smoke -p 8000:8000 \
-            -e VCF_DOCTOR_DEMO_MODE=true -e VCF_DOCTOR_ADMIN_PASSWORD=smoke-test-pass \
+            -e VCF_DOCTOR_TEST_FIXTURES=1 -e VCF_DOCTOR_ADMIN_PASSWORD=smoke-test-pass \
             vcf-doctor:ci
           for i in $(seq 1 30); do
             curl -fsS localhost:8000/api/health && break
@@ -129,8 +131,14 @@ jobs:
           # Unauthenticated API access is refused; traversal cannot reach the database.
           test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8000/api/overview)" = 401
           curl -s --path-as-is localhost:8000/../data/vcf-doctor.db | grep -q '<title>VCF Doctor</title>'
-          # Log in with the seeded password, then check the fixture inventory (51 resources) is in the image.
+          # Log in with the seeded password. A fresh install has no connections.
           curl -fsS -c cj -H 'content-type: application/json' -d '{"password":"smoke-test-pass"}' localhost:8000/api/auth/login
+          test "$(curl -fsS -b cj localhost:8000/api/connections)" = '[]'
+          # Add a fixture connection, scan it, then check the fixture inventory (51 resources) is in the image.
+          cid=$(curl -fsS -b cj -H 'content-type: application/json' \
+            -d '{"name":"Smoke","host":"fixture","username":"smoke","password":"","kind":"fixture"}' \
+            localhost:8000/api/connections | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+          curl -fsS -b cj -H 'content-type: application/json' -d "{\"connection_id\":\"$cid\"}" localhost:8000/api/scan | grep -q '"status":"ok"'
           curl -fsS -b cj localhost:8000/api/overview | python3 -c 'import json,sys; o=json.load(sys.stdin); assert o["resource_total"] == 51, o["resource_total"]'
           # Security headers on the UI and the API; HSTS only when the proxy says https.
           # (GET with dumped headers: the app does not answer HEAD.)

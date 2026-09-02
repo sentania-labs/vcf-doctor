@@ -7,14 +7,12 @@ from fastapi.testclient import TestClient
 from app import db
 from app.assistant import settings as assistant_settings
 from app.assistant.router import router
-from app.config import settings as cfg
 
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     db.reset_for_tests(str(tmp_path / "assistant.db"))
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.setattr(cfg, "demo_mode", False)
     app = FastAPI()
     app.include_router(router, prefix="/api/assistant")
     return TestClient(app)
@@ -112,10 +110,11 @@ def test_test_endpoint_with_mock(client):
     assert "No live call" in r.json()["message"]
 
 
-def test_demo_mode_uses_mock_without_key(client, monkeypatch):
-    monkeypatch.setattr(cfg, "demo_mode", True)
-    assert assistant_settings.get_provider().name == "mock"
-    assert client.get("/api/assistant/status").json()["available"] is True
+def test_no_key_never_falls_back_to_mock(client, monkeypatch):
+    """The mock provider is only ever used when the operator selects it."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    assert assistant_settings.get_provider().name != "mock"
+    assert client.get("/api/assistant/status").json()["available"] is False
 
 
 def test_api_error_detail_uses_body_message():

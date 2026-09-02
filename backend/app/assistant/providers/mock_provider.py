@@ -1,6 +1,6 @@
 """Mock provider: deterministic, evidence-shaped answers with no network.
 
-Used in demo mode, in tests, and whenever the operator selects it. Output is
+Used in tests and whenever the operator selects it. Output is
 built from the request itself so it mentions the findings, resources and
 changes it was actually given, and streams in small chunks so the UI shows
 streaming.
