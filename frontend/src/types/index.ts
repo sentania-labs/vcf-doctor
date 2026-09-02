@@ -116,10 +116,11 @@ export interface EnvironmentConnection {
   connection_id: string; name: string; host: string; kind: string
   has_data: boolean; snapshots_in_window: number; counts: SignificanceCounts
   changes: ChangeLogEntry[]; truncated: boolean; findings: FindingsDelta | null
+  pruned_snapshot_ids: string[] // referenced by change rows but since pruned; no compare possible
 }
 export interface EnvironmentTotals {
   connections: number; covered: number; no_data: number; changes: SignificanceCounts
-  findings_appeared: number; findings_cleared: number
+  findings_appeared: number; findings_cleared: number; findings_compared: number
 }
 export interface EnvironmentChanges {
   since: string; until: string; window: 'last_cycle' | 'custom'; min_significance: Significance

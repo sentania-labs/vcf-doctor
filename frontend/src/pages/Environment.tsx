@@ -133,9 +133,9 @@ export default function EnvironmentPage() {
               <StatCard label="High impact" value={data.totals.changes.high} tone={data.totals.changes.high > 0 ? 'critical' : undefined} icon={<AlertTriangle size={16} />}
                 sub={data.min_significance === 'high' ? 'showing high only' : 'across all connections'} />
               <StatCard label="Findings appeared" value={data.totals.findings_appeared} tone={data.totals.findings_appeared > 0 ? 'warning' : undefined} icon={<ShieldAlert size={16} />}
-                sub="new since the start of the window" />
+                sub={data.totals.findings_compared < data.totals.covered ? `compared on ${data.totals.findings_compared} of ${data.totals.covered} covered connections` : 'new since the start of the window'} />
               <StatCard label="Findings cleared" value={data.totals.findings_cleared} tone={data.totals.findings_cleared > 0 ? 'ok' : undefined} icon={<ShieldCheck size={16} />}
-                sub="present at the start, gone at the end" />
+                sub={data.totals.findings_compared < data.totals.covered ? `compared on ${data.totals.findings_compared} of ${data.totals.covered} covered connections` : 'present at the start, gone at the end'} />
             </div>
 
             {data.connections.length === 0 ? (
@@ -146,7 +146,7 @@ export default function EnvironmentPage() {
                 {data.connections.map(c => (
                   <ConnectionSection key={c.connection_id} section={c} minSig={data.min_significance} since={data.since} until={data.until}
                     onCompare={(from, to) => compare(c.connection_id, from, to)}
-                    onFinding={() => { select(c.connection_id); nav('/health') }} />
+                    onFinding={f => { select(c.connection_id); nav(`/health?finding=${encodeURIComponent(f.id)}`) }} />
                 ))}
               </div>
             )}
@@ -161,6 +161,7 @@ function ConnectionSection({ section, minSig, since, until, onCompare, onFinding
   const [collapsed, setCollapsed] = useState(false)
   const toggle = (id: string) => setOpenIds(s => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n })
   const groups = useMemo(() => groupByDay(section.changes, r => r.observed_at), [section.changes])
+  const pruned = useMemo(() => new Set(section.pruned_snapshot_ids), [section.pruned_snapshot_ids])
   const appeared = section.findings?.appeared ?? []
   const cleared = section.findings?.cleared ?? []
 
@@ -201,7 +202,7 @@ function ConnectionSection({ section, minSig, since, until, onCompare, onFinding
                 <div key={g.key}>
                   <div className="px-4 py-1.5 bg-surface-2/60 border-y border-border first:border-t-0 text-[11px] font-semibold uppercase tracking-wider text-faint flex items-baseline gap-2">{g.label} <span className="tnum font-medium normal-case tracking-normal">{g.items.length}</span></div>
                   <div className="divide-y divide-border">
-                    {g.items.map(r => <ChangeLogRow key={r.id} row={r} open={openIds.has(r.id)} onToggle={() => toggle(r.id)} onCompare={onCompare} />)}
+                    {g.items.map(r => <ChangeLogRow key={r.id} row={r} open={openIds.has(r.id)} onToggle={() => toggle(r.id)} onCompare={pruned.has(r.from_snapshot_id) || pruned.has(r.to_snapshot_id) ? undefined : onCompare} />)}
                   </div>
                 </div>
               ))}
@@ -216,8 +217,10 @@ function ConnectionSection({ section, minSig, since, until, onCompare, onFinding
           {section.findings && (appeared.length > 0 || cleared.length > 0) ? (
             <div className="grid gap-4 lg:grid-cols-2">
               <FindingsList title="Findings that appeared" findings={appeared} tone="warning" onFinding={onFinding} note={`absent at ${formatDateTime(section.findings.baseline_at)}, present at ${formatDateTime(section.findings.end_at)}`} />
-              <FindingsList title="Findings that cleared" findings={cleared} tone="ok" onFinding={onFinding} note={`present at ${formatDateTime(section.findings.baseline_at)}, gone at ${formatDateTime(section.findings.end_at)}`} />
+              <FindingsList title="Findings that cleared" findings={cleared} tone="ok" note={`present at ${formatDateTime(section.findings.baseline_at)}, gone at ${formatDateTime(section.findings.end_at)}`} />
             </div>
+          ) : section.findings === null && section.changes.length > 0 ? (
+            <Card className="px-5 py-4 text-sm text-muted"><span className="font-medium text-fg">Findings not compared:</span> the snapshots at both ends of this window are not both kept (retention pruned one, or it predates the findings cache), so appeared and cleared are unknown for this connection and left out of the totals.</Card>
           ) : null}
         </div>
       )}
@@ -225,7 +228,8 @@ function ConnectionSection({ section, minSig, since, until, onCompare, onFinding
   )
 }
 
-function FindingsList({ title, findings, tone, note, onFinding }: { title: string; findings: Finding[]; tone: 'warning' | 'ok'; note: string; onFinding: (f: Finding) => void }) {
+// onFinding omitted: the findings are historical (cleared), so there is nothing on Health to open.
+function FindingsList({ title, findings, tone, note, onFinding }: { title: string; findings: Finding[]; tone: 'warning' | 'ok'; note: string; onFinding?: (f: Finding) => void }) {
   if (findings.length === 0) return <Card className="px-5 py-4 text-sm text-muted"><span className="font-medium text-fg">{title}:</span> none</Card>
   return (
     <Card className="px-4 py-3">
@@ -234,7 +238,7 @@ function FindingsList({ title, findings, tone, note, onFinding }: { title: strin
         <span className="ml-auto font-normal normal-case tracking-normal">{note}</span>
       </h3>
       <div className="space-y-2">
-        {findings.map(f => <FindingRow key={f.id} finding={f} compact onClick={() => onFinding(f)} />)}
+        {findings.map(f => onFinding ? <FindingRow key={f.id} finding={f} compact onClick={() => onFinding(f)} /> : <div key={f.id} className="pointer-events-none"><FindingRow finding={f} compact /></div>)}
       </div>
     </Card>
   )

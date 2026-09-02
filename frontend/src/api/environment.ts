@@ -40,7 +40,7 @@ function mockEnvironment(query: EnvironmentQuery): EnvironmentChanges {
       connection_id: e.connection.id, name: e.connection.name, host: e.connection.host, kind: e.connection.kind,
       has_data: hasData, snapshots_in_window: snaps.length,
       counts: { high: floor <= 2 ? counts.high : 0, medium: floor <= 1 ? counts.medium : 0, low: floor <= 0 ? counts.low : 0, total: visible.length },
-      changes: visible, truncated: false,
+      changes: visible, truncated: false, pruned_snapshot_ids: [],
       findings: snaps.length >= 2 ? { baseline_snapshot_id: snaps[0].id, baseline_at: snaps[0].created_at, end_snapshot_id: snaps[snaps.length - 1].id, end_at: snaps[snaps.length - 1].created_at, appeared, cleared: [] } : null,
     }
   }).sort((a, b) => a.name.localeCompare(b.name))
@@ -49,7 +49,7 @@ function mockEnvironment(query: EnvironmentQuery): EnvironmentChanges {
   const covered = connections.filter(c => c.has_data).length
   return {
     since: new Date(sinceMs).toISOString(), until: new Date(untilMs).toISOString(), window: query.since ? 'custom' : 'last_cycle', min_significance: floorSig,
-    totals: { connections: connections.length, covered, no_data: connections.length - covered, changes, findings_appeared: connections.reduce((n, c) => n + (c.findings?.appeared.length ?? 0), 0), findings_cleared: 0 },
+    totals: { connections: connections.length, covered, no_data: connections.length - covered, changes, findings_appeared: connections.reduce((n, c) => n + (c.findings?.appeared.length ?? 0), 0), findings_cleared: 0, findings_compared: connections.filter(c => c.findings).length },
     connections,
   }
 }

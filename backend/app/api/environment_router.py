@@ -54,7 +54,10 @@ class ConnectionWindow(BaseModel):
     counts: SignificanceCounts
     changes: list[ChangeRecord]
     truncated: bool  # per-connection limit reached; the counts are still complete
-    findings: FindingsDelta | None  # None when there are not two snapshots to compare
+    findings: FindingsDelta | None  # None when there are not two snapshots with cached findings
+    # Snapshot ids referenced by the change rows that retention has since pruned;
+    # such rows can no longer be opened as a snapshot comparison.
+    pruned_snapshot_ids: list[str]
 
 
 class EnvironmentTotals(BaseModel):
@@ -64,6 +67,7 @@ class EnvironmentTotals(BaseModel):
     changes: SignificanceCounts
     findings_appeared: int
     findings_cleared: int
+    findings_compared: int  # connections whose findings delta could be computed
 
 
 class EnvironmentChanges(BaseModel):
@@ -88,13 +92,18 @@ def last_cycle_since(until: datetime) -> datetime | None:
     None when nothing has been scanned yet."""
     scheduled: list[datetime] = []
     paused: list[datetime] = []
+    any_scheduled = False
     for conn in store.list_connections():
-        snap = store.snapshot_summary_at(conn.id, at_or_before=until)
-        if snap is None:
-            continue
         sched = store.get_schedule(conn.id)
-        (scheduled if sched is not None and sched.enabled else paused).append(snap.created_at)
-    latest = scheduled or paused
+        active = sched is not None and sched.enabled
+        any_scheduled = any_scheduled or active
+        snap = store.snapshot_summary_at(conn.id, at_or_before=until)
+        if snap is not None:
+            (scheduled if active else paused).append(snap.created_at)
+    # Paused snapshots only decide the start when nothing is scheduled at all;
+    # an active connection still waiting on its first scan must not hand the
+    # decision to a stale paused one.
+    latest = scheduled if any_scheduled else paused
     return min(latest) if latest else None
 
 
@@ -155,7 +164,7 @@ def environment_changes(
 
     sections: list[ConnectionWindow] = []
     totals = SignificanceCounts()
-    appeared = cleared = covered = 0
+    appeared = cleared = covered = compared = 0
     for conn in sorted(store.list_connections(), key=lambda c: c.name.lower()):
         rows = store.list_change_log(
             conn.id,
@@ -182,8 +191,11 @@ def environment_changes(
             setattr(totals, level, getattr(totals, level) + getattr(counts, level))
         totals.total += counts.total
         if delta is not None:
+            compared += 1
             appeared += len(delta.appeared)
             cleared += len(delta.cleared)
+        referenced = {c.from_snapshot_id for c in rows} | {c.to_snapshot_id for c in rows}
+        pruned = sorted(referenced - store.existing_snapshot_ids(list(referenced)))
         sections.append(
             ConnectionWindow(
                 connection_id=conn.id,
@@ -196,6 +208,7 @@ def environment_changes(
                 changes=rows,
                 truncated=truncated,
                 findings=delta,
+                pruned_snapshot_ids=pruned,
             )
         )
     return EnvironmentChanges(
@@ -210,6 +223,7 @@ def environment_changes(
             changes=totals,
             findings_appeared=appeared,
             findings_cleared=cleared,
+            findings_compared=compared,
         ),
         connections=sections,
     )

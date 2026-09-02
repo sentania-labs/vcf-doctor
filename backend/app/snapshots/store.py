@@ -505,6 +505,19 @@ def earliest_snapshot_summary_since(
     return _row_to_summary(row) if row is not None else None
 
 
+def existing_snapshot_ids(snapshot_ids: list[str]) -> set[str]:
+    """Which of the given ids still have a snapshot row (change rows outlive pruning)."""
+    ids = sorted(set(snapshot_ids))
+    found: set[str] = set()
+    for i in range(0, len(ids), _SQL_CHUNK):
+        chunk = ids[i : i + _SQL_CHUNK]
+        rows = db.fetchall(
+            f"SELECT id FROM snapshots WHERE id IN ({','.join('?' * len(chunk))})", tuple(chunk)
+        )
+        found.update(r["id"] for r in rows)
+    return found
+
+
 def get_snapshot(snapshot_id: str) -> Snapshot | None:
     row = db.fetchone("SELECT * FROM snapshots WHERE id = ?", (snapshot_id,))
     if row is None:

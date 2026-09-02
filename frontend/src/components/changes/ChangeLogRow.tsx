@@ -31,7 +31,8 @@ export function ChangeLogRow({ row, open, onToggle, onCompare }: { row: ChangeLo
           <PropertyChanges change={row} />
           <div className="flex items-center gap-3 text-xs text-faint">
             <span>{n} {n === 1 ? 'property' : 'properties'} changed, observed {relativeTime(row.observed_at)}</span>
-            {onCompare ? <button className="text-accent hover:underline ml-auto" onClick={() => onCompare(row.from_snapshot_id, row.to_snapshot_id)}>Compare these two snapshots</button> : null}
+            {onCompare ? <button className="text-accent hover:underline ml-auto" onClick={() => onCompare(row.from_snapshot_id, row.to_snapshot_id)}>Compare these two snapshots</button>
+              : <span className="ml-auto">One of the two snapshots is no longer kept, so they cannot be compared</span>}
           </div>
         </div>
       ) : null}

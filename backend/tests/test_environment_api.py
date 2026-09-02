@@ -59,6 +59,7 @@ def test_empty_estate(client):
         "changes": {"high": 0, "medium": 0, "low": 0, "total": 0},
         "findings_appeared": 0,
         "findings_cleared": 0,
+        "findings_compared": 0,
     }
     assert body["connections"] == [] and body["window"] == "last_cycle"
 
@@ -229,6 +230,7 @@ def test_findings_delta_needs_cached_findings_on_both_ends(client):
     body = client.get("/api/environment/changes").json()
     assert _section(body, a)["findings"] is None
     assert body["totals"]["findings_appeared"] == 0
+    assert body["totals"]["findings_compared"] == 0
 
 
 def test_findings_baseline_is_newest_snapshot_before_window(client):
@@ -248,3 +250,31 @@ def test_findings_baseline_is_newest_snapshot_before_window(client):
         client.get(f"/api/environment/changes?since=2020-01-01T00:00:00Z&until={until}").json(), a
     )
     assert sec["has_data"] is True and sec["findings"] is None and sec["counts"]["total"] == 0
+
+
+def test_active_connection_awaiting_first_scan_does_not_defer_to_paused(client):
+    a = client.post("/api/connections", json=_conn("Alpha")).json()["id"]
+    b = client.post("/api/connections", json=_conn("Beta")).json()["id"]
+    _scan(client, b, 2)
+    _shift(b, timedelta(days=-30))
+    client.put(f"/api/connections/{b}/schedule", json={"enabled": False})
+    # Alpha is scheduled but has never been scanned: the window falls back to
+    # 24 h rather than stretching back to Beta's month-old snapshot.
+    body = client.get("/api/environment/changes").json()
+    assert store._dt(body["since"]) > store.now() - timedelta(hours=25)
+    assert _section(body, a)["has_data"] is False
+    assert _section(body, b)["has_data"] is False
+
+
+def test_pruned_snapshots_are_reported_per_section(client):
+    a = client.post("/api/connections", json=_conn("Alpha")).json()["id"]
+    _scan(client, a, 2)
+    sec = _section(client.get("/api/environment/changes").json(), a)
+    assert sec["pruned_snapshot_ids"] == []
+    older = sec["changes"][0]["from_snapshot_id"]
+    assert client.delete(f"/api/snapshots/{older}").status_code == 200
+    body = client.get("/api/environment/changes").json()
+    sec = _section(body, a)
+    # The change rows survive the prune and the section names the missing snapshot.
+    assert len(sec["changes"]) == 15 and sec["pruned_snapshot_ids"] == [older]
+    assert sec["findings"] is None and body["totals"]["findings_compared"] == 0
