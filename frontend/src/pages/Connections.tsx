@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import { CheckCircle2, FlaskConical, Plug, Plus, Trash2, XCircle } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, FlaskConical, KeyRound, Plug, Plus, Trash2, XCircle } from 'lucide-react'
 import type { ConnectionCreate, ConnectionPublic, ConnectionTestResult, Schedule } from '@/types'
-import { createConnection, deleteConnection, getSchedule, testConnection, testConnectionDraft, updateSchedule } from '@/api'
+import { createConnection, deleteConnection, getSchedule, testConnection, testConnectionDraft, updateConnection, updateSchedule } from '@/api'
 import { ApiError } from '@/api/client'
 import { useAppState } from '@/state/AppState'
 import { Badge, Button, Card, Dialog, EmptyState, Field, Input, PageHeader, Select, Skeleton, Toggle } from '@/components/ui'
@@ -64,7 +64,20 @@ function ConnectionCard({ c, onDelete }: { c: ConnectionPublic; onDelete: () => 
   const [saving, setSaving] = useState(false)
   const [test, setTest] = useState<ConnectionTestResult | null>(null)
   const [testing, setTesting] = useState(false)
-  const { refreshKey } = useAppState()
+  const { refreshKey, reloadConnections } = useAppState()
+  // Password re-entry: opened automatically when the stored password is unreadable.
+  const [pwOpen, setPwOpen] = useState(!!c.needs_credentials)
+  const [pw, setPw] = useState('')
+  const [pwBusy, setPwBusy] = useState(false)
+  const [pwMsg, setPwMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  useEffect(() => { if (c.needs_credentials) setPwOpen(true) }, [c.needs_credentials])
+  const savePassword = async () => {
+    if (!pw) return
+    setPwBusy(true); setPwMsg(null)
+    try { await updateConnection(c.id, { password: pw }); setPw(''); setPwOpen(false); setPwMsg({ ok: true, text: 'Password updated.' }); await reloadConnections() }
+    catch (e) { setPwMsg({ ok: false, text: e instanceof Error ? e.message : String(e) }) }
+    finally { setPwBusy(false) }
+  }
 
   useEffect(() => { getSchedule(c.id).then(s => { setSched(s); setSchedErr(null) }).catch(e => setSchedErr(e instanceof Error ? e.message : String(e))) }, [c.id, refreshKey])
 
@@ -89,14 +102,27 @@ function ConnectionCard({ c, onDelete }: { c: ConnectionPublic; onDelete: () => 
             <h3 className="font-semibold text-[15px] tracking-tight">{c.name}</h3>
             <Badge tone="neutral">{c.kind || 'vcenter'}</Badge>
             {sched ? <Badge tone={sched.enabled ? 'ok' : 'neutral'}>{sched.enabled ? 'Scheduled' : 'Paused'}</Badge> : null}
+            {c.needs_credentials ? <Badge tone="critical"><AlertTriangle size={11} /> Needs password</Badge> : null}
           </div>
           <p className="text-sm text-muted mt-0.5 font-mono">{c.username} @ {c.host}{c.verify_tls ? '' : '  (TLS verify off)'}</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button size="sm" onClick={() => void runTest()} loading={testing}>Test</Button>
+          <Button size="sm" onClick={() => { setPwOpen(o => c.needs_credentials ? true : !o); setPwMsg(null) }} title="Update the stored password"><KeyRound size={13} /> Password</Button>
+          <Button size="sm" onClick={() => void runTest()} loading={testing} disabled={!!c.needs_credentials}>Test</Button>
           <button onClick={onDelete} className="text-faint hover:text-critical transition-colors p-1.5 rounded" title="Remove connection"><Trash2 size={15} /></button>
         </div>
       </div>
+      {c.needs_credentials ? (
+        <p className="mt-3 text-sm text-critical bg-critical-bg rounded-md px-3 py-2" role="alert">The stored password was encrypted with a different key and cannot be read (the encryption key was lost or rotated). Scans fail until it is entered again; nothing else about this connection is affected.</p>
+      ) : null}
+      {pwOpen ? (
+        <form className="mt-3 flex items-end gap-3 flex-wrap" onSubmit={e => { e.preventDefault(); void savePassword() }}>
+          <div className="flex-1 min-w-[220px]"><Field label={`Password for ${c.username}`}><Input type="password" value={pw} onChange={e => setPw(e.target.value)} autoComplete="new-password" disabled={pwBusy} autoFocus /></Field></div>
+          <Button type="submit" variant="primary" size="sm" loading={pwBusy} disabled={!pw}>Save password</Button>
+          {!c.needs_credentials ? <Button type="button" variant="ghost" size="sm" onClick={() => { setPwOpen(false); setPw('') }}>Cancel</Button> : null}
+        </form>
+      ) : null}
+      {pwMsg ? <p className={`mt-2 text-sm inline-flex items-center gap-1.5 ${pwMsg.ok ? 'text-ok' : 'text-critical'}`}>{pwMsg.ok ? <CheckCircle2 size={14} /> : <XCircle size={14} />}{pwMsg.text}</p> : null}
       {test ? (
         <p className={`mt-3 text-sm inline-flex items-center gap-1.5 ${test.ok ? 'text-ok' : 'text-critical'}`}>
           {test.ok ? <CheckCircle2 size={14} /> : <XCircle size={14} />}{test.message}{test.version ? <span className="text-muted">vCenter {test.version}{test.build ? ` build ${test.build}` : ''}</span> : null}

@@ -10,7 +10,18 @@ class CollectorUnavailable(Exception):
     """Raised when the live collector cannot be loaded. API maps this to 503."""
 
 
+class CredentialsUnreadable(Exception):
+    """The stored password is encrypted under a key this deployment no longer
+    has. Scans and tests fail with this message until the operator re-enters
+    the password on the Connections page."""
+
+
 def get_collector(connection: Connection) -> Collector:
+    if connection.credentials_unreadable:
+        raise CredentialsUnreadable(
+            "stored password cannot be decrypted with the current encryption key; "
+            "re-enter the password for this connection"
+        )
     if connection.kind == "fixture":
         if not settings.test_fixtures:
             # A leftover fixture connection (from the retired demo mode) must

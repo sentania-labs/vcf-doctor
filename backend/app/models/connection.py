@@ -22,6 +22,9 @@ class ConnectionCreate(BaseModel):
 class Connection(ConnectionCreate):
     id: str
     created_at: datetime
+    # True when the stored password is encrypted under a key this process
+    # does not have (key lost or rotated). password is "" in that case.
+    credentials_unreadable: bool = False
 
 
 class ConnectionPublic(BaseModel):
@@ -34,6 +37,8 @@ class ConnectionPublic(BaseModel):
     verify_tls: bool
     created_at: datetime
     kind: str = "vcenter"
+    # The operator must re-enter the password before this connection can scan.
+    needs_credentials: bool = False
 
 
 class ConnectionResult(BaseModel):

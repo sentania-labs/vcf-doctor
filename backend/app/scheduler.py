@@ -87,11 +87,26 @@ def _label(trigger: str, label: str | None) -> str:
     return f"{'Scheduled' if trigger == 'scheduled' else 'Manual'} {stamp}"
 
 
+NEEDS_PASSWORD = (
+    "stored password cannot be decrypted with the current encryption key; "
+    "re-enter the password for this connection"
+)
+
+
 def run_scan(connection_id: str, trigger: str = "manual", label: str | None = None) -> ScanRun:
     """Collect, persist a snapshot, cache findings, log changes, prune, record the run."""
     conn = store.get_connection(connection_id)
     if conn is None:
         raise KeyError(connection_id)
+    if conn.credentials_unreadable:
+        # Key lost or rotated: no traceback per interval, one skipped run that
+        # says what to do. Cleared as soon as the password is re-entered.
+        log.warning("scan skipped for %s: stored password needs re-entering", connection_id)
+        run = store.create_run(connection_id, trigger, status="skipped")
+        run = store.finish_run(run.id, "skipped", error=NEEDS_PASSWORD)
+        store.update_schedule(connection_id, last_run=run.finished, last_status="skipped")
+        _refresh_next_run(connection_id)
+        return run
     lock = _lock_for(connection_id)
     if not lock.acquire(blocking=False):
         run = store.create_run(connection_id, trigger, status="skipped")
