@@ -325,12 +325,19 @@ Public repository, so all jobs run on GitHub-hosted runners. Nothing in CI
 touches vCenter or the lab; the real-vCenter check in Phase 3 is manual for
 the hackathon.
 
-Jobs on pull request: pytest, frontend type-check and build, image build.
-Jobs on merge to `main`: the above, plus image push to GHCR and a tagged
-release.
+Jobs on pull request: lint, pytest, frontend type-check and build (`checks`);
+pip-audit, npm audit, gitleaks and trivy repo scan (`scan`, via `make scan`);
+GitHub dependency review; CodeQL for Python and TypeScript; image build,
+trivy image scan (`make scan-image`) and the fixture-mode smoke test, which
+also asserts the security headers and the non-root user. Jobs on merge to
+`main`: the above, plus image push to GHCR with SLSA provenance and an SBOM
+attached, keyless cosign signing of the digest, and a tagged release.
 
-Image scanning and similar gates are suspended under the hackathon exception
-until 2026-09-02.
+Every scanner is a `make` target so CI and a developer run the same command;
+severities and accepted findings live in `trivy.yaml` and `.trivyignore`.
+Dependabot opens weekly grouped PRs for pip, npm, GitHub Actions and the
+digest-pinned base images. The hackathon exception that suspended image
+scanning is closed; these gates are the release discipline.
 
 Assistant tests run against the mock provider. No Anthropic API key exists
 in CI.

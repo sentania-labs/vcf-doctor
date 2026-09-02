@@ -1,6 +1,12 @@
 # Placement: GitHub-hosted. Public repo (free), nothing here touches the lab,
 # and the smoke test needs a real Docker daemon, which the lab pool never has.
-# Image scanning is suspended under the hackathon exception until 2026-09-02.
+#
+# Gates, in order: checks (lint, tests, frontend build) -> scan (dependency
+# audit, secret scan, repo misconfig/lockfile scan) -> image (build, image
+# scan, smoke test). Only a main-branch push that passed all of them publishes,
+# and the published digest carries a provenance attestation, an SBOM and a
+# keyless cosign signature. Every scanner is invoked through `make`, so a
+# developer runs exactly what CI runs.
 name: ci
 
 on:
@@ -12,22 +18,23 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# Least privilege by default; the image job widens its own scope below.
 permissions:
-  contents: write
-  packages: write
+  contents: read
 
 env:
   IMAGE: ghcr.io/${{ github.repository }}
+  TRIVY_VERSION: v0.74.0
 
 jobs:
   checks:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           python-version: "3.12"
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
           cache: npm
@@ -37,14 +44,62 @@ jobs:
       - run: make test
       - run: make build-frontend
 
-  image:
+  # Dependency vulnerabilities (pip-audit, npm audit), committed secrets
+  # (gitleaks over full history) and repo misconfiguration + lockfile CVEs
+  # (trivy fs). Blocks on: any known vulnerability in the backend environment,
+  # HIGH+ in frontend runtime deps, any secret, HIGH/CRITICAL fixable CVE or
+  # misconfiguration in the repo.
+  scan:
     needs: checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        with:
+          fetch-depth: 0 # gitleaks scans history, not just the tip
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
+        with:
+          version: ${{ env.TRIVY_VERSION }}
+          cache: true
+      - run: make setup
+      - run: make scan
 
-      - name: Build (local load for smoke)
+  # Pull requests only: refuses newly introduced dependencies with known HIGH+
+  # advisories or disallowed licenses before they reach main.
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+          comment-summary-in-pr: on-failure
+
+  # Builds and validates the image for every PR and push. Runs PR-controlled
+  # code (Docker build, make scan-image, the smoke-test shell) without any
+  # elevated token: id-token/packages/attestations write live only in the
+  # push-only `publish` job below, so a same-repo PR can never mint an OIDC
+  # certificate through this workflow.
+  image:
+    needs: [checks, scan]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
+        with:
+          version: ${{ env.TRIVY_VERSION }}
+          cache: true
+
+      - name: Build (local load for scan and smoke)
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
@@ -52,6 +107,12 @@ jobs:
           tags: vcf-doctor:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # Blocks on: HIGH/CRITICAL CVEs with a fix available in the image
+      # (OS packages, bundled Python and npm packages). Unfixed CVEs are
+      # reported but do not gate; accepted CVEs live in .trivyignore.
+      - name: Scan image
+        run: make scan-image IMAGE=vcf-doctor:ci
 
       - name: Smoke test (fixture mode, no vCenter)
         run: |
@@ -71,6 +132,13 @@ jobs:
           # Log in with the seeded password, then check the fixture inventory (51 resources) is in the image.
           curl -fsS -c cj -H 'content-type: application/json' -d '{"password":"smoke-test-pass"}' localhost:8000/api/auth/login
           curl -fsS -b cj localhost:8000/api/overview | python3 -c 'import json,sys; o=json.load(sys.stdin); assert o["resource_total"] == 51, o["resource_total"]'
+          # Security headers on the UI and the API; HSTS only when the proxy says https.
+          # (GET with dumped headers: the app does not answer HEAD.)
+          hdr() { curl -fsS -o /dev/null -D - "$@"; }
+          hdr localhost:8000/ | grep -qi '^content-security-policy: '
+          hdr localhost:8000/api/health | grep -qi '^cache-control: no-store'
+          if hdr localhost:8000/ | grep -qi '^strict-transport-security'; then echo 'HSTS sent on plain http'; exit 1; fi
+          hdr -H 'X-Forwarded-Proto: https' localhost:8000/ | grep -qi '^strict-transport-security: max-age=31536000'
           # Runs as a non-root user.
           test "$(docker exec smoke id -u)" = 10001
 
@@ -78,8 +146,22 @@ jobs:
         if: always()
         run: docker logs smoke || true; docker rm -f smoke || true
 
+  # Main-branch pushes only. Split out of `image` so the OIDC token and
+  # write scopes below are never granted to a PR-triggered run.
+  publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # tag + release on main
+      packages: write # push to GHCR
+      id-token: write # keyless cosign (Fulcio/Rekor) needs the OIDC token
+      attestations: write # provenance / SBOM attestations
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
       - name: Compute tags
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         id: tags
         run: |
           VERSION="v0.1.${{ github.run_number }}"
@@ -88,28 +170,45 @@ jobs:
           echo "list=$IMAGE:$VERSION,$IMAGE:sha-$SHORT,$IMAGE:latest" >> "$GITHUB_OUTPUT"
 
       - name: Login to GHCR
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Same build cache as the scanned/smoked image from the `image` job. The
+      # pushed index carries a max-mode SLSA provenance attestation and an SPDX
+      # SBOM, both attached to the digest and readable with
+      # `docker buildx imagetools inspect`.
       - name: Publish
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: publish
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           push: true
           tags: ${{ steps.tags.outputs.list }}
           cache-from: type=gha
+          provenance: mode=max
+          sbom: true
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      # Keyless: the signature is bound to this workflow's OIDC identity and
+      # logged in Rekor. Verify with:
+      #   cosign verify ghcr.io/<owner>/vcf-doctor@<digest> \
+      #     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+      #     --certificate-identity-regexp '^https://github.com/<owner>/vcf-doctor/'
+      - name: Sign published digest
+        env:
+          DIGEST: ${{ steps.publish.outputs.digest }}
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
 
       - name: Tag release
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           V="${{ steps.tags.outputs.version }}"
           git tag "$V" 2>/dev/null && git push origin "$V" || echo "tag $V exists"
           gh release view "$V" >/dev/null 2>&1 || gh release create "$V" --generate-notes --title "$V" \
-            --notes "Image: $IMAGE:$V (also sha-${GITHUB_SHA::7}, latest)"
+            --notes "Image: $IMAGE:$V (also sha-${GITHUB_SHA::7}, latest). Digest: ${{ steps.publish.outputs.digest }} (cosign keyless signed, SBOM + provenance attached)"
