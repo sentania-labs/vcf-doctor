@@ -1,18 +1,18 @@
-"""GET /api/events in demo mode: the fixture events appear after the second scan."""
+"""GET /api/events with the fixture collector: fixture events appear after the second scan."""
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app import db
-from app.config import settings
 from app.main import app
+from tests.conftest import seed_fixture_connection
 
 
 @pytest.fixture()
-def client(tmp_path, monkeypatch):
-    monkeypatch.setattr(settings, "demo_mode", True)
-    db.reset_for_tests(str(tmp_path / "demo.db"))
+def client(tmp_path):
+    db.reset_for_tests(str(tmp_path / "fixture.db"))
     with TestClient(app) as c:
+        seed_fixture_connection(c)
         yield c
 
 

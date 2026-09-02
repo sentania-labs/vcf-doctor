@@ -5,7 +5,6 @@ services:
     build: .
     ports: ["8000:8000"]
     environment:
-      VCF_DOCTOR_DEMO_MODE: "${VCF_DOCTOR_DEMO_MODE:-false}"
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
     volumes:
       - vcf-doctor-data:/data

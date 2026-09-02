@@ -2,6 +2,7 @@
 
 from app.collectors.base import Collector
 from app.collectors.fixture import FixtureCollector
+from app.config import settings
 from app.models import Connection
 
 
@@ -11,6 +12,12 @@ class CollectorUnavailable(Exception):
 
 def get_collector(connection: Connection) -> Collector:
     if connection.kind == "fixture":
+        if not settings.test_fixtures:
+            # A leftover fixture connection (from the retired demo mode) must
+            # not keep producing made-up inventory on a live deployment.
+            raise CollectorUnavailable(
+                "fixture connections are for tests only; delete this connection"
+            )
         from app.snapshots import store
 
         return FixtureCollector(connection.id, sequence=store.count_snapshots(connection.id))

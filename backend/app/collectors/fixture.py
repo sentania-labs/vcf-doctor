@@ -1,4 +1,7 @@
-"""Fixture collector: bundled snapshot data so the app runs with no vCenter.
+"""Fixture collector: bundled snapshot data for tests, no vCenter needed.
+
+Test-only: a "fixture" connection is accepted only with the
+VCF_DOCTOR_TEST_FIXTURES hook (see api/router._check_kind).
 
 The first collect for a connection returns fixtures/snapshot_a.json (healthy),
 every later collect returns fixtures/snapshot_b.json (degraded). Either file

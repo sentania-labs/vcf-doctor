@@ -1,4 +1,4 @@
-"""Deterministic fixture generator for VCF Doctor demo mode.
+"""Deterministic fixture generator for the VCF Doctor test fixtures.
 
 Produces fixtures/snapshot_a.json (healthy baseline) and
 fixtures/snapshot_b.json (degraded) describing one fictional VCF workload

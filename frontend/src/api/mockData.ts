@@ -230,7 +230,7 @@ function buildWorkloadDomain(): MockEstate {
     { id: 'snap-vc01-004', created_at: minutesAgo(2), label: 'Current', connection_id: src, scheduled: true, resource_count: r.length, tier: 'recent' },
     { id: 'snap-vc01-003', created_at: minutesAgo(22), label: 'Before firmware window', connection_id: src, scheduled: false, resource_count: r.length, tier: 'manual' },
     { id: 'snap-vc01-002', created_at: minutesAgo(62), label: 'Scheduled', connection_id: src, scheduled: true, resource_count: r.length - 1, tier: 'recent' },
-    { id: 'snap-vc01-001', created_at: minutesAgo(180), label: 'Demo baseline', connection_id: src, scheduled: false, resource_count: r.length - 1, tier: 'manual' },
+    { id: 'snap-vc01-001', created_at: minutesAgo(180), label: 'Baseline', connection_id: src, scheduled: false, resource_count: r.length - 1, tier: 'manual' },
     ...tieredSnapshots(src, 'snap-vc01-h', r.length, 99),
   ] satisfies SnapshotSummary[]).sort((a, b) => b.created_at.localeCompare(a.created_at))
 

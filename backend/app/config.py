@@ -12,7 +12,10 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="VCF_DOCTOR_", extra="ignore")
 
     db_path: str = "/data/vcf-doctor.db"
-    demo_mode: bool = False
+    # Test hook, deliberately undocumented: allows a connection of kind
+    # "fixture" (bundled snapshot data, no vCenter). Used by the backend test
+    # suite and the CI smoke test. Never set it on a real deployment.
+    test_fixtures: bool = False
     llm_model: str = "claude-opus-5"
     # Directory containing the built frontend (index.html). Empty disables static serving.
     static_dir: str = ""

@@ -2,7 +2,6 @@ import pytest
 
 from app import db
 from app.assistant import settings as assistant_settings
-from app.config import settings as cfg
 
 SECRET = "sk-ant-test-not-a-real-key-0000"
 
@@ -11,7 +10,6 @@ SECRET = "sk-ant-test-not-a-real-key-0000"
 def fresh_db(tmp_path, monkeypatch):
     db.reset_for_tests(str(tmp_path / "s.db"))
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.setattr(cfg, "demo_mode", False)
 
 
 def test_defaults_without_anything_stored():

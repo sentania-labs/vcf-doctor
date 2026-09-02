@@ -4,13 +4,14 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from tests.conftest import seed_fixture_connection
+
 
 def _client(tmp_path, monkeypatch, static: Path | None = None):
     from app import db
     from app.config import settings
 
     db.reset_for_tests(str(tmp_path / "t.db"))
-    monkeypatch.setattr(settings, "demo_mode", True)
     if static is not None:
         monkeypatch.setattr(settings, "static_dir", str(static))
     import importlib
@@ -19,6 +20,13 @@ def _client(tmp_path, monkeypatch, static: Path | None = None):
 
     importlib.reload(main)
     return TestClient(main.app)
+
+
+def _seeded(tmp_path, monkeypatch):
+    c = _client(tmp_path, monkeypatch)
+    c.__enter__()
+    seed_fixture_connection(c)
+    return c
 
 
 def test_spa_catch_all_cannot_escape_static_dir(tmp_path, monkeypatch):
@@ -35,7 +43,7 @@ def test_spa_catch_all_cannot_escape_static_dir(tmp_path, monkeypatch):
 
 
 def test_two_connections_are_isolated_and_namespaced(tmp_path, monkeypatch):
-    with _client(tmp_path, monkeypatch) as c:
+    with _seeded(tmp_path, monkeypatch) as c:
         a = c.get("/api/connections").json()[0]["id"]
         b = c.post(
             "/api/connections",
@@ -69,8 +77,8 @@ def test_two_connections_are_isolated_and_namespaced(tmp_path, monkeypatch):
         assert r.status_code == 400
 
 
-def test_demo_flow_produces_known_findings_and_changes(tmp_path, monkeypatch):
-    with _client(tmp_path, monkeypatch) as c:
+def test_fixture_flow_produces_known_findings_and_changes(tmp_path, monkeypatch):
+    with _seeded(tmp_path, monkeypatch) as c:
         a = c.get("/api/connections").json()[0]["id"]
         c.post("/api/scan", json={"connection_id": a})
         findings = c.get(f"/api/findings?connection_id={a}").json()
