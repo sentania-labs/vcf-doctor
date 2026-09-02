@@ -177,7 +177,13 @@ class ForwardedHeadersMiddleware:
         client = scope.get("client")
         peer = client[0] if client else None
         nets = networks()
-        if peer and not is_trusted(peer, nets):
+        trusted = bool(peer) and is_trusted(peer, nets)
+        # Keep the TCP peer and the trust decision for the Settings page:
+        # scope["client"] is about to be rewritten when the peer is trusted.
+        scope.setdefault("state", {})
+        scope["state"]["proxy_peer"] = peer
+        scope["state"]["proxy_peer_trusted"] = trusted
+        if peer and not trusted:
             if peer not in _warned_peers and len(_warned_peers) < _WARNED_MAX:
                 for name, _ in scope["headers"]:
                     if name in (b"x-forwarded-for", b"x-forwarded-proto"):
@@ -190,7 +196,7 @@ class ForwardedHeadersMiddleware:
                             peer,
                         )
                         break
-        if peer and is_trusted(peer, nets):
+        if trusted:
             proto = None
             forwarded_for: list[str] = []
             for name, value in scope["headers"]:

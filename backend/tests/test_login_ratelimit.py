@@ -239,6 +239,10 @@ def test_trusted_proxies_from_settings_page_apply_live(tmp_path):
         body = r.json()
         assert body["trusted_proxies"] == ["10.0.0.1/32"] and body["source"] == "settings"
         assert body["stored"] == ["10.0.0.1/32"] and body["env_problem"] is None
+        # Trust is decided when a request arrives, so the save itself still
+        # reports the old decision; the card re-reads after saving.
+        assert body["peer"] == "10.0.0.1" and body["peer_trusted"] is False
+        body = c.get("/api/settings/trusted-proxies").json()
         assert body["peer"] == "10.0.0.1" and body["peer_trusted"] is True
         c.post("/api/auth/logout")
         _lock_out(c, "203.0.113.5")
@@ -313,3 +317,20 @@ def test_limiter_key_is_never_header_sized(tmp_path, monkeypatch):
             c.post("/api/auth/login", json={"password": "bad"}, headers={"X-Forwarded-For": huge})
         assert auth.tracked_addresses() == 1
         assert all(len(k) <= 64 for k in auth._per_ip)
+
+
+def test_settings_page_reports_the_tcp_peer_not_the_forwarded_client(tmp_path, monkeypatch):
+    """Codex round: behind a trusted ingress request.client is the visitor;
+    the page must still report the ingress as the (trusted) peer."""
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "trusted_proxies", "10.0.0.0/8")
+    app = _app(tmp_path)
+    with TestClient(app, client=("10.0.0.1", 5000)) as c:
+        c.post("/api/auth/setup", json={"password": "correct horse"})
+        body = c.get(
+            "/api/settings/trusted-proxies",
+            headers={"X-Forwarded-For": "203.0.113.9", "X-Forwarded-Proto": "https"},
+        ).json()
+        assert body["peer"] == "10.0.0.1" and body["peer_trusted"] is True
+        assert body["ignored_forwarded_headers"] is False and body["scheme"] == "https"

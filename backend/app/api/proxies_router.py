@@ -36,8 +36,10 @@ class TrustedProxiesUpdate(BaseModel):
 
 def _current(request: Request) -> TrustedProxies:
     value, source = proxies.effective()
-    peer = request.client.host if request.client else None
-    trusted = proxies.is_trusted(peer, proxies.networks())
+    # The middleware recorded the TCP peer before rewriting request.client.
+    state = request.state
+    peer = getattr(state, "proxy_peer", request.client.host if request.client else None)
+    trusted = bool(getattr(state, "proxy_peer_trusted", False))
     return TrustedProxies(
         trusted_proxies=value,
         source=source,
