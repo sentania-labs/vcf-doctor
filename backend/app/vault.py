@@ -56,7 +56,7 @@ class KeyUnavailable(Exception):
 _lock = threading.Lock()
 # (env value, db path) -> (Fernet, source, key file path). Re-derived when either
 # input changes, which is what tests do when they point db at a temp file.
-_cache: tuple[tuple[str, str], tuple[Fernet, KeySource, Path | None]] | None = None
+_cache: dict[tuple[str, str], tuple[Fernet, KeySource, Path | None]] = {}
 
 
 def key_file_path() -> Path:
@@ -120,18 +120,18 @@ def _load_or_create_key_file(path: Path) -> bytes:
 
 
 def _resolve() -> tuple[Fernet, KeySource, Path | None]:
-    global _cache
     env = os.environ.get(ENV_KEY, "")
     ident = (env, cfg.db_path)
     with _lock:
-        if _cache is not None and _cache[0] == ident:
-            return _cache[1]
+        if ident in _cache:
+            return _cache[ident]
         if env.strip():
             resolved: tuple[Fernet, KeySource, Path | None] = (Fernet(_normalise(env)), "env", None)
         else:
             path = key_file_path()
             resolved = (Fernet(_load_or_create_key_file(path)), "file", path)
-        _cache = (ident, resolved)
+        _cache.clear()
+        _cache[ident] = resolved
         return resolved
 
 
@@ -215,6 +215,5 @@ def migrate_plaintext() -> int:
 
 
 def reset_for_tests() -> None:
-    global _cache
     with _lock:
-        _cache = None
+        _cache.clear()
