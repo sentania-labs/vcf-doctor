@@ -98,7 +98,7 @@ function RetentionCard({ value, onChange }: { value: RetentionPolicy; onChange: 
         {problem ? <p className="text-sm text-critical bg-critical-bg rounded-md px-3 py-2" role="alert">{problem.message}</p>
           : <p className="text-sm text-muted">Every scan for {value.recent_days} {value.recent_days === 1 ? 'day' : 'days'}, then hourly to {value.hourly_days} {value.hourly_days === 1 ? 'day' : 'days'}, then daily to {value.daily_days} {value.daily_days === 1 ? 'day' : 'days'}.</p>}
         <ul className="text-xs text-faint space-y-1 list-disc pl-4">
-          <li>Manual and labelled snapshots are never pruned.</li>
+          <li>Manual snapshots are never pruned. Scheduled snapshots follow the tiers above.</li>
           <li>vCenter events and the change log follow the daily window ({value.daily_days || '?'} {value.daily_days === 1 ? 'day' : 'days'}).</li>
         </ul>
       </div>

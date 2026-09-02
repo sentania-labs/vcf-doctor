@@ -19,7 +19,7 @@ export interface Change {
   change_type: ChangeType; resource_id: string; resource_type: string; resource_name: string
   property_changes: Record<string, PropertyChange>; significance: Significance; summary: string
 }
-// Retention tier (docs/RETENTION_EVENTS.md): manual and labelled snapshots are never pruned.
+// Retention tier (docs/RETENTION_EVENTS.md): manual snapshots are never pruned.
 export type SnapshotTier = 'manual' | 'recent' | 'hourly' | 'daily'
 export interface SnapshotSummary {
   id: string; created_at: string; label: string; connection_id: string

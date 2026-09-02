@@ -13,9 +13,10 @@ Applied per connection after every scan and at startup (idempotent):
 - hourly_days <= age < daily_days: keep the one nearest each day mark (00:00 UTC);
 - age >= daily_days: prune.
 
-Manual and labelled snapshots are never pruned. `SnapshotSummary.tier` is
+Manual snapshots (`scheduled = 0`) are never pruned; scheduled snapshots
+follow the tiers whether or not they carry a label. `SnapshotSummary.tier` is
 `recent | hourly | daily | manual`. The old `retention` count setting is
-removed from the API and the GUI (read once for migration, then ignored).
+removed from the API and the GUI and is no longer read by the code.
 
 Snapshot resource blobs are stored gzip-compressed (`resources_gz` BLOB);
 existing rows are migrated at startup in place, in batches, without blocking
