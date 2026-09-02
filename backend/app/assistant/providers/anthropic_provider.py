@@ -141,7 +141,7 @@ def fallback_kwargs() -> dict:
     return {"betas": [FALLBACK_BETA], "fallbacks": "default"}
 
 
-def _api_error_detail(e: "anthropic.APIStatusError") -> str:
+def _api_error_detail(e: anthropic.APIStatusError) -> str:
     """The API's own reason, e.g. 'model: claude-opus-5 is not available' or
     'fallbacks: Extra inputs are not permitted'. Error bodies never carry the
     key, so this is safe to show to the operator and to log."""

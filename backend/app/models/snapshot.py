@@ -20,7 +20,7 @@ class RetentionPolicy(BaseModel):
     daily_days: int = Field(ge=1)
 
     @model_validator(mode="after")
-    def _ordered(self) -> "RetentionPolicy":
+    def _ordered(self) -> RetentionPolicy:
         if not self.recent_days <= self.hourly_days <= self.daily_days:
             raise ValueError("retention tiers must satisfy recent <= hourly <= daily days")
         return self
