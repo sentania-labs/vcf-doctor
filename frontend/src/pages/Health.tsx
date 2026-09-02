@@ -71,7 +71,8 @@ function Count({ n }: { n: number }) {
 interface Related {
   changes: Change[]; resources: Resource[]; events: Event[]
   window: { since: string; until: string | null } | null
-  scope: RelatedWindow | null  // what the backend actually looked at; null while loading or when the lookup failed
+  scope: RelatedWindow | null  // what the backend actually looked at; null when the lookup failed
+  loading: boolean
 }
 
 // One line saying which window the related changes come from, so nobody mistakes "0 changes" for "nothing to see".
@@ -80,7 +81,7 @@ function describeScope(scope: RelatedWindow): string {
     const scans = `${scope.scans_present} ${scope.scans_present === 1 ? 'scan' : 'scans'}`
     const capped = scope.capped ? ', capped' : ''
     return scope.first_observed && scope.first_observed !== scope.since
-      ? `Since ${formatDateTime(scope.since)}, the scan before it was first seen (${scans}${capped})`
+      ? `Since ${formatDateTime(scope.since)} (first seen ${formatDateTime(scope.first_observed)}, ${scans}${capped})`
       : `Since the first snapshot ${formatDateTime(scope.since)} (${scans}${capped})`
   }
   if (scope.basis === 'latest_differing_pair') {
@@ -94,7 +95,7 @@ function describeScope(scope: RelatedWindow): string {
 function FindingDrawer({ finding, onClose }: { finding: Finding | null; onClose: () => void }) {
   const { connectionId } = useAppState()
   const { openDrawer } = useAssistantDrawer()
-  const empty: Related = { changes: [], resources: [], events: [], window: null, scope: null }
+  const empty: Related = { changes: [], resources: [], events: [], window: null, scope: null, loading: true }
   const [related, setRelated] = useState<Related>(empty)
 
   // Gather related changes, resources and vCenter events for the evidence package (best effort, page still works if it fails).
@@ -128,10 +129,12 @@ function FindingDrawer({ finding, onClose }: { finding: Finding | null; onClose:
             const rel = await getFindingRelated(finding.id, conn)
             changes = rel.changes
             scope = rel.window
-            if (rel.window.since) window = { since: rel.window.since, until: rel.window.until }
+            // Events around the cause: from the scan before the finding first appeared up to the scan that
+            // showed it (or the pair that differed). Not "until now": a month of newer events would bury them.
+            if (rel.window.since) window = { since: rel.window.since, until: rel.window.until ?? rel.window.first_observed }
           } catch { changes = [] }
         }
-        // Events in the same window as the related changes; with nothing to go on, the last 24 h.
+        // With nothing to go on, the last 24 h.
         if (conn) {
           window = window ?? { since: new Date(Date.now() - 86_400_000).toISOString(), until: null }
           try {
@@ -141,8 +144,8 @@ function FindingDrawer({ finding, onClose }: { finding: Finding | null; onClose:
             events = [...own, ...rest.filter(e => !seen.has(e.id))].slice(0, 10)
           } catch { events = [] }
         }
-        if (!cancelled) setRelated({ changes, resources: relRes, events, window, scope })
-      } catch { if (!cancelled) setRelated({ changes: [], resources: [], events, window, scope }) }
+        if (!cancelled) setRelated({ changes, resources: relRes, events, window, scope, loading: false })
+      } catch { if (!cancelled) setRelated({ changes: [], resources: [], events, window, scope, loading: false }) }
     })()
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -193,7 +196,7 @@ function FindingDrawer({ finding, onClose }: { finding: Finding | null; onClose:
               {related.scope ? <span className="text-xs text-faint tnum text-right">{describeScope(related.scope)}</span> : null}
             </div>
             {related.changes.length === 0 ? (
-              <p className="text-sm text-faint">{related.scope ? 'No recorded changes to this object or its neighbours in this window.' : 'Loading changes'}</p>
+              <p className="text-sm text-faint">{related.loading ? 'Loading changes' : related.scope ? 'No recorded changes to this object or its neighbours in this window.' : 'Could not load related changes.'}</p>
             ) : (
               <ul className="space-y-1.5">
                 {related.changes.map((c, i) => (
@@ -208,7 +211,7 @@ function FindingDrawer({ finding, onClose }: { finding: Finding | null; onClose:
               <h3 className="text-xs font-semibold uppercase tracking-wider text-faint">Events in this window</h3>
               {related.window ? <span className="text-xs text-faint tnum">{formatDateTime(related.window.since)} to {related.window.until ? formatTime(related.window.until) : 'now'}</span> : null}
             </div>
-            {related.events.length === 0 ? <p className="text-sm text-faint">{related.window ? 'No vCenter events recorded in this window.' : 'Loading events'}</p> : (
+            {related.events.length === 0 ? <p className="text-sm text-faint">{related.loading ? 'Loading events' : 'No vCenter events recorded in this window.'}</p> : (
               <ul className="divide-y divide-border rounded-lg border border-border overflow-hidden">
                 {related.events.map(e => (
                   <li key={e.id} className="px-3.5 py-2 flex items-start gap-2.5 bg-surface">

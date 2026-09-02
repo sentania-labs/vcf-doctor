@@ -33,7 +33,7 @@ MAX_WINDOW = timedelta(days=30)  # never look further back than this
 MAX_SCANS_BACK = 200  # snapshots inspected when locating first observation
 MAX_PAIRS_BACK = 20  # snapshot pairs diffed in the no-log fallback
 MAX_CHANGES = 12  # rows returned to the drawer
-LOG_FETCH_LIMIT = 5000
+LOG_FETCH_LIMIT = 1000  # per query; rows are then sorted oldest first and capped
 SIGNIFICANCE_RANK = {"high": 0, "medium": 1, "low": 2}
 
 WindowBasis = Literal["first_observed", "latest_differing_pair", "no_snapshots"]
@@ -116,20 +116,48 @@ def first_observed(connection_id: str, finding_id: str) -> FirstObserved:
     return out
 
 
-def _select(changes: list, near: set[str]) -> list[Change]:
-    """Rows about the neighbourhood, then other high-significance rows; newest
-    and most significant first, capped at MAX_CHANGES."""
-    mine = [c for c in changes if c.resource_id in near]
-    rest = [c for c in changes if c.resource_id not in near and c.significance == "high"]
+def _key(c) -> tuple:
+    """Oldest first, so the change that introduced the finding leads and
+    survives the MAX_CHANGES cap; high significance first within one scan."""
+    observed = getattr(c, "observed_at", None)
+    stamp = observed.timestamp() if observed else 0
+    return (stamp, SIGNIFICANCE_RANK.get(c.significance, 9), c.resource_name)
 
-    def key(c):
-        observed = getattr(c, "observed_at", None)
-        stamp = -observed.timestamp() if observed else 0
-        return (stamp, SIGNIFICANCE_RANK.get(c.significance, 9), c.resource_name)
 
-    mine.sort(key=key)
-    rest.sort(key=key)
-    return [Change.model_validate(c.model_dump()) for c in (mine + rest)[:MAX_CHANGES]]
+def _select(changes: list, near: list[str]) -> list[Change]:
+    """Rows about the neighbourhood (in the order of `near`: the object itself
+    first), then other high-significance rows; oldest first, capped."""
+    seen: set[str] = set()
+    picked: list = []
+    for rid in near:
+        for c in sorted((c for c in changes if c.resource_id == rid), key=_key):
+            marker = getattr(c, "id", None) or (rid, c.summary)
+            if marker not in seen:
+                seen.add(marker)
+                picked.append(c)
+    near_set = set(near)
+    rest = [c for c in changes if c.resource_id not in near_set and c.significance == "high"]
+    picked.extend(sorted(rest, key=_key))
+    return [Change.model_validate(c.model_dump()) for c in picked[:MAX_CHANGES]]
+
+
+def _logged(connection_id: str, since: datetime, near: list[str]) -> list:
+    """Per-object queries (the store filters by one resource id) plus the
+    connection's high rows, so a busy log cannot push the cause off the end."""
+    rows: list = []
+    for rid in near:
+        rows.extend(
+            store.list_change_log(
+                connection_id, since=since, resource_id=rid, limit=LOG_FETCH_LIMIT
+            )
+        )
+    rows.extend(
+        store.list_change_log(
+            connection_id, since=since, min_significance="high", limit=LOG_FETCH_LIMIT
+        )
+    )
+    unique = {r.id: r for r in rows}
+    return list(unique.values())
 
 
 def _latest_differing_pair(connection_id: str) -> tuple[list, datetime | None, datetime | None]:
@@ -158,14 +186,15 @@ def related_changes(connection_id: str, finding: Finding, resources: list[Resour
         )
     if store.count_changes(connection_id):
         floor = store.now() - MAX_WINDOW
-        # Rows are stamped with the later snapshot: the introducing diff sits at seen_at.
-        # When retention has pruned every snapshot older than the finding, the log (which
-        # outlives snapshots) may still hold the cause; read it back to the cap.
-        log_since = floor if first.all_surviving else max(seen_at, floor)
-        rows = store.list_change_log(connection_id, since=log_since, limit=LOG_FETCH_LIMIT)
+        # The introducing diff is stamped with the first snapshot that holds the finding, or
+        # with a snapshot retention has since pruned; either way it is at or after the
+        # snapshot before (interval_start). When every surviving snapshot holds the finding
+        # the log (which outlives snapshots) may still hold the cause: read back to the cap.
+        log_since = floor if first.all_surviving else max(first.interval_start, floor)
+        rows = _logged(connection_id, log_since, near)
         since = max(first.interval_start, floor)
         if first.all_surviving and rows:
-            since = min(since, max(rows[-1].observed_at, floor))
+            since = min(since, max(min(r.observed_at for r in rows), floor))
         window = RelatedWindow(
             basis="first_observed",
             since=since,
@@ -174,7 +203,7 @@ def related_changes(connection_id: str, finding: Finding, resources: list[Resour
             scans_present=count,
             capped=walk_capped or first.interval_start < floor,
         )
-        changes = _select(rows, set(near))
+        changes = _select(rows, near)
     else:
         diff, since, until = _latest_differing_pair(connection_id)
         window = RelatedWindow(
@@ -185,7 +214,7 @@ def related_changes(connection_id: str, finding: Finding, resources: list[Resour
             scans_present=count,
             capped=walk_capped,
         )
-        changes = _select(diff, set(near))
+        changes = _select(diff, near)
     return FindingRelated(
         finding_id=finding.id,
         connection_id=connection_id,

@@ -76,7 +76,6 @@ def test_third_identical_scan_still_shows_the_cause(client):
         for c in body["changes"]
         if c["resource_id"] not in body["resource_ids"]
     )
-    assert len(body["changes"]) <= fr.MAX_CHANGES
 
 
 def test_connection_is_resolved_from_the_finding_when_omitted(client):
@@ -112,6 +111,19 @@ def test_pruned_snapshots_do_not_hide_the_logged_cause(client):
     assert body["changes"][0]["summary"] == "connectionState connected -> disconnected"
 
 
+def test_pruned_middle_snapshot_keeps_the_cause_in_the_query(client):
+    """A, B, B with the first B pruned: the introducing row is stamped with the
+    pruned snapshot, between the surviving A and B. It must still be fetched."""
+    cid = _connection(client, 3)
+    snaps = client.get(f"/api/snapshots?connection_id={cid}").json()
+    assert client.delete(f"/api/snapshots/{snaps[1]['id']}").status_code == 200
+    finding = _finding(client, cid, "HOST_DISCONNECTED")
+    body = client.get(f"/api/findings/{finding['id']}/related?connection_id={cid}").json()
+    assert body["window"]["scans_present"] == 1
+    assert body["window"]["since"] == snaps[2]["created_at"]
+    assert body["changes"][0]["summary"] == "connectionState connected -> disconnected"
+
+
 def test_no_log_falls_back_to_latest_differing_pair(client):
     """A database from before the change log has no rows: diff the newest pair that differs."""
     cid = _connection(client, 3)
@@ -126,7 +138,7 @@ def test_no_log_falls_back_to_latest_differing_pair(client):
     assert body["changes"][0]["resource_id"] == finding["resource_id"]
 
 
-def test_no_log_and_nothing_ever_differed(client, monkeypatch):
+def test_no_log_and_nothing_ever_differed(client):
     cid = _connection(client, 1)
     finding = _finding(client, cid, "VM_SNAPSHOT_STALE")
     body = client.get(f"/api/findings/{finding['id']}/related?connection_id={cid}").json()
@@ -205,10 +217,38 @@ def test_select_keeps_neighbourhood_then_high_only():
         )
 
     rows = [ch("a", "low"), ch("b", "low"), ch("c", "high"), ch("d", "medium")]
-    picked = fr._select(rows, {"a"})
+    picked = fr._select(rows, ["a"])
     assert [c.resource_id for c in picked] == ["a", "c"]
     # An estate-wide finding (empty neighbourhood) only sees the high rows.
-    assert [c.resource_id for c in fr._select(rows, set())] == ["c"]
+    assert [c.resource_id for c in fr._select(rows, [])] == ["c"]
+
+
+def test_select_keeps_the_oldest_rows_when_capped():
+    """A flapping object logs a row every scan; the introducing change (oldest) must survive."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.models.change import ChangeRecord
+
+    t0 = datetime(2026, 1, 1, tzinfo=UTC)
+    rows = [
+        ChangeRecord(
+            id=f"r{i}",
+            connection_id="c",
+            from_snapshot_id="x",
+            to_snapshot_id="y",
+            observed_at=t0 + timedelta(minutes=i),
+            change_type="modified",
+            resource_id="vm:a",
+            resource_type="vm",
+            resource_name="a",
+            significance="low",
+            summary="CAUSE" if i == 0 else f"flap {i}",
+        )
+        for i in range(fr.MAX_CHANGES + 5)
+    ]
+    picked = fr._select(list(reversed(rows)), ["vm:a"])
+    assert len(picked) == fr.MAX_CHANGES
+    assert picked[0].summary == "CAUSE"
 
 
 def test_first_observed_walks_back_with_store(client):
