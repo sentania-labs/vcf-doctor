@@ -5,9 +5,11 @@ What's wrong, what changed, and what should I do about it?
 VCF Doctor is an operations console for VMware Cloud Foundation. It connects
 to one or more vCenters, captures a full inventory snapshot on a schedule, and
 runs a fixed set of deterministic health checks against every snapshot. Because
-every snapshot is kept, it can show exactly what changed between any two points
-in time, per object or rolled up across the whole estate, and tie each finding
-to the changes and vCenter events around it. An optional Claude-powered
+snapshots are kept (every scan for two weeks, thinning to hourly and then daily
+for a year by default; manual snapshots are kept indefinitely), it can show
+exactly what changed between any two retained points in time, per object or
+rolled up across the whole estate, and tie each finding to the changes and
+vCenter events around it. An optional Claude-powered
 assistant explains a finding in plain language or drafts a PowerCLI
 investigation script from the recorded evidence; it never decides what is
 healthy and never runs anything. The console is read-only by design.

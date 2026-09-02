@@ -5,7 +5,7 @@ wiki.
 
 ## Run it locally
 
-Prerequisites: Python 3.12+, [uv](https://docs.astral.sh/uv/), Node 22+.
+Prerequisites: Python 3.14+, [uv](https://docs.astral.sh/uv/), Node 22+.
 
 ```bash
 make setup          # backend venv via uv, frontend npm ci

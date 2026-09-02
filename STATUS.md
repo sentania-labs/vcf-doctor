@@ -38,6 +38,7 @@ version of this file is in git history.
   image scan, smoke test, CodeQL); the image is signed with provenance and
   SBOM, and CI publishes the exact digest it tested with one-by-one release
   numbers (#17, #36).
+- Python 3.14 base image, pip dropped from the runtime image (#52).
 - 500 backend tests pass (`make test`, 2026-09-02).
 
 ## In progress
