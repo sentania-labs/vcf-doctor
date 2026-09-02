@@ -104,15 +104,16 @@ def _changes(
 
 
 def _recent_changes(connection_id: str | None, min_significance: str | None) -> list:
-    """Overview feed: the persisted log (last 24 h) for each connection that
-    has one; the on-demand diff of the latest pair for connections that do not
+    """Overview feed: the persisted log (last 24 h, or the newest observation
+    when the last scan is older than that) for each connection that has one;
+    the on-demand diff of the latest pair for connections that do not
     (databases predating the log). Sorted high significance first, then newest."""
     floor = _resolve_min_significance(min_significance)
     since = store.now() - timedelta(hours=24)
     out: list = []
     for conn in _target_connections(connection_id):
         if store.count_changes(conn.id):
-            out.extend(store.list_change_log(conn.id, since=since, min_significance=floor))
+            out.extend(_logged_changes(conn.id, since, floor))
             continue
         pair = store.latest_snapshots(conn.id, 2)
         if len(pair) == 2:
@@ -126,6 +127,22 @@ def _recent_changes(connection_id: str | None, min_significance: str | None) -> 
         )
     )
     return out
+
+
+def _logged_changes(connection_id: str, since: datetime, floor: str) -> list:
+    """Change rows observed since `since`; when there are none (the last scan
+    that found anything is older than the window) the rows of the newest
+    observation instead, so the Overview never empties out between scans."""
+    rows = store.list_change_log(connection_id, since=since, min_significance=floor)
+    if rows:
+        return rows
+    newest = store.list_change_log(connection_id, min_significance=floor, limit=1)
+    if not newest:
+        return []
+    observed = newest[0].observed_at
+    return store.list_change_log(
+        connection_id, since=observed, until=observed, min_significance=floor
+    )
 
 
 def _all_changes(connection_id: str | None, from_id: str | None, to_id: str | None) -> list:

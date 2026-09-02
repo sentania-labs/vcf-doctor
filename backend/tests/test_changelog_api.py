@@ -145,3 +145,23 @@ def test_overview_reads_log_and_falls_back_when_empty(client):
         ]
         == []
     )
+
+
+def test_overview_keeps_latest_pair_when_last_scan_is_older_than_24h(client):
+    cid = _scanned_connection(client)
+    assert store.count_changes(cid) == 15
+    old = (store.now() - timedelta(hours=25)).isoformat()
+    with db.transaction() as c:
+        c.execute("UPDATE changes SET observed_at = ? WHERE connection_id = ?", (old, cid))
+    # The default log window no longer covers the rows...
+    assert client.get(f"/api/changes/log?connection_id={cid}").json() == []
+    # ...but the Overview still shows the latest snapshot pair's changes.
+    # The Overview feed is capped at 5 rows, high significance first.
+    ov = client.get(f"/api/overview?connection_id={cid}").json()
+    assert len(ov["recent_changes"]) == 5
+    assert [c["significance"] for c in ov["recent_changes"]] == ["high"] * 4 + ["medium"]
+    assert {c["observed_at"].replace("Z", "+00:00") for c in ov["recent_changes"]} == {old}
+    high = client.get(f"/api/overview?connection_id={cid}&min_significance=high").json()
+    assert [c["significance"] for c in high["recent_changes"]] == ["high"] * 4
+    # The unscoped Overview (all connections) behaves the same.
+    assert len(client.get("/api/overview").json()["recent_changes"]) == 5
