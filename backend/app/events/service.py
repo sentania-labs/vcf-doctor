@@ -5,7 +5,9 @@ saved. It asks the collector for the window (previous snapshot time - 60 s,
 now], or the last 24 h on a connection's first scan, resolves resource names
 against the snapshot, stores the events (dedup on id) and prunes anything
 older than the retention policy's daily_days. It never raises: a failure to
-read events must not fail a scan.
+read events must not fail a scan. Pruning also runs from
+store.apply_retention (startup and after every scan), so a connection whose
+event fetch fails is still kept within the policy.
 """
 
 from __future__ import annotations
@@ -14,7 +16,6 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from app import db
 from app.events import store as events_store
 from app.models.event import Event
 from app.models.snapshot import Snapshot
@@ -24,18 +25,13 @@ log = logging.getLogger("vcf_doctor.events")
 
 FIRST_SCAN_WINDOW = timedelta(hours=24)
 OVERLAP = timedelta(seconds=60)
-DEFAULT_RETENTION_DAYS = 365
-RETENTION_POLICY_KEY = "retention_policy"
 
 
 def retention_days() -> int:
-    """retention_policy.daily_days from the settings KV, else a conservative year."""
-    try:
-        policy = db.get_setting(RETENTION_POLICY_KEY) or {}
-        days = int(policy.get("daily_days", DEFAULT_RETENTION_DAYS))
-        return days if days > 0 else DEFAULT_RETENTION_DAYS
-    except (TypeError, ValueError, AttributeError):
-        return DEFAULT_RETENTION_DAYS
+    """The effective retention policy's daily_days: the stored policy, or the
+    deployment defaults (VCF_DOCTOR_RETENTION_DAILY_DAYS) when none is stored
+    or the stored one is invalid. Same source of truth as snapshot pruning."""
+    return store.retention_policy().daily_days
 
 
 def capture_window(connection_id: str, snapshot: Snapshot) -> tuple[datetime, datetime]:

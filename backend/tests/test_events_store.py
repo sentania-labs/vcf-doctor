@@ -5,11 +5,13 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from app import db
+from app.config import settings as cfg
 from app.events import service
 from app.events import store as events_store
-from app.models import Resource
+from app.models import ConnectionCreate, Resource
 from app.models.event import Event
-from app.models.snapshot import Snapshot
+from app.models.snapshot import RetentionPolicy, Snapshot
+from app.snapshots import store
 
 NOW = datetime(2026, 8, 31, 12, 0, 0, tzinfo=UTC)
 
@@ -111,14 +113,36 @@ def test_prune_and_delete():
     assert events_store.latest_event_time("c2") is None
 
 
-def test_retention_days_reads_policy_with_fallback():
-    assert service.retention_days() == service.DEFAULT_RETENTION_DAYS
+def test_retention_days_follows_the_effective_policy(monkeypatch):
+    # No stored policy: the deployment default, not a hardcoded year.
+    monkeypatch.setattr(cfg, "retention_daily_days", 42)
+    assert service.retention_days() == 42
     db.set_setting("retention_policy", {"recent_days": 14, "hourly_days": 30, "daily_days": 90})
     assert service.retention_days() == 90
+    # Invalid stored policies fall back to the deployment default as well.
     db.set_setting("retention_policy", {"daily_days": 0})
-    assert service.retention_days() == service.DEFAULT_RETENTION_DAYS
+    assert service.retention_days() == 42
     db.set_setting("retention_policy", "garbage")
-    assert service.retention_days() == service.DEFAULT_RETENTION_DAYS
+    assert service.retention_days() == 42
+
+
+def test_apply_retention_prunes_events_without_a_capture():
+    """A connection whose event fetch fails still gets pruned: the retention
+    pass (startup and per scan) prunes events, not only capture_events."""
+    conn = store.create_connection(
+        ConnectionCreate(name="c", host="fixture", username="u", password="p", kind="fixture")
+    )
+    events_store.upsert_events(
+        [
+            _ev("old", 60 * 24 * 10, conn=conn.id),  # 10 days old
+            _ev("fresh", 5, conn=conn.id),
+            _ev("other", 60 * 24 * 10, conn="c2"),
+        ]
+    )
+    policy = RetentionPolicy(recent_days=1, hourly_days=2, daily_days=3)
+    assert store.apply_retention(conn.id, policy, at=NOW) == 0
+    assert [e.id for e in events_store.list_events(connection_id=conn.id)] == [f"{conn.id}:fresh"]
+    assert events_store.count_events("c2") == 1  # other connections untouched
 
 
 def _snapshot(sid: str, created: datetime, conn="c1") -> Snapshot:
@@ -172,7 +196,7 @@ def test_capture_events_enriches_stores_prunes_and_never_raises(monkeypatch):
 
     snap = _snapshot("s1", NOW)
     monkeypatch.setattr(store, "list_snapshots", lambda cid: [snap])
-    db.set_setting("retention_policy", {"daily_days": 30})
+    store.set_retention_policy(RetentionPolicy(recent_days=7, hourly_days=14, daily_days=30))
     collector = FakeCollector(
         [
             Event(
