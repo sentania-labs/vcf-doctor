@@ -1,7 +1,8 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { AlertTriangle, Stethoscope } from 'lucide-react'
 import { login, setupPassword, USE_MOCKS } from '@/api'
+import { ApiError } from '@/api/client'
 import { isAuthed, useAuth } from '@/state/AuthState'
 import { Button, Field, Input, Spinner } from '@/components/ui'
 
@@ -12,6 +13,17 @@ export default function LoginPage() {
   const [confirm, setConfirm] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  // Lockout from the backend (429): sign-in is refused until this time. Counted down on screen.
+  const [lockUntil, setLockUntil] = useState<number | null>(null)
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (lockUntil === null) return
+    const id = setInterval(() => setNow(Date.now()), 250)
+    return () => clearInterval(id)
+  }, [lockUntil])
+  const waitSeconds = lockUntil === null ? 0 : Math.max(0, Math.ceil((lockUntil - now) / 1000))
+  useEffect(() => { if (lockUntil !== null && waitSeconds === 0) setLockUntil(null) }, [lockUntil, waitSeconds])
+  const locked = waitSeconds > 0
 
   if (status && isAuthed(status)) return <Navigate to="/" replace />
   const firstRun = !!status && !status.configured
@@ -24,6 +36,7 @@ export default function LoginPage() {
       if (password.length < 8) { setErr('Password must be at least 8 characters.'); return }
       if (password !== confirm) { setErr('Passwords do not match.'); return }
     } else if (!password) { setErr('Enter the password.'); return }
+    if (locked) return
     setBusy(true)
     try {
       if (firstRun) await setupPassword(password); else await login(password)
@@ -33,6 +46,7 @@ export default function LoginPage() {
       const msg = e2 instanceof Error ? e2.message : String(e2)
       // Someone else finished first-run setup meanwhile: flip to sign-in.
       if (firstRun && /already set/i.test(msg)) { await refresh(); setErr('A password was already set. Sign in instead.') }
+      else if (e2 instanceof ApiError && e2.status === 429) { setLockUntil(Date.now() + (e2.retryAfter ?? 30) * 1000); setNow(Date.now()); setErr(null) }
       else setErr(msg === 'invalid password' ? 'Invalid password.' : msg)
       setBusy(false)
     }
@@ -81,9 +95,13 @@ export default function LoginPage() {
                     <Input type="password" value={confirm} onChange={e => setConfirm(e.target.value)} autoComplete="new-password" disabled={busy} name="confirm" />
                   </Field>
                 ) : null}
-                {err ? <p className="text-sm text-critical bg-critical-bg rounded-md px-3 py-2" role="alert">{err}</p> : null}
-                <Button type="submit" variant="primary" className="w-full" loading={busy}>
-                  {firstRun ? 'Set password and sign in' : 'Sign in'}
+                {locked ? (
+                  <p className="text-sm text-warning bg-warning-bg rounded-md px-3 py-2" role="alert" aria-live="polite">
+                    Too many attempts, try again in {waitSeconds} {waitSeconds === 1 ? 'second' : 'seconds'}.
+                  </p>
+                ) : err ? <p className="text-sm text-critical bg-critical-bg rounded-md px-3 py-2" role="alert">{err}</p> : null}
+                <Button type="submit" variant="primary" className="w-full" loading={busy} disabled={locked}>
+                  {locked ? `Try again in ${waitSeconds}s` : firstRun ? 'Set password and sign in' : 'Sign in'}
                 </Button>
                 {firstRun ? (
                   <p className="text-xs text-faint leading-relaxed">

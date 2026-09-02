@@ -23,9 +23,12 @@ async function request(path: string, init?: RequestInit): Promise<Response> {
 
 export class ApiError extends Error {
   status: number
-  constructor(status: number, message: string) {
+  // Seconds to wait before retrying, from a 429 (body retry_after or the Retry-After header).
+  retryAfter?: number
+  constructor(status: number, message: string, retryAfter?: number) {
     super(message)
     this.status = status
+    this.retryAfter = retryAfter
   }
 }
 
@@ -35,12 +38,16 @@ async function parse<T>(r: Response, path: string): Promise<T> {
       window.dispatchEvent(new CustomEvent(UNAUTHENTICATED_EVENT))
     }
     let detail = `${r.status} ${r.statusText}`
+    let retryAfter: number | undefined
+    const header = Number(r.headers.get('Retry-After'))
+    if (Number.isFinite(header) && header > 0) retryAfter = header
     try {
       const body = await r.json()
       if (body && typeof body.detail === 'string') detail = body.detail
       else if (body && typeof body.message === 'string') detail = body.message
+      if (body && typeof body.retry_after === 'number' && body.retry_after > 0) retryAfter = body.retry_after
     } catch { /* body not json */ }
-    throw new ApiError(r.status, detail)
+    throw new ApiError(r.status, detail, retryAfter)
   }
   if (r.status === 204) return undefined as T
   const text = await r.text()

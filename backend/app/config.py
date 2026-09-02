@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     # "on" requires the shared operator password; "off" for deployments that
     # front the app with ingress authentication.
     auth: str = "on"
+    # Comma-separated IPs or CIDRs allowed to set X-Forwarded-For and
+    # X-Forwarded-Proto (the ingress). Overrides the Settings page value.
+    # Empty (the default) trusts nobody; see app/proxies.py.
+    trusted_proxies: str = ""
 
 
 settings = Settings()

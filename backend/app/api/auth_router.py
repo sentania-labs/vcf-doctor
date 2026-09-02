@@ -1,7 +1,8 @@
 from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from app import auth
+from app import auth, proxies
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -50,20 +51,30 @@ def setup(body: PasswordBody, request: Request, response: Response) -> dict:
     return {"ok": True}
 
 
+def _too_many(wait: int) -> JSONResponse:
+    return JSONResponse(
+        {"detail": f"too many failed attempts; try again in {wait}s", "retry_after": wait},
+        status_code=429,
+        headers={"Retry-After": str(wait)},
+    )
+
+
 @router.post("/login")
-def login(body: PasswordBody, request: Request, response: Response) -> dict:
+def login(body: PasswordBody, request: Request, response: Response):
     if not auth.configured():
         raise HTTPException(409, "no password set yet; use setup")
-    wait = auth.login_blocked()
+    ip = proxies.client_ip(request)
+    wait, stamp = auth.begin_attempt(ip)
     if wait:
-        raise HTTPException(
-            429,
-            f"too many failed attempts; try again in {wait}s",
-            headers={"Retry-After": str(wait)},
-        )
+        return _too_many(wait)
     ok = auth.verify_password(body.password)
-    auth.record_login(ok)
+    auth.finish_attempt(ip, stamp, ok)
     if not ok:
+        # Tell the caller now if the next attempt would be refused, so the
+        # login page can start its countdown without a wasted request.
+        wait = auth.login_blocked(ip)
+        if wait:
+            return _too_many(wait)
         raise HTTPException(401, "invalid password")
     _set_cookie(response, request)
     return {"ok": True}

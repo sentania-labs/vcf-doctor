@@ -160,8 +160,10 @@ jobs:
       # of kind "fixture" (bundled snapshot data) stand in for a vCenter.
       - name: Smoke test (fixture collector, no vCenter)
         run: |
+          # Trust the whole docker bridge so the forwarded-header checks below see a trusted peer.
           docker run -d --name smoke -p 8000:8000 \
             -e VCF_DOCTOR_TEST_FIXTURES=1 -e VCF_DOCTOR_ADMIN_PASSWORD=smoke-test-pass \
+            -e VCF_DOCTOR_TRUSTED_PROXIES=172.16.0.0/12 \
             vcf-doctor:ci
           for i in $(seq 1 30); do
             curl -fsS localhost:8000/api/health && break
@@ -182,13 +184,17 @@ jobs:
             localhost:8000/api/connections | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
           curl -fsS -b cj -H 'content-type: application/json' -d "{\"connection_id\":\"$cid\"}" localhost:8000/api/scan | grep -q '"status":"ok"'
           curl -fsS -b cj localhost:8000/api/overview | python3 -c 'import json,sys; o=json.load(sys.stdin); assert o["resource_total"] == 51, o["resource_total"]'
-          # Security headers on the UI and the API; HSTS only when the proxy says https.
+          # Security headers on the UI and the API; HSTS only when a trusted proxy says https.
           # (GET with dumped headers: the app does not answer HEAD.)
           hdr() { curl -fsS -o /dev/null -D - "$@"; }
           hdr localhost:8000/ | grep -qi '^content-security-policy: '
           hdr localhost:8000/api/health | grep -qi '^cache-control: no-store'
           if hdr localhost:8000/ | grep -qi '^strict-transport-security'; then echo 'HSTS sent on plain http'; exit 1; fi
           hdr -H 'X-Forwarded-Proto: https' localhost:8000/ | grep -qi '^strict-transport-security: max-age=31536000'
+          # Login lockout is per forwarded client: five wrong passwords lock one address, not the next.
+          for i in 1 2 3 4 5; do curl -s -o /dev/null -H 'content-type: application/json' -H 'X-Forwarded-For: 203.0.113.5' -d '{"password":"nope-nope"}' localhost:8000/api/auth/login; done
+          test "$(curl -s -o /dev/null -w '%{http_code}' -H 'content-type: application/json' -H 'X-Forwarded-For: 203.0.113.5' -d '{"password":"smoke-test-pass"}' localhost:8000/api/auth/login)" = 429
+          test "$(curl -s -o /dev/null -w '%{http_code}' -H 'content-type: application/json' -H 'X-Forwarded-For: 203.0.113.6' -d '{"password":"smoke-test-pass"}' localhost:8000/api/auth/login)" = 200
           # Runs as a non-root user.
           test "$(docker exec smoke id -u)" = 10001
 

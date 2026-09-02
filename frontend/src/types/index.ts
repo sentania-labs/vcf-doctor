@@ -109,6 +109,12 @@ export interface ConnectionTestResult { ok: boolean; message: string; version?: 
 export interface RetentionPolicy { recent_days: number; hourly_days: number; daily_days: number }
 // changes_min_significance: lowest significance the Changes page and Overview show by default (low = everything).
 export interface Settings { retention_policy: RetentionPolicy; assistant: AssistantSettings; changes_min_significance?: Significance }
+// Trusted proxies: addresses allowed to set X-Forwarded-For / X-Forwarded-Proto (the ingress).
+export interface TrustedProxies {
+  trusted_proxies: string[]; source: 'env' | 'settings'; stored: string[]; env_problem: string | null
+  // Where this request came from, so the page can point at the ingress.
+  peer: string | null; peer_trusted: boolean; ignored_forwarded_headers: boolean; scheme: string
+}
 export interface SettingsUpdate { retention_policy: RetentionPolicy; assistant: Partial<AssistantSettings> & { api_key?: string }; changes_min_significance?: Significance }
 export interface AssistantEvidenceCount { findings: number; changes: number; resources: number; events: number }
 export type AssistantStreamEvent =
