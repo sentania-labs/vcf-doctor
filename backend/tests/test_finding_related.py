@@ -102,7 +102,8 @@ def test_pruned_snapshots_do_not_hide_the_logged_cause(client):
     snapshots left, the introducing diff is still found in the log."""
     cid = _connection(client, 3)
     snaps = client.get(f"/api/snapshots?connection_id={cid}").json()
-    assert client.delete(f"/api/snapshots/{snaps[2]['id']}").status_code == 200
+    deleted = client.delete(f"/api/snapshots/{snaps[2]['id']}")
+    assert deleted.status_code == 200
     finding = _finding(client, cid, "HOST_DISCONNECTED")
     body = client.get(f"/api/findings/{finding['id']}/related?connection_id={cid}").json()
     assert body["window"]["scans_present"] == 2
@@ -116,7 +117,8 @@ def test_pruned_middle_snapshot_keeps_the_cause_in_the_query(client):
     pruned snapshot, between the surviving A and B. It must still be fetched."""
     cid = _connection(client, 3)
     snaps = client.get(f"/api/snapshots?connection_id={cid}").json()
-    assert client.delete(f"/api/snapshots/{snaps[1]['id']}").status_code == 200
+    deleted = client.delete(f"/api/snapshots/{snaps[1]['id']}")
+    assert deleted.status_code == 200
     finding = _finding(client, cid, "HOST_DISCONNECTED")
     body = client.get(f"/api/findings/{finding['id']}/related?connection_id={cid}").json()
     assert body["window"]["scans_present"] == 1
