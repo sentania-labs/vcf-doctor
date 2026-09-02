@@ -7,7 +7,7 @@ RUN npm ci
 COPY frontend/ .
 RUN npm run build
 
-FROM python:3.12-slim@sha256:e5c9fa26ffb76e11e0f054f30dc2523a2f9693f0c36c0cf1e39b27e152d899fc AS backend
+FROM python:3.14-slim@sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6 AS backend
 COPY --from=ghcr.io/astral-sh/uv:0.12.8 /uv /usr/local/bin/uv
 WORKDIR /app
 COPY backend/pyproject.toml ./
