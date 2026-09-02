@@ -91,15 +91,19 @@ def test_password_change_invalidates_old_sessions(tmp_path, monkeypatch):
 def test_login_backoff_after_repeated_failures(tmp_path, monkeypatch):
     from app import auth
 
-    auth.record_login(True)  # reset process state
+    auth.reset_login_state()
     with _client(tmp_path, monkeypatch) as c:
         c.post("/api/auth/setup", json={"password": "correct horse"})
         c.post("/api/auth/logout")
-        for _ in range(5):
+        for _ in range(4):
             assert c.post("/api/auth/login", json={"password": "wrong wrong"}).status_code == 401
+        # The fifth failure already answers 429 so the page can start counting down.
+        r = c.post("/api/auth/login", json={"password": "wrong wrong"})
+        assert r.status_code == 429 and r.headers["Retry-After"] == str(r.json()["retry_after"])
         r = c.post("/api/auth/login", json={"password": "correct horse"})
         assert r.status_code == 429 and "Retry-After" in r.headers
-    auth.record_login(True)
+        assert r.json()["retry_after"] >= 1
+    auth.reset_login_state()
 
 
 def test_docs_are_not_public(tmp_path, monkeypatch):

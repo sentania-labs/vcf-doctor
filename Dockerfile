@@ -25,4 +25,6 @@ EXPOSE 8000
 # /api/health needs no session. Uses the stdlib, so no curl in the image.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD python3 -c "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/api/health')"
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]
+# Forwarded headers are handled by the app (trusted proxies setting), not
+# by uvicorn, which would believe X-Forwarded-For from anyone.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-proxy-headers"]

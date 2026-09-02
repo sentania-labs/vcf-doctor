@@ -7,6 +7,7 @@ import { useAsync } from '@/hooks/useAsync'
 import { Badge, Button, Card, CardHeader, ErrorState, Field, Input, PageHeader, Select, Skeleton, Toggle } from '@/components/ui'
 import HealthScoreCard from '@/components/settings/HealthScoreCard'
 import EncryptionCard from '@/components/settings/EncryptionCard'
+import TrustedProxiesCard from '@/components/settings/TrustedProxiesCard'
 
 function AccessCard() {
   const { status } = useAuth()
@@ -199,6 +200,7 @@ export default function SettingsPage() {
 
           <EncryptionCard reloadKey={`${assistant.api_key_set}:${assistant.api_key_unreadable ?? false}`} />
           <AccessCard />
+          <TrustedProxiesCard />
           {err ? <p className="text-sm text-critical">{err}</p> : null}
         </div>
       )}

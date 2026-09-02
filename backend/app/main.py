@@ -8,13 +8,14 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app import auth, db, scheduler, vault
+from app import auth, db, proxies, scheduler, vault
 from app.api.auth_router import router as auth_router
 from app.api.encryption_router import router as encryption_router
 from app.api.environment_router import router as environment_router
 from app.api.events_router import router as events_router
 from app.api.findings_related import router as findings_related_router
 from app.api.health_score_router import router as health_score_router
+from app.api.proxies_router import router as proxies_router
 from app.api.router import router as api_router
 from app.config import settings
 from app.snapshots import store
@@ -101,12 +102,17 @@ async def security_headers(request: Request, call_next):
         # shared browser or proxy keep a copy.
         response.headers["Cache-Control"] = "no-store"
     if request.url.scheme == "https":
-        # uvicorn runs with --proxy-headers, so the scheme reflects the
-        # ingress's X-Forwarded-Proto. Plain-http deployments never see HSTS,
-        # which would otherwise lock a browser out of them for a year.
+        # The scheme reflects X-Forwarded-Proto only when it came from a
+        # trusted proxy (app/proxies.py). Plain-http deployments never see
+        # HSTS, which would otherwise lock a browser out of them for a year.
         response.headers["Strict-Transport-Security"] = HSTS
     return response
 
+
+# Outermost layer: decides what "client address" and "scheme" mean before
+# anything above looks at them. Registered last so it wraps the http
+# middlewares defined above.
+app.add_middleware(proxies.ForwardedHeadersMiddleware)
 
 app.include_router(auth_router)
 
@@ -132,6 +138,7 @@ app.include_router(health_score_router)
 app.include_router(environment_router)
 app.include_router(encryption_router)
 app.include_router(findings_related_router)
+app.include_router(proxies_router)
 
 try:
     from app.assistant.router import router as assistant_router

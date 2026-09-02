@@ -1,7 +1,6 @@
 """Browser-facing security headers are on every response, UI and API alike."""
 
 from fastapi.testclient import TestClient
-from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 EXPECTED = {
     "x-content-type-options": "nosniff",
@@ -68,10 +67,16 @@ def test_headers_present_on_401(tmp_path, monkeypatch):
         assert r.headers["x-frame-options"] == "DENY"
 
 
-def test_hsts_only_when_the_proxy_says_https(tmp_path, monkeypatch):
+def test_hsts_only_when_a_trusted_proxy_says_https(tmp_path, monkeypatch):
     main = _main(tmp_path, monkeypatch)
-    # Same wrapper uvicorn applies with --proxy-headers --forwarded-allow-ips '*'.
-    with TestClient(ProxyHeadersMiddleware(main.app, trusted_hosts="*")) as c:
+    from app.config import settings
+
+    # Untrusted peer (the default): the header is ignored, no HSTS.
+    with TestClient(main.app, client=("10.9.9.9", 4000)) as c:
+        r = c.get("/api/health", headers={"X-Forwarded-Proto": "https"})
+        assert "strict-transport-security" not in r.headers
+    monkeypatch.setattr(settings, "trusted_proxies", "10.9.9.0/24")
+    with TestClient(main.app, client=("10.9.9.9", 4000)) as c:
         assert "strict-transport-security" not in c.get("/api/health").headers
         plain = c.get("/api/health", headers={"X-Forwarded-Proto": "http"})
         assert "strict-transport-security" not in plain.headers

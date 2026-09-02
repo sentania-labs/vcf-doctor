@@ -61,6 +61,7 @@ Environment variables (all optional):
 | `ANTHROPIC_API_KEY` | unset | Enables the Claude assistant. A key entered in Settings takes precedence. |
 | `VCF_DOCTOR_AUTH` | `on` | `off` disables the login page (use only behind ingress auth) |
 | `VCF_DOCTOR_ADMIN_PASSWORD` | unset | Seeds the operator password on first boot; otherwise the UI asks on first visit |
+| `VCF_DOCTOR_TRUSTED_PROXIES` | unset (trust nobody) | Comma-separated IPs or CIDRs (the ingress) whose `X-Forwarded-For` and `X-Forwarded-Proto` are believed. Overrides the Settings page value. |
 | `VCF_DOCTOR_LLM_MODEL` | `claude-opus-5` | Default assistant model; changeable in Settings |
 | `VCF_DOCTOR_RETENTION_RECENT_DAYS` | `14` | Default retention tier: every scheduled snapshot younger than this is kept; changeable in Settings |
 | `VCF_DOCTOR_RETENTION_HOURLY_DAYS` | `30` | Between recent and this age, one scheduled snapshot per hour is kept |
@@ -79,6 +80,15 @@ about a specific vCenter belongs in a manifest.
 
 **Access.** A single shared operator password gates the UI and API (session
 cookie, 7 days, PBKDF2 hash, signing secret rotated on password change).
+Failed sign-ins are counted per client address: five, then an exponential
+wait capped at a minute, reported back as `Retry-After` and counted down on
+the login page. A process-wide ceiling (30 failures a minute across every
+address) backstops guessing from many addresses. The client address is the
+TCP peer unless that peer is a trusted proxy (Settings, or
+`VCF_DOCTOR_TRUSTED_PROXIES`), in which case the rightmost untrusted
+`X-Forwarded-For` hop is used. Nothing is trusted by default, so behind an
+ingress every visitor shares the ingress's address and one lockout; trust
+the ingress and each visitor gets their own.
 Generated scripts are never executed. Per-user accounts are a follow-up issue.
 
 **Secrets at rest.** vCenter passwords and the Anthropic key (when entered via
@@ -100,8 +110,9 @@ same-origin Content-Security-Policy (`default-src 'self'`, no inline or
 external scripts, `frame-ancestors 'none'`; inline styles stay allowed
 because React and Tailwind set style attributes). `/api` responses are
 `Cache-Control: no-store`. `Strict-Transport-Security` (one year) is sent
-only when the ingress reports `X-Forwarded-Proto: https`, so a plain-http
-lab deployment is never locked out.
+only when a trusted proxy reports `X-Forwarded-Proto: https`, so a plain-http
+lab deployment is never locked out and a visitor cannot switch it on by
+sending the header themselves.
 
 **Gates in CI** (all GitHub-hosted, all via `make`, so a developer and CI run
 the same command):
