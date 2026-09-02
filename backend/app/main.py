@@ -110,6 +110,12 @@ async def security_headers(request: Request, call_next):
 app.include_router(auth_router)
 
 
+@app.exception_handler(vault.KeyUnavailable)
+async def key_unavailable(request: Request, exc: vault.KeyUnavailable):
+    """Saving a secret with no usable encryption key is refused, not crashed."""
+    return JSONResponse({"detail": str(exc)}, status_code=503)
+
+
 @app.get("/api/health")
 def health() -> dict:
     return {

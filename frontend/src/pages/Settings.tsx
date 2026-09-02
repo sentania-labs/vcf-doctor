@@ -190,10 +190,10 @@ export default function SettingsPage() {
               <Field label="Anthropic API key" hint="Write-only. The key is stored on the server and never shown again. A key saved here takes precedence over the ANTHROPIC_API_KEY environment variable; clear it to fall back to the environment.">
                 <div className="flex items-center gap-3">
                   <Input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder={assistant.api_key_set ? 'Enter a new key to replace the stored one' : 'sk-ant-...'} autoComplete="new-password" disabled={assistant.provider === 'mock'} />
-                  <Badge tone={assistant.api_key_unreadable ? 'critical' : assistant.api_key_set ? 'ok' : 'neutral'} className="shrink-0"><KeyRound size={11} /> {assistant.api_key_unreadable ? 'Re-enter key' : assistant.api_key_set ? 'Key set' : 'No key'}</Badge>
+                  <Badge tone={assistant.api_key_unreadable ? 'critical' : assistant.api_key_set ? 'ok' : 'neutral'} className="shrink-0"><KeyRound size={11} /> {assistant.api_key_unreadable ? (assistant.api_key_set ? 'Re-enter key (env in use)' : 'Re-enter key') : assistant.api_key_set ? 'Key set' : 'No key'}</Badge>
                 </div>
               </Field>
-              {assistant.api_key_unreadable ? <p className="text-sm text-critical bg-critical-bg rounded-md px-3 py-2" role="alert">The stored API key was encrypted with a different key and cannot be read. Enter it again to store it under the current encryption key.</p> : null}
+              {assistant.api_key_unreadable ? <p className="text-sm text-critical bg-critical-bg rounded-md px-3 py-2" role="alert">The stored API key was encrypted with a different key and cannot be read.{assistant.api_key_set ? ' The ANTHROPIC_API_KEY environment variable is being used meanwhile.' : ''} Enter it again to store it under the current encryption key.</p> : null}
             </div>
           </Card>
 

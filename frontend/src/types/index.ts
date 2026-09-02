@@ -130,6 +130,6 @@ export interface EnvironmentChanges {
 }
 // Secrets at rest (Settings > Encryption). Never carries the key itself.
 export interface EncryptionStatus {
-  enabled: boolean; key_source: 'env' | 'file'; key_env_var: string; key_file: string | null
-  unreadable_connections: string[]; assistant_key_unreadable: boolean
+  enabled: boolean; key_source: 'env' | 'file'; key_env_var: string; key_file: string | null; key_error?: string | null
+  unreadable_connections: string[]; assistant_key_unreadable: boolean; assistant_env_fallback?: boolean
 }

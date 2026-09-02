@@ -47,6 +47,12 @@ class SecretUnreadable(Exception):
     """The stored value is encrypted but the current key cannot open it."""
 
 
+class KeyUnavailable(Exception):
+    """No usable encryption key: the key file is corrupt or unreadable, or the
+    environment value is malformed. Reads degrade to "needs credentials";
+    writes are refused (API maps this to 503) until the operator fixes the key."""
+
+
 _lock = threading.Lock()
 # (env value, db path) -> (Fernet, source, key file path). Re-derived when either
 # input changes, which is what tests do when they point db at a temp file.
@@ -69,8 +75,14 @@ def _normalise(raw: str) -> bytes:
 
 
 def _read_key_file(path: Path) -> bytes:
-    data = path.read_text().strip().encode()
-    Fernet(data)  # raises if the file is corrupt; better to fail loudly here
+    try:
+        data = path.read_text().strip().encode()
+        Fernet(data)
+    except (OSError, ValueError) as exc:
+        raise KeyUnavailable(
+            f"encryption key file {path} is unreadable or corrupt ({exc.__class__.__name__}); "
+            "restore it from backup, or remove it to generate a new key and re-enter credentials"
+        ) from exc
     if stat.S_IMODE(path.stat().st_mode) & 0o077:
         log.warning("encryption key file %s is readable by others; expected mode 0600", path)
     return data
@@ -81,17 +93,24 @@ def _load_or_create_key_file(path: Path) -> bytes:
         return _read_key_file(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     key = Fernet.generate_key()
+    # Write a private temp file, fsync it, then link it into place. The link
+    # is atomic and exclusive, so a crash mid-write never leaves a half key
+    # file behind and two processes racing at first boot agree on one key.
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     try:
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    except FileExistsError:
-        # Another process (a second replica, a race at first boot) won; use its key.
-        return _read_key_file(path)
-    try:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(fd, "w") as fh:
             fh.write(key.decode() + "\n")
-    except Exception:
-        path.unlink(missing_ok=True)
-        raise
+            fh.flush()
+            os.fsync(fh.fileno())
+        try:
+            os.link(tmp, path)
+        except FileExistsError:
+            return _read_key_file(path)
+    except OSError as exc:
+        raise KeyUnavailable(f"cannot create encryption key file {path}: {exc}") from exc
+    finally:
+        tmp.unlink(missing_ok=True)
     log.warning(
         "generated encryption key file %s; back it up or set %s in the environment",
         path,
@@ -116,8 +135,17 @@ def _resolve() -> tuple[Fernet, KeySource, Path | None]:
         return resolved
 
 
+def key_error() -> str | None:
+    """Why no key is usable, or None when everything is fine."""
+    try:
+        _resolve()
+        return None
+    except KeyUnavailable as exc:
+        return str(exc)
+
+
 def key_source() -> KeySource:
-    return _resolve()[1]
+    return "env" if os.environ.get(ENV_KEY, "").strip() else "file"
 
 
 def is_encrypted(stored: str | None) -> bool:
@@ -134,10 +162,10 @@ def decrypt(stored: str) -> str:
     row written by an older build still works until startup migration runs."""
     if not is_encrypted(stored):
         return stored
-    fernet, _, _ = _resolve()
     try:
+        fernet, _, _ = _resolve()
         return fernet.decrypt(stored[len(PREFIX) :].encode()).decode()
-    except InvalidToken as exc:
+    except (InvalidToken, KeyUnavailable) as exc:
         raise SecretUnreadable("stored secret cannot be decrypted with the current key") from exc
 
 

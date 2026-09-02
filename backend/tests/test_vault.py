@@ -171,7 +171,10 @@ def test_api_surfaces_status_and_never_the_key(monkeypatch):
         t = client.post(f"/api/connections/{conn.id}/test").json()
         assert t["ok"] is False and "re-enter" in t["message"]
         run = client.post("/api/scan", json={"connection_id": conn.id}).json()[0]
-        assert run["status"] == "error" and "re-enter" in run["error"]
+        assert run["status"] == "skipped" and "re-enter" in run["error"]
+        assert client.get(f"/api/connections/{conn.id}/schedule").json()["last_status"] == "skipped"
+        for path in ("/api/settings/encryption", "/api/connections", "/api/scans"):
+            assert os.environ[vault.ENV_KEY] not in client.get(path).text
         # Re-enter through the API; everything clears.
         r = client.put(f"/api/connections/{conn.id}", json={"password": "again"})
         assert r.json()["needs_credentials"] is False
@@ -188,3 +191,52 @@ def test_startup_migrates_plaintext(tmp_path):
         pass
     assert _raw_password(conn.id).startswith(vault.PREFIX)
     assert store.get_connection(conn.id).password == "legacy"
+
+
+def test_env_fallback_is_reported_not_flagged_as_broken(monkeypatch):
+    from app.main import app
+
+    assistant_settings.update_settings({"api_key": SECRET})
+    _rotate_key(monkeypatch)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-env-0000")
+    with TestClient(app) as client:
+        body = client.get("/api/settings/encryption").json()
+        assert body["assistant_key_unreadable"] is True and body["assistant_env_fallback"] is True
+        a = client.get("/api/settings").json()["assistant"]
+        assert a["api_key_set"] is True and a["api_key_unreadable"] is True
+
+
+def test_corrupt_key_file_degrades_instead_of_crashing():
+    from app.main import app
+
+    conn = _conn()
+    vault.reset_for_tests()
+    vault.key_file_path().write_text("not a key\n")
+    # Startup, listing, and status all survive; the connection is flagged.
+    with TestClient(app) as client:
+        body = client.get("/api/settings/encryption").json()
+        assert body["key_error"] and "corrupt" in body["key_error"]
+        assert body["unreadable_connections"] == [conn.id]
+        assert "not a key" not in body["key_error"]  # names the path, never the contents
+        # Saving a secret is refused with a clear message, not a 500.
+        r = client.put(f"/api/connections/{conn.id}", json={"password": "x"})
+        assert r.status_code == 503 and "key file" in r.json()["detail"]
+        r = client.put("/api/settings", json={"assistant": {"api_key": "sk-ant-new"}})
+        assert r.status_code == 503
+
+
+def test_empty_password_migrates_and_roundtrips():
+    conn = _conn(password="")
+    with db.transaction() as c:
+        c.execute("UPDATE connections SET password = '' WHERE id = ?", (conn.id,))
+    assert vault.migrate_plaintext() == 1
+    loaded = store.get_connection(conn.id)
+    assert loaded.password == "" and loaded.credentials_unreadable is False
+
+
+def test_key_file_write_is_atomic_no_temp_left_behind():
+    vault.encrypt("x")
+    path = vault.key_file_path()
+    siblings = path.parent.iterdir()
+    leftovers = [p.name for p in siblings if p.name.startswith(path.name) and p != path]
+    assert leftovers == []

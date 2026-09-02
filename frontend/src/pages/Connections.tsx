@@ -107,7 +107,7 @@ function ConnectionCard({ c, onDelete }: { c: ConnectionPublic; onDelete: () => 
           <p className="text-sm text-muted mt-0.5 font-mono">{c.username} @ {c.host}{c.verify_tls ? '' : '  (TLS verify off)'}</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button size="sm" onClick={() => { setPwOpen(o => !o); setPwMsg(null) }} title="Update the stored password"><KeyRound size={13} /> Password</Button>
+          <Button size="sm" onClick={() => { setPwOpen(o => c.needs_credentials ? true : !o); setPwMsg(null) }} title="Update the stored password"><KeyRound size={13} /> Password</Button>
           <Button size="sm" onClick={() => void runTest()} loading={testing} disabled={!!c.needs_credentials}>Test</Button>
           <button onClick={onDelete} className="text-faint hover:text-critical transition-colors p-1.5 rounded" title="Remove connection"><Trash2 size={15} /></button>
         </div>
