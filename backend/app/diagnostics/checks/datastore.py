@@ -12,6 +12,13 @@ class DatastoreHighUsage(DiagnosticCheck):
     id = "DATASTORE_HIGH_USAGE"
     name = "Datastore high usage"
     description = "A datastore is above 85% (warning) or 95% (critical) used."
+    resource_type = "datastore"
+
+    def applicable(
+        self, resources: list[Resource], previous: list[Resource] | None = None
+    ) -> list[Resource]:
+        # Usage is only judged when capacity and free space are both known.
+        return [ds for ds in by_type(resources, "datastore") if datastore_usage_pct(ds) is not None]
 
     def evaluate(
         self, resources: list[Resource], previous: list[Resource] | None = None
@@ -49,6 +56,7 @@ class DatastoreInaccessible(DiagnosticCheck):
     id = "DATASTORE_INACCESSIBLE"
     name = "Datastore inaccessible"
     description = "A datastore is reported as inaccessible."
+    resource_type = "datastore"
 
     def evaluate(
         self, resources: list[Resource], previous: list[Resource] | None = None

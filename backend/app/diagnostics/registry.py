@@ -19,6 +19,21 @@ def list_checks() -> list[dict]:
     return [{"id": c.id, "name": c.name, "description": c.description} for c in get_checks()]
 
 
+def coverage(resources: list[Resource], previous: list[Resource] | None = None) -> dict[str, int]:
+    """check id -> number of objects that check judged on this snapshot. Zero
+    means the check did not evaluate anything (the health score treats it as
+    not evaluated). A check whose applicable() raises is reported as zero so
+    one bad check cannot poison the score."""
+    out: dict[str, int] = {}
+    for check in get_checks():
+        try:
+            out[check.id] = len(check.applicable(resources, previous))
+        except Exception:  # noqa: BLE001 - mirror run_all: never sink the overview
+            log.exception("check %s applicable() failed; counting as not evaluated", check.id)
+            out[check.id] = 0
+    return out
+
+
 def run_all(resources: list[Resource], previous: list[Resource] | None = None) -> list[Finding]:
     """Run every registered check. Output is deterministic: sorted by severity
     (critical first), then check id, then resource id. One check raising does
@@ -42,4 +57,4 @@ def run_all(resources: list[Resource], previous: list[Resource] | None = None) -
     return findings
 
 
-__all__ = ["get_checks", "list_checks", "run_all"]
+__all__ = ["coverage", "get_checks", "list_checks", "run_all"]

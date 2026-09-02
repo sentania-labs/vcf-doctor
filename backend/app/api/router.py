@@ -11,7 +11,7 @@ from app import db, scheduler
 from app.assistant import settings as assistant_settings
 from app.collectors.registry import CollectorUnavailable, get_collector
 from app.config import settings
-from app.diagnostics.registry import list_checks
+from app.diagnostics.scoring import compute_health
 from app.models import (
     AssistantSettings,
     Connection,
@@ -55,6 +55,23 @@ def _latest_resources(connection_id: str | None) -> list[Resource]:
         snap = store.latest_snapshot(conn.id)
         if snap:
             out.extend(snap.resources)
+    return out
+
+
+def _check_coverage(connection_id: str | None) -> dict[str, int]:
+    """Objects each check evaluated on the latest snapshot(s), summed across
+    connections. Checks that compare against the previous snapshot count the
+    previous snapshot's objects, and zero when there is none."""
+    from app.diagnostics.registry import coverage
+
+    out: dict[str, int] = {}
+    for conn in _target_connections(connection_id):
+        snaps = store.latest_snapshots(conn.id, 2)
+        if not snaps:
+            continue
+        previous = snaps[1].resources if len(snaps) > 1 else None
+        for check_id, n in coverage(snaps[0].resources, previous).items():
+            out[check_id] = out.get(check_id, 0) + n
     return out
 
 
@@ -506,12 +523,12 @@ def overview(
     free = sum(float(r.properties.get("freeSpace") or 0) for r in stores)
     storage_free_pct = round(free / capacity * 100, 1) if capacity else None
 
-    score = max(0, 100 - 15 * by_sev["critical"] - 5 * by_sev["warning"])
+    health = compute_health(findings, _check_coverage(connection_id))
     last_scan = store.latest_run(connection_id)
-    checks_with_findings = {f.check_id for f in findings}
-    by_sev["passed"] = max(0, len(list_checks()) - len(checks_with_findings))
+    by_sev["passed"] = health["passed"]
     return {
-        "health_score": score,
+        "health_score": health["score"],
+        "health": health,
         "counts": by_sev,
         "resource_counts": by_type,
         "resource_total": len(resources),

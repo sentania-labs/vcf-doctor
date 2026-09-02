@@ -3,6 +3,7 @@ import { apiGet } from './client'
 import { qs } from '@/lib/format'
 import { USE_MOCKS, delay, mockEstate, mockState } from './mocks'
 import { SIGNIFICANCE_RANK } from './changes'
+import { DEFAULT_HEALTH_WEIGHTS, HEALTH_FORMULA } from './healthScore'
 
 // minSignificance filters recent_changes; omitted means the backend applies the Settings default.
 export function getOverview(connectionId?: string | null, minSignificance?: Significance): Promise<Overview> {
@@ -28,8 +29,14 @@ export function getOverview(connectionId?: string | null, minSignificance?: Sign
     const score = Math.max(0, 100 - counts.critical * 25 - counts.warning * 6 - counts.info * 1)
     const last = estates.map(e => e.schedule.last_run).filter(Boolean).sort().at(-1) ?? null
     const order = { critical: 0, warning: 1, info: 2 }
+    const checkIds = [...new Set(findings.map(f => f.check_id))]
+    const health = {
+      score, passed: Math.max(0, counts.passed - 3), findings: checkIds.length, not_evaluated: 3,
+      deduction: 100 - score, weights: { ...DEFAULT_HEALTH_WEIGHTS }, formula: HEALTH_FORMULA,
+      checks: checkIds.map(id => ({ check_id: id, evaluated: 4, findings: findings.filter(f => f.check_id === id).length, deduction: 10 })),
+    }
     return delay({
-      health_score: score, counts, resources: { total: resources.length, by_type },
+      health_score: score, health, counts, resources: { total: resources.length, by_type },
       hosts_connected: hosts.filter(h => h.properties.connectionState === 'connected').length, hosts_total: hosts.length,
       vms_on: vms.filter(v => v.properties.powerState === 'poweredOn').length, vms_total: vms.length,
       storage_free_pct: cap ? Math.round((free / cap) * 100) : null, last_scan: last,

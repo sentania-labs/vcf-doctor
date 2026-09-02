@@ -1,7 +1,7 @@
 import { Link, useNavigate } from 'react-router-dom'
-import { ArrowRight, Boxes, HardDrive, MonitorSmartphone, Plug, Server } from 'lucide-react'
+import { ArrowRight, Boxes, HardDrive, Info, MonitorSmartphone, Plug, Server } from 'lucide-react'
 import { getChangesMinSignificance, getEvents, getOverview } from '@/api'
-import type { Event } from '@/types'
+import type { Event, Overview } from '@/types'
 import { useAsync } from '@/hooks/useAsync'
 import { useAppState } from '@/state/AppState'
 import { Button, Card, CardHeader, EmptyState, ErrorState, Skeleton } from '@/components/ui'
@@ -69,11 +69,11 @@ export default function OverviewPage() {
             {d ? <>
               <p className={cn('text-xl font-semibold tracking-tight leading-snug', verdictTone)}>{verdict}</p>
               <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm">
-                <Row dot="bg-ok" label="passed" n={d.counts.passed} />
                 <Row dot="bg-critical" label="critical" n={d.counts.critical} />
                 <Row dot="bg-warning" label={d.counts.warning === 1 ? 'warning' : 'warnings'} n={d.counts.warning} />
                 <Row dot="bg-info" label="info" n={d.counts.info} />
               </dl>
+              <HealthChecks health={d.health} />
             </> : <div className="space-y-2"><Skeleton className="h-6 w-56" /><Skeleton className="h-4 w-40" /><Skeleton className="h-4 w-32" /></div>}
           </div>
         </Card>
@@ -136,9 +136,35 @@ export default function OverviewPage() {
   )
 }
 
-function Row({ dot, label, n }: { dot: string; label: string; n: number }) {
+// Checks passed / with findings / not evaluated, with the score formula on hover
+// so an operator can explain the number. Not evaluated means the check had no
+// applicable objects (or needs a previous snapshot); it is not a pass.
+function HealthChecks({ health }: { health: Overview['health'] }) {
+  const worst = health.checks.filter(c => c.deduction > 0).slice(0, 3)
+  const tip = [
+    health.formula,
+    `Weights: critical ${health.weights.critical}, warning ${health.weights.warning}, info ${health.weights.info} (Settings).`,
+    worst.length ? 'Largest deductions: ' + worst.map(c => `${c.check_id} ${c.findings}/${c.evaluated} (-${c.deduction})`).join('; ') + '.' : '',
+  ].filter(Boolean).join('\n')
   return (
-    <div className="flex items-center gap-2.5">
+    <div className="mt-3 pt-3 border-t border-border text-sm">
+      <div className="flex items-center gap-1.5 text-xs uppercase tracking-wider text-faint font-semibold">
+        Checks
+        <span title={tip} aria-label="How the score is calculated" className="inline-flex cursor-help text-muted"><Info size={13} /></span>
+      </div>
+      <dl className="mt-1.5 grid grid-cols-3 gap-x-4 gap-y-1">
+        <Row dot="bg-ok" label="passed" n={health.passed} />
+        <Row dot="bg-critical" label="findings" n={health.findings} />
+        <Row dot="bg-surface-3" label="not evaluated" n={health.not_evaluated} title="No applicable objects on the last scan, or the check compares against a previous snapshot that does not exist yet." />
+      </dl>
+      <p className="mt-1.5 text-xs text-faint">Score is 100 minus {health.deduction} lost across checks with findings, weighted by severity and by the share of objects affected.</p>
+    </div>
+  )
+}
+
+function Row({ dot, label, n, title }: { dot: string; label: string; n: number; title?: string }) {
+  return (
+    <div className="flex items-center gap-2.5" title={title}>
       <span className={cn('h-2 w-2 rounded-full', dot)} />
       <span className="font-semibold tnum w-8">{n}</span>
       <span className="text-muted">{label}</span>

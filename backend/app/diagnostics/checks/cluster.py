@@ -11,6 +11,16 @@ class ClusterHostCountChange(DiagnosticCheck):
     id = "CLUSTER_HOST_COUNT_CHANGE"
     name = "Cluster host count changed"
     description = "The number of hosts in a cluster differs from the previous snapshot."
+    resource_type = "cluster"
+
+    def applicable(
+        self, resources: list[Resource], previous: list[Resource] | None = None
+    ) -> list[Resource]:
+        # Needs a previous snapshot; only clusters present in both are compared.
+        if previous is None:
+            return []
+        before = cluster_members(previous)
+        return [c for c in by_type(resources, "cluster") if c.id in before]
 
     def evaluate(
         self, resources: list[Resource], previous: list[Resource] | None = None
@@ -57,6 +67,7 @@ class HostCountLow(DiagnosticCheck):
     id = "HOST_COUNT_LOW"
     name = "Cluster host count low"
     description = f"A cluster has fewer than {MIN_HOSTS} hosts and cannot tolerate a failure."
+    resource_type = "cluster"
 
     def evaluate(
         self, resources: list[Resource], previous: list[Resource] | None = None
@@ -91,6 +102,13 @@ class ClusterHaDisabled(DiagnosticCheck):
     id = "CLUSTER_HA_DISABLED"
     name = "Cluster HA disabled"
     description = "vSphere HA is disabled on a cluster."
+    resource_type = "cluster"
+
+    def applicable(
+        self, resources: list[Resource], previous: list[Resource] | None = None
+    ) -> list[Resource]:
+        clusters = by_type(resources, "cluster")
+        return [c for c in clusters if c.properties.get("haEnabled") is not None]
 
     def evaluate(
         self, resources: list[Resource], previous: list[Resource] | None = None
@@ -128,6 +146,13 @@ class ClusterDrsDisabled(DiagnosticCheck):
     id = "CLUSTER_DRS_DISABLED"
     name = "Cluster DRS disabled"
     description = "vSphere DRS is disabled on a cluster."
+    resource_type = "cluster"
+
+    def applicable(
+        self, resources: list[Resource], previous: list[Resource] | None = None
+    ) -> list[Resource]:
+        clusters = by_type(resources, "cluster")
+        return [c for c in clusters if c.properties.get("drsEnabled") is not None]
 
     def evaluate(
         self, resources: list[Resource], previous: list[Resource] | None = None

@@ -18,6 +18,15 @@ class NetworkRemoved(DiagnosticCheck):
     id = "NETWORK_REMOVED"
     name = "Network removed"
     description = "A network present in the previous snapshot is gone."
+    resource_type = "network"
+
+    def applicable(
+        self, resources: list[Resource], previous: list[Resource] | None = None
+    ) -> list[Resource]:
+        # The objects judged are the previous snapshot's networks.
+        if previous is None:
+            return []
+        return [r for r in previous if r.type in NETWORK_TYPES]
 
     def evaluate(
         self, resources: list[Resource], previous: list[Resource] | None = None
@@ -63,6 +72,18 @@ class ResourceRemoved(DiagnosticCheck):
     id = "RESOURCE_REMOVED"
     name = "Resource removed"
     description = "A resource present in the previous snapshot is gone."
+
+    def applicable(
+        self, resources: list[Resource], previous: list[Resource] | None = None
+    ) -> list[Resource]:
+        # The objects judged are the previous snapshot's non-network resources
+        # (vCLS VMs excluded, as in evaluate).
+        if previous is None:
+            return []
+        return [
+            r for r in previous
+            if r.type not in NETWORK_TYPES and not (r.type == "vm" and r.name.startswith("vCLS"))
+        ]
 
     def evaluate(
         self, resources: list[Resource], previous: list[Resource] | None = None
