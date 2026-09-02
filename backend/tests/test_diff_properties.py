@@ -214,7 +214,7 @@ def test_cluster_flags_are_high_and_automation_level_medium():
     )
     assert c.significance == "medium"
     c = one(res("cluster", "c", evcMode=None), res("cluster", "c", evcMode="intel-skylake"))
-    assert c.significance == "medium" and c.summary == "evcMode none -> intel-skylake"
+    assert c.significance == "medium" and c.summary == "evcMode unknown -> intel-skylake"
 
 
 # ------------------------------------------------------------ lists of dicts
@@ -404,7 +404,7 @@ def test_dict_item_with_nested_values_compares_without_crashing():
 
 def test_bool_versus_string_scalars_and_none_scalars():
     c = one(res("vm", "v", template=None), res("vm", "v", template=True))
-    assert c.significance == "low" and c.summary == "template none -> true"
+    assert c.significance == "low" and c.summary == "template unknown -> true"
     c = one(res("vm", "v", numCpu="2"), res("vm", "v", numCpu=4))
     assert c.summary == "numCpu 2 -> 4"
 
@@ -414,6 +414,77 @@ def test_host_cluster_with_unusual_property_shape_does_not_crash():
     new = res("host", "h", cluster=["wld01"])
     changes = diff([old], [new])
     assert changes == [] or changes[0].resource_id == "host:vc01:h"
+
+
+# ------------------------------------------------------------ issue #9 edge cases
+
+
+def test_dict_elements_in_scalar_list_do_not_crash_and_render_whole():
+    # networks is id-valued, so its items are normally shortened at the last
+    # colon. A dict rendered as JSON also has colons and must be shown whole.
+    old = res("vm", "v", networks=[{"a": 1}])
+    new = res("vm", "v", networks=[{"a": 2}, {"b": [1, {"c": None}]}])
+    c = one(old, new)
+    assert c.summary == 'networks added {"a": 2}, {"b": [1, {"c": null}]}; removed {"a": 1}'
+    assert c.property_changes["networks"].old == [{"a": 1}]
+    # Real ids still shorten.
+    c = one(res("vm", "v", networks=["net:vc01:a"]), res("vm", "v", networks=["net:vc01:b"]))
+    assert c.summary == "networks added b; removed a"
+
+
+def test_mixed_type_list_with_nested_none_and_tuples():
+    old = res("vm", "v", networks=[1, "a", None, {"z": 1}, [1, 2]])
+    new = res("vm", "v", networks=["a", 2.5, None, (1, 2)])
+    c = one(old, new)
+    assert c.summary == 'networks added 2.5; removed 1, {"z": 1}'
+
+
+def test_none_capacity_formats_as_unknown_not_zero():
+    unknown = res("datastore", "ds", capacity=None, freeSpace=None, accessible=True)
+    known = res("datastore", "ds", capacity=1000, freeSpace=5, accessible=True)
+    c = one(unknown, known)
+    assert c.summary == "capacity unknown -> 1000; usage unknown -> 99.5%"
+    assert c.property_changes["usagePct"].old is None
+    assert c.property_changes["usagePct"].new == 99.5
+    # Two unknowns are not a change.
+    assert diff([unknown], [unknown]) == []
+    c = one(res("vm", "v", numCpu=None), res("vm", "v", numCpu=4))
+    assert c.summary == "numCpu unknown -> 4"
+    c = one(res("host", "h", memoryBytes=8), res("host", "h", memoryBytes=None))
+    assert c.summary == "memoryBytes 8 -> unknown"
+
+
+def test_type_change_on_same_id_is_removed_plus_added():
+    old = Resource(
+        id="x", type="host", name="a", source=SRC, properties={"connectionState": "connected"}
+    )
+    new = Resource(
+        id="x", type="vm", name="a", source=SRC, properties={"powerState": "poweredOn"}
+    )
+    changes = diff([old], [new])
+    assert [(c.change_type, c.resource_type, c.significance) for c in changes] == [
+        ("removed", "host", "high"),
+        ("added", "vm", "low"),
+    ]
+    assert all(c.property_changes == {} for c in changes)
+    assert diff([old], [new], min_significance="medium") == [changes[0]]
+
+
+def test_empty_list_versus_none_is_not_a_change():
+    assert diff([res("vm", "v", networks=[])], [res("vm", "v")]) == []
+    assert diff([res("vm", "v")], [res("vm", "v", networks=[])]) == []
+    assert diff([res("vm", "v", disks=[])], [res("vm", "v", disks=None)]) == []
+    # An empty list becoming a populated one is still a change.
+    c = one(res("vm", "v", disks=[]), res("vm", "v", disks=[{"label": "Hard disk 1"}]))
+    assert c.summary == "Hard disk 1 added"
+
+
+def test_dict_list_items_with_unhashable_or_none_keys_do_not_crash():
+    old = res("vm", "v", disks=[{"label": ["a"], "x": 1}, {"label": None, "x": None}])
+    new = res("vm", "v", disks=[{"label": {"k": 1}, "x": 2}, {"label": None, "x": {"y": None}}])
+    c = one(old, new)
+    assert c.significance == "medium"
+    assert "added" in c.summary and "removed" in c.summary
 
 
 # ------------------------------------------------------------ min_significance
@@ -487,3 +558,8 @@ def test_unknown_side_is_not_a_change():
         )
         == []
     )
+
+
+def test_ids_with_spaces_still_shorten():
+    c = one(res("vm", "v", host="host:vc01:esx 01"), res("vm", "v", host="host:vc01:esx 02"))
+    assert c.summary == "host esx 01 -> esx 02"
