@@ -94,8 +94,15 @@ HSTS = "max-age=31536000"
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
     """Registered after require_session so it is the outer layer: the 401
-    responses above carry the same headers as everything else."""
-    response = await call_next(request)
+    responses above, and an unhandled-exception 500, carry the same headers
+    as everything else. call_next re-raises framework exceptions instead of
+    returning a response, so those are caught here rather than left to
+    Starlette's outer ServerErrorMiddleware, which never sees this layer."""
+    try:
+        response = await call_next(request)
+    except Exception:
+        log.exception("unhandled error while serving %s", request.url.path)
+        response = JSONResponse({"detail": "internal server error"}, status_code=500)
     for name, value in SECURITY_HEADERS.items():
         response.headers[name] = value
     if request.url.path.startswith("/api/"):

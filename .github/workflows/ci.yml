@@ -83,14 +83,14 @@ jobs:
           fail-on-severity: high
           comment-summary-in-pr: on-failure
 
+  # Builds and validates the image for every PR and push. Runs PR-controlled
+  # code (Docker build, make scan-image, the smoke-test shell) without any
+  # elevated token: id-token/packages/attestations write live only in the
+  # push-only `publish` job below, so a same-repo PR can never mint an OIDC
+  # certificate through this workflow.
   image:
     needs: [checks, scan]
     runs-on: ubuntu-latest
-    permissions:
-      contents: write # tag + release on main
-      packages: write # push to GHCR
-      id-token: write # keyless cosign (Fulcio/Rekor) needs the OIDC token
-      attestations: write # provenance / SBOM attestations
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
@@ -146,8 +146,22 @@ jobs:
         if: always()
         run: docker logs smoke || true; docker rm -f smoke || true
 
+  # Main-branch pushes only. Split out of `image` so the OIDC token and
+  # write scopes below are never granted to a PR-triggered run.
+  publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # tag + release on main
+      packages: write # push to GHCR
+      id-token: write # keyless cosign (Fulcio/Rekor) needs the OIDC token
+      attestations: write # provenance / SBOM attestations
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
       - name: Compute tags
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         id: tags
         run: |
           VERSION="v0.1.${{ github.run_number }}"
@@ -156,18 +170,17 @@ jobs:
           echo "list=$IMAGE:$VERSION,$IMAGE:sha-$SHORT,$IMAGE:latest" >> "$GITHUB_OUTPUT"
 
       - name: Login to GHCR
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Same build cache as the scanned/smoked image. The pushed index carries a
-      # max-mode SLSA provenance attestation and an SPDX SBOM, both attached to
-      # the digest and readable with `docker buildx imagetools inspect`.
+      # Same build cache as the scanned/smoked image from the `image` job. The
+      # pushed index carries a max-mode SLSA provenance attestation and an SPDX
+      # SBOM, both attached to the digest and readable with
+      # `docker buildx imagetools inspect`.
       - name: Publish
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         id: publish
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
@@ -179,7 +192,6 @@ jobs:
           sbom: true
 
       - name: Install cosign
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
 
       # Keyless: the signature is bound to this workflow's OIDC identity and
@@ -188,13 +200,11 @@ jobs:
       #     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
       #     --certificate-identity-regexp '^https://github.com/<owner>/vcf-doctor/'
       - name: Sign published digest
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           DIGEST: ${{ steps.publish.outputs.digest }}
         run: cosign sign --yes "${IMAGE}@${DIGEST}"
 
       - name: Tag release
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
