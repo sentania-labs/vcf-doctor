@@ -2,14 +2,14 @@ import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { CheckCircle2, Lightbulb, Search, Sparkles, Terminal } from 'lucide-react'
 import type { Finding, Severity } from '@/types'
-import { getChanges, getEvents, getFindings, getResources, getSnapshots } from '@/api'
+import { getEvents, getFindingRelated, getFindings, getResources, getSnapshots } from '@/api'
 import { useAsync } from '@/hooks/useAsync'
 import { useAppState } from '@/state/AppState'
 import { useAssistantDrawer } from '@/state/AssistantState'
 import { Button, Card, Drawer, EmptyState, ErrorState, PageHeader, Segmented, Skeleton } from '@/components/ui'
 import { EvidenceTable, EventCategoryDot, FindingRow, ResourceIcon, ResourceTypeLabel, SeverityBadge } from '@/components/domain'
 import { formatDateTime, formatTime, relativeTime } from '@/lib/format'
-import type { AssistantTask, Change, Event, Resource } from '@/types'
+import type { AssistantTask, Change, Event, RelatedWindow, Resource } from '@/types'
 
 type Filter = 'all' | Severity
 
@@ -68,12 +68,34 @@ function Count({ n }: { n: number }) {
   return <span className="ml-0.5 rounded bg-surface-3 px-1.5 text-[11px] text-muted tnum">{n}</span>
 }
 
-interface Related { changes: Change[]; resources: Resource[]; events: Event[]; window: { since: string; until: string | null } | null }
+interface Related {
+  changes: Change[]; resources: Resource[]; events: Event[]
+  window: { since: string; until: string | null } | null
+  scope: RelatedWindow | null  // what the backend actually looked at; null when the lookup failed
+  loading: boolean
+}
+
+// One line saying which window the related changes come from, so nobody mistakes "0 changes" for "nothing to see".
+function describeScope(scope: RelatedWindow): string {
+  if (scope.basis === 'first_observed' && scope.since) {
+    const scans = `${scope.scans_present} ${scope.scans_present === 1 ? 'scan' : 'scans'}`
+    const capped = scope.capped ? ', capped' : ''
+    return scope.first_observed && scope.first_observed !== scope.since
+      ? `Since ${formatDateTime(scope.since)} (first seen ${formatDateTime(scope.first_observed)}, ${scans}${capped})`
+      : `Since the first snapshot ${formatDateTime(scope.since)} (${scans}${capped})`
+  }
+  if (scope.basis === 'latest_differing_pair') {
+    return scope.since && scope.until
+      ? `No change log on this database: newest snapshots that differ, ${formatDateTime(scope.since)} to ${formatTime(scope.until)}`
+      : 'No change log on this database and no two snapshots differ yet'
+  }
+  return 'No snapshots to compare yet'
+}
 
 function FindingDrawer({ finding, onClose }: { finding: Finding | null; onClose: () => void }) {
   const { connectionId } = useAppState()
   const { openDrawer } = useAssistantDrawer()
-  const empty: Related = { changes: [], resources: [], events: [], window: null }
+  const empty: Related = { changes: [], resources: [], events: [], window: null, scope: null, loading: true }
   const [related, setRelated] = useState<Related>(empty)
 
   // Gather related changes, resources and vCenter events for the evidence package (best effort, page still works if it fails).
@@ -83,6 +105,7 @@ function FindingDrawer({ finding, onClose }: { finding: Finding | null; onClose:
     setRelated(empty)
     ;(async () => {
       let window: Related['window'] = null
+      let scope: RelatedWindow | null = null
       let events: Event[] = []
       try {
         const [resources, snaps] = await Promise.all([getResources(connectionId), getSnapshots(connectionId)])
@@ -99,15 +122,21 @@ function FindingDrawer({ finding, onClose }: { finding: Finding | null; onClose:
         // resource id (host:<connection_id>:host-12), else the resource's source (vcenter:<connection_id>).
         const candidates = [connectionId, finding.resource_id?.split(':')[1], target?.source?.split(':')[1]].filter((c): c is string => !!c)
         const conn = candidates.find(c => snaps.some(s => s.connection_id === c)) ?? null
-        const mine = (conn ? snaps.filter(s => s.connection_id === conn) : []).sort((a, b) => b.created_at.localeCompare(a.created_at))
-        if (mine.length >= 2) {
-          const all = await getChanges(mine[0].connection_id, mine[1].id, mine[0].id)
-          changes = all.filter(c => near.has(c.resource_id) || c.significance === 'high').slice(0, 8)
-        }
-        // Events between the previous and current snapshot: the finding's resource first, then the rest of the
-        // connection. With a single snapshot the window is the last 24 h. Best effort: failures leave the list empty.
+        // Related changes: the change log since the finding was first observed (issue #5), not just the newest
+        // pair of snapshots, so two identical back-to-back scans no longer hide the cause. Best effort.
         if (conn) {
-          window = mine.length >= 2 ? { since: mine[1].created_at, until: mine[0].created_at } : { since: new Date(Date.now() - 86_400_000).toISOString(), until: null }
+          try {
+            const rel = await getFindingRelated(finding.id, conn)
+            changes = rel.changes
+            scope = rel.window
+            // Events around the cause: from the scan before the finding first appeared up to the scan that
+            // showed it (or the pair that differed). Not "until now": a month of newer events would bury them.
+            if (rel.window.since) window = { since: rel.window.since, until: rel.window.until ?? rel.window.first_observed }
+          } catch { changes = [] }
+        }
+        // With nothing to go on, the last 24 h.
+        if (conn) {
+          window = window ?? { since: new Date(Date.now() - 86_400_000).toISOString(), until: null }
           try {
             const own = finding.resource_id ? await getEvents({ connectionId: conn, since: window.since, until: window.until, resourceId: finding.resource_id, limit: 10 }) : []
             const rest = own.length < 10 ? await getEvents({ connectionId: conn, since: window.since, until: window.until, limit: 20 }) : []
@@ -115,8 +144,8 @@ function FindingDrawer({ finding, onClose }: { finding: Finding | null; onClose:
             events = [...own, ...rest.filter(e => !seen.has(e.id))].slice(0, 10)
           } catch { events = [] }
         }
-        if (!cancelled) setRelated({ changes, resources: relRes, events, window })
-      } catch { if (!cancelled) setRelated({ changes: [], resources: [], events, window }) }
+        if (!cancelled) setRelated({ changes, resources: relRes, events, window, scope, loading: false })
+      } catch { if (!cancelled) setRelated({ changes: [], resources: [], events, window, scope, loading: false }) }
     })()
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -161,23 +190,28 @@ function FindingDrawer({ finding, onClose }: { finding: Finding | null; onClose:
             </section>
           ) : null}
 
-          {related.changes.length > 0 ? (
-            <section>
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-faint mb-2.5">Related changes</h3>
+          <section>
+            <div className="flex items-baseline justify-between gap-3 mb-2.5">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-faint">Related changes</h3>
+              {related.scope ? <span className="text-xs text-faint tnum text-right">{describeScope(related.scope)}</span> : null}
+            </div>
+            {related.changes.length === 0 ? (
+              <p className="text-sm text-faint">{related.loading ? 'Loading changes' : related.scope ? 'No recorded changes to this object or its neighbours in this window.' : 'Could not load related changes.'}</p>
+            ) : (
               <ul className="space-y-1.5">
                 {related.changes.map((c, i) => (
                   <li key={i} className="text-sm flex items-center gap-2"><span className={`h-1.5 w-1.5 rounded-full ${c.significance === 'high' ? 'bg-critical' : c.significance === 'medium' ? 'bg-warning' : 'bg-faint'}`} /><span className="font-medium">{c.resource_name}</span><span className="text-muted">{c.summary}</span></li>
                 ))}
               </ul>
-            </section>
-          ) : null}
+            )}
+          </section>
 
           <section>
             <div className="flex items-baseline justify-between gap-3 mb-2.5">
               <h3 className="text-xs font-semibold uppercase tracking-wider text-faint">Events in this window</h3>
               {related.window ? <span className="text-xs text-faint tnum">{formatDateTime(related.window.since)} to {related.window.until ? formatTime(related.window.until) : 'now'}</span> : null}
             </div>
-            {related.events.length === 0 ? <p className="text-sm text-faint">{related.window ? 'No vCenter events recorded in this window.' : 'Loading events'}</p> : (
+            {related.events.length === 0 ? <p className="text-sm text-faint">{related.loading ? 'Loading events' : 'No vCenter events recorded in this window.'}</p> : (
               <ul className="divide-y divide-border rounded-lg border border-border overflow-hidden">
                 {related.events.map(e => (
                   <li key={e.id} className="px-3.5 py-2 flex items-start gap-2.5 bg-surface">

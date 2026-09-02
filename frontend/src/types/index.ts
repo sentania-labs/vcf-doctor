@@ -27,6 +27,15 @@ export interface SnapshotSummary {
 }
 // A persisted diff row from GET /changes/log (newest first). observed_at is the TO snapshot time.
 export type ChangeLogEntry = Change & { id: string; observed_at: string; from_snapshot_id: string; to_snapshot_id: string }
+// GET /findings/{id}/related: changes around a finding since it was first observed (issue #5).
+// first_observed: the change log since the finding first appeared. latest_differing_pair: no change log on this
+// database, so the newest pair of snapshots that differ. no_snapshots: nothing to compare yet.
+export type RelatedWindowBasis = 'first_observed' | 'latest_differing_pair' | 'no_snapshots'
+export interface RelatedWindow {
+  basis: RelatedWindowBasis; since: string | null; until: string | null; first_observed: string | null
+  scans_present: number; capped: boolean
+}
+export interface FindingRelated { finding_id: string; connection_id: string; resource_ids: string[]; window: RelatedWindow; changes: Change[] }
 // vCenter event or task, normalised by the collector and stored per connection.
 export type EventSource = 'event' | 'task'
 export type EventCategory = 'info' | 'warning' | 'error' | 'user'
