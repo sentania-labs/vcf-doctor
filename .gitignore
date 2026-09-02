@@ -11,6 +11,9 @@ frontend/dist/
 # data
 *.db
 data/
+data-*/
+*.db-wal
+*.db-shm
 # env
 .env
 .env.*
