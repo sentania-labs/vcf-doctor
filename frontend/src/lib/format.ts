@@ -134,3 +134,51 @@ export function formatProperty(k: string, v: unknown): string {
   }
   return formatValue(v)
 }
+
+/* ---------- Day grouping and time-range presets (Snapshots, Changes timeline, Events) ---------- */
+
+// Local calendar day key for an ISO time ("2026-09-01"). Groups lists under date headers.
+export function dayKey(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+// "Today", "Yesterday", else "Mon, Sep 1" (with the year once it differs from the current one).
+export function dayLabel(iso: string, now: number = Date.now()): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  const key = dayKey(iso)
+  if (key === dayKey(new Date(now).toISOString())) return 'Today'
+  if (key === dayKey(new Date(now - 86_400_000).toISOString())) return 'Yesterday'
+  const sameYear = d.getFullYear() === new Date(now).getFullYear()
+  return d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', ...(sameYear ? {} : { year: 'numeric' }) })
+}
+
+export interface DayGroup<T> { key: string; label: string; items: T[] }
+// Groups items (already in display order) under their local day, keeping first-seen order of days.
+export function groupByDay<T>(items: T[], time: (t: T) => string): Array<DayGroup<T>> {
+  const out: Array<DayGroup<T>> = []
+  const idx = new Map<string, number>()
+  for (const it of items) {
+    const iso = time(it)
+    const key = dayKey(iso)
+    let i = idx.get(key)
+    if (i === undefined) { i = out.length; idx.set(key, i); out.push({ key, label: dayLabel(iso), items: [] }) }
+    out[i].items.push(it)
+  }
+  return out
+}
+
+export type RangePreset = '1h' | '24h' | '7d'
+export const RANGE_PRESETS: Array<{ value: RangePreset; label: string; ms: number }> = [
+  { value: '1h', label: '1 h', ms: 3_600_000 },
+  { value: '24h', label: '24 h', ms: 86_400_000 },
+  { value: '7d', label: '7 d', ms: 7 * 86_400_000 },
+]
+// ISO "since" for a preset, rounded to the minute so re-renders inside the same minute reuse the query key.
+export function sinceFor(preset: RangePreset, now: number = Date.now()): string {
+  const ms = RANGE_PRESETS.find(p => p.value === preset)?.ms ?? 86_400_000
+  const t = now - ms
+  return new Date(t - (t % 60_000)).toISOString()
+}

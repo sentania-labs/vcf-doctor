@@ -11,10 +11,10 @@ import sys
 import threading
 from datetime import timedelta
 
-from app import db
 from app.collectors.registry import get_collector
 from app.config import settings
 from app.models import Finding, Resource, ScanRun, Snapshot
+from app.models.snapshot import RetentionPolicy
 from app.snapshots import store
 
 log = logging.getLogger("vcf_doctor.scan")
@@ -29,8 +29,26 @@ def _lock_for(connection_id: str) -> threading.Lock:
         return _locks.setdefault(connection_id, threading.Lock())
 
 
-def retention() -> int:
-    return int(db.get_setting("retention", settings.default_retention))
+def retention_policy() -> RetentionPolicy:
+    """Effective tier policy (settings KV `retention_policy`, else env defaults)."""
+    return store.retention_policy()
+
+
+def startup_maintenance() -> None:
+    """Once per process start: compress legacy snapshot rows, then apply
+    retention to every connection so a long-stopped instance catches up."""
+    try:
+        migrated = store.migrate_legacy_snapshots()
+        if migrated:
+            log.info("startup: compressed %d legacy snapshot(s)", migrated)
+    except Exception:
+        log.exception("startup: legacy snapshot migration failed")
+    policy = retention_policy()
+    for conn in store.list_connections():
+        try:
+            store.apply_retention(conn.id, policy)
+        except Exception:
+            log.exception("startup: retention failed for %s", conn.id)
 
 
 def compute_findings(resources: list[Resource], previous: list[Resource] | None) -> list[Finding]:
@@ -70,7 +88,7 @@ def _label(trigger: str, label: str | None) -> str:
 
 
 def run_scan(connection_id: str, trigger: str = "manual", label: str | None = None) -> ScanRun:
-    """Collect, persist a snapshot, cache findings, prune, record the run."""
+    """Collect, persist a snapshot, cache findings, log changes, prune, record the run."""
     conn = store.get_connection(connection_id)
     if conn is None:
         raise KeyError(connection_id)
@@ -91,8 +109,23 @@ def run_scan(connection_id: str, trigger: str = "manual", label: str | None = No
             )
             findings = compute_findings(resources, previous.resources if previous else None)
             store.save_findings(snapshot.id, findings)
-            if trigger == "scheduled":
-                store.prune_scheduled(connection_id, retention())
+            # --- events capture (app/events); never fails the scan ---
+            try:
+                from app.events.service import capture_events
+
+                capture_events(conn, collector, snapshot)
+            except Exception:  # noqa: BLE001
+                log.exception("event capture failed for %s", connection_id)
+            # --- end events capture ---
+            if previous is not None:
+                store.save_changes(
+                    connection_id,
+                    previous.id,
+                    snapshot.id,
+                    snapshot.created_at,
+                    compute_changes(previous.resources, resources),
+                )
+            store.apply_retention(connection_id)
             run = store.finish_run(run.id, "ok", snapshot_id=snapshot.id)
             status = "ok"
         except Exception as exc:

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { AlertCircle, Bot, Send, Sparkles, Square, User } from 'lucide-react'
-import type { AssistantEvidenceCount, AssistantRequest, AssistantTask, Change, Finding, Resource, ScriptFormat } from '@/types'
+import type { AssistantEvidenceCount, AssistantRequest, AssistantTask, Change, Event, Finding, Resource, ScriptFormat } from '@/types'
 import { getAssistantStatus, streamAssistant } from '@/api'
 import { useAsync } from '@/hooks/useAsync'
 import { Button, Select, Skeleton } from '@/components/ui'
@@ -33,7 +33,7 @@ const TASK_LABEL: Record<AssistantTask, string> = { explain: 'Explain', investig
 export function AssistantPanel({ seed, seedKey, context, compact }: {
   seed: AssistantSeed | null
   seedKey: number
-  context: { findings: Finding[]; changes: Change[]; resources: Resource[] }
+  context: { findings: Finding[]; changes: Change[]; resources: Resource[]; events: Event[] }
   compact?: boolean
 }) {
   const status = useAsync(() => getAssistantStatus(), [seedKey])
@@ -54,7 +54,7 @@ export function AssistantPanel({ seed, seedKey, context, compact }: {
   useEffect(() => {
     if (!seed || appliedSeed.current === seedKey) return
     appliedSeed.current = seedKey
-    const next = { findings: seed.findings ?? context.findings, changes: seed.changes ?? context.changes, resources: seed.resources ?? context.resources }
+    const next = { findings: seed.findings ?? context.findings, changes: seed.changes ?? context.changes, resources: seed.resources ?? context.resources, events: seed.events ?? context.events }
     setCtx(next)
     setTask(seed.task)
     if (seed.scriptFormat) setFormat(seed.scriptFormat)
@@ -80,7 +80,7 @@ export function AssistantPanel({ seed, seedKey, context, compact }: {
     const req: AssistantRequest = {
       task: t,
       ...(t === 'generate-script' ? { script_format: f } : {}),
-      context: { question, findings: c.findings, changes: c.changes, resources: c.resources, allowed_actions: ['read'] },
+      context: { question, findings: c.findings, changes: c.changes, resources: c.resources, events: c.events, allowed_actions: ['read'] },
     }
     const ac = new AbortController()
     abortRef.current = ac
@@ -102,7 +102,7 @@ export function AssistantPanel({ seed, seedKey, context, compact }: {
 
   const stop = () => abortRef.current?.abort()
   const hasFinding = ctx.findings.length > 0
-  const total = ctx.findings.length + ctx.changes.length + ctx.resources.length
+  const total = ctx.findings.length + ctx.changes.length + ctx.resources.length + ctx.events.length
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -117,6 +117,8 @@ export function AssistantPanel({ seed, seedKey, context, compact }: {
             <span className="font-medium tnum">{ctx.changes.length} {ctx.changes.length === 1 ? 'change' : 'changes'}</span>
             <span className="text-faint">,</span>
             <span className="font-medium tnum">{ctx.resources.length} {ctx.resources.length === 1 ? 'resource' : 'resources'}</span>
+            <span className="text-faint">,</span>
+            <span className="font-medium tnum">{ctx.events.length} {ctx.events.length === 1 ? 'event' : 'events'}</span>
           </div>
           {status.data ? <span className="text-xs text-faint font-mono">{status.data.provider} / {status.data.model}</span> : <Skeleton className="h-3 w-24" />}
         </div>
@@ -150,7 +152,7 @@ export function AssistantPanel({ seed, seedKey, context, compact }: {
           <div className={cn('anim-fade-up', compact ? '' : 'max-w-2xl')}>
             <div className="h-10 w-10 rounded-lg bg-surface-2 border border-border flex items-center justify-center text-accent mb-4"><Bot size={20} /></div>
             <h3 className="text-base font-semibold tracking-tight">Evidence-grounded assistant</h3>
-            <p className="text-sm text-muted mt-1 leading-relaxed">Answers come only from the findings, changes and resources shown above. Scripts are produced for your review and are never executed.</p>
+            <p className="text-sm text-muted mt-1 leading-relaxed">Answers come only from the findings, changes, resources and vCenter events shown above. Scripts are produced for your review and are never executed.</p>
             <div className="mt-5 grid gap-2">
               {STARTERS.map(s => (
                 <button key={s.label} disabled={!available || busy}
@@ -221,7 +223,7 @@ function MessageView({ m }: { m: Message }) {
         {refused ? <p className="mt-2 text-sm text-warning">The model declined to answer this request. Try rephrasing or narrowing the evidence.</p> : null}
         {m.error ? <p className="mt-2 text-sm text-critical flex items-center gap-1.5"><AlertCircle size={14} />{m.error}</p> : null}
         {m.evidence && !m.streaming ? (
-          <p className="mt-3 text-xs text-faint">Using: {m.evidence.findings} {m.evidence.findings === 1 ? 'finding' : 'findings'}, {m.evidence.changes} {m.evidence.changes === 1 ? 'change' : 'changes'}, {m.evidence.resources} {m.evidence.resources === 1 ? 'resource' : 'resources'}</p>
+          <p className="mt-3 text-xs text-faint">Using: {m.evidence.findings} {m.evidence.findings === 1 ? 'finding' : 'findings'}, {m.evidence.changes} {m.evidence.changes === 1 ? 'change' : 'changes'}, {m.evidence.resources} {m.evidence.resources === 1 ? 'resource' : 'resources'}, {m.evidence.events} {m.evidence.events === 1 ? 'event' : 'events'}</p>
         ) : null}
       </div>
     </div>

@@ -3,6 +3,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from app.models.change import Change
+from app.models.event import Event
 from app.models.finding import Finding
 from app.models.resource import Resource
 
@@ -17,6 +18,7 @@ class AssistantContext(BaseModel):
     findings: list[Finding] = Field(default_factory=list)
     changes: list[Change] = Field(default_factory=list)
     resources: list[Resource] = Field(default_factory=list)
+    events: list[Event] = Field(default_factory=list)  # what vCenter recorded in the window
     allowed_actions: list[str] = Field(default_factory=lambda: ["read-only"])
 
 

@@ -34,6 +34,7 @@ SIGNIFICANCE: dict[str, dict[str, Significance]] = {
         "lockdownMode": "medium",
         "ntpServers": "medium",
         "dnsServers": "medium",
+        "bootTime": "medium",
         "model": "low",
         "memoryBytes": "low",
         "numCpuCores": "low",
@@ -59,6 +60,7 @@ SIGNIFICANCE: dict[str, dict[str, Significance]] = {
         "toolsStatus": "low",
         "guestIp": "low",
         "annotation": "low",
+        "bootTime": "low",
     },
     "cluster": {
         "drsEnabled": "high",
@@ -105,12 +107,14 @@ DICT_LISTS: dict[str, str] = {
 }
 # Properties whose values may be namespaced ids; summaries show the short name.
 _ID_VALUED = frozenset({"host", "cluster", "hosts", "networks", "datastores"})
-
+# Properties only compared when both sides carry a value (a powered-off VM
+# has no bootTime; that is not a reboot).
 # Properties where None means "vCenter did not return it" (disconnected host,
 # inaccessible VM, no host reporting). A None on either side is unknown, not a
 # change, so these are skipped rather than reported as removed/added.
 _BOTH_SIDES_REQUIRED = frozenset(
     {
+        "bootTime",
         "vmkernelAdapters",
         "physicalNics",
         "standardSwitches",
@@ -253,6 +257,8 @@ def _scalar_summary(prop: str, old: Any, new: Any) -> str:
         return "entered maintenance mode" if new else "exited maintenance mode"
     if prop == "accessible":
         return "became inaccessible" if new is False else "became accessible"
+    if prop == "bootTime":
+        return f"rebooted {_fmt(old)} -> {_fmt(new)}"
     if prop in _ID_VALUED:
         return f"{prop} {_short(old)} -> {_short(new)}"
     return f"{prop} {_fmt(old)} -> {_fmt(new)}"

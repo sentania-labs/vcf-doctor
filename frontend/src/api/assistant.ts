@@ -51,7 +51,7 @@ export async function streamAssistant(req: AssistantRequest, onEvent: AssistantE
     else if (event === 'done') {
       sawDone = true
       const ev = (data.evidence ?? {}) as Record<string, number>
-      onEvent({ type: 'done', stop_reason: String(data.stop_reason ?? 'end_turn'), evidence: { findings: ev.findings ?? 0, changes: ev.changes ?? 0, resources: ev.resources ?? 0 } })
+      onEvent({ type: 'done', stop_reason: String(data.stop_reason ?? 'end_turn'), evidence: { findings: ev.findings ?? 0, changes: ev.changes ?? 0, resources: ev.resources ?? 0, events: ev.events ?? 0 } })
     } else if (event === 'error') {
       sawError = true
       onEvent({ type: 'error', message: String(data.message ?? 'Assistant error') })
@@ -88,7 +88,7 @@ async function mockStream(req: AssistantRequest, onEvent: AssistantEventHandler,
     await new Promise(r => setTimeout(r, 12))
     onEvent({ type: 'delta', text: c })
   }
-  onEvent({ type: 'done', stop_reason: 'end_turn', evidence: { findings: req.context.findings.length, changes: req.context.changes.length, resources: req.context.resources.length } })
+  onEvent({ type: 'done', stop_reason: 'end_turn', evidence: { findings: req.context.findings.length, changes: req.context.changes.length, resources: req.context.resources.length, events: req.context.events?.length ?? 0 } })
 }
 
 export interface AssistantModel { id: string; display_name: string; recommended: boolean }

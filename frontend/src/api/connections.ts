@@ -14,7 +14,7 @@ export function createConnection(body: ConnectionCreate): Promise<ConnectionPubl
     mockState.estates.push({
       connection: conn,
       schedule: { connection_id: id, interval_minutes: body.interval_minutes, enabled: body.enabled, last_run: null, next_run: body.enabled ? new Date(Date.now() + body.interval_minutes * 60_000).toISOString() : null, last_status: null },
-      resources: [], findings: [], snapshots: [], changes: [], scans: [],
+      resources: [], findings: [], snapshots: [], changes: [], changeLog: [], events: [], scans: [],
     })
     return delay(conn, 500)
   }

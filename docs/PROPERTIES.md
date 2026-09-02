@@ -50,15 +50,16 @@ names, standard only), exists (true)
 
 | type | high | medium | low |
 |---|---|---|---|
-| host | connectionState, powerState, vmkernelAdapters | maintenanceMode, cluster, version, build, lockdownMode, ntpServers, dnsServers | model, memoryBytes, numCpuCores, physicalNics, standardSwitches |
-| vm | | powerState, networks, datastores, disks, nics | host, numCpu, memoryMB, hardwareVersion, template, snapshotCount, resourcePool, folder, cpuReservationMhz, memReservationMB, toolsStatus, guestIp, annotation |
+| host | connectionState, powerState, vmkernelAdapters | maintenanceMode, cluster, version, build, lockdownMode, ntpServers, dnsServers, bootTime | model, memoryBytes, numCpuCores, physicalNics, standardSwitches |
+| vm | | powerState, networks, datastores, disks, nics | host, numCpu, memoryMB, hardwareVersion, template, snapshotCount, resourcePool, folder, cpuReservationMhz, memReservationMB, toolsStatus, guestIp, annotation, bootTime |
 | cluster | drsEnabled, haEnabled, vsanEnabled | host membership, drsAutomationLevel, haAdmissionControl, evcMode | ruleCount |
 | datastore | accessible, removed | capacity, freeSpace (banded), hosts, maintenanceMode | multipleHostAccess |
 | network | removed, vlan | switch | numPorts, hosts |
 | vcenter | | version, build | apiVersion |
 
 List-valued properties diff as added/removed items in the summary
-("vmkernel vmk1 mtu 1500 -> 9000", "disk Hard disk 3 added").
+("vmkernel vmk1 mtu 1500 -> 9000", "disk Hard disk 3 added"). `bootTime` is
+only compared when both sides carry a value (summary "rebooted old -> new").
 
 # New diagnostic checks
 

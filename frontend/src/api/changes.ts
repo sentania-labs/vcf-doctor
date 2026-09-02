@@ -1,4 +1,4 @@
-import type { Change, Significance } from '@/types'
+import type { Change, ChangeLogEntry, Significance } from '@/types'
 import { apiGet } from './client'
 import { qs } from '@/lib/format'
 import { USE_MOCKS, delay, mockEstate, mockState } from './mocks'
@@ -20,4 +20,33 @@ export function getChanges(connectionId: string, from: string, to: string, minSi
     return delay(span >= 2 ? changes : changes.filter((_, i) => i % 2 === 0), 350)
   }
   return apiGet<Change[]>(`/changes${qs({ connection_id: connectionId, from, to, min_significance: minSignificance })}`)
+}
+
+export interface ChangeLogQuery {
+  connectionId: string
+  since?: string | null
+  until?: string | null
+  minSignificance?: Significance | null
+  resourceId?: string | null
+  limit?: number | null
+}
+
+// GET /changes/log: the persisted per-scan diff rows, newest first. Backend defaults: last 24 h, limit 500.
+export function getChangeLog(query: ChangeLogQuery): Promise<ChangeLogEntry[]> {
+  if (USE_MOCKS) {
+    const estate = mockEstate(query.connectionId)[0]
+    const sinceMs = query.since ? new Date(query.since).getTime() : Date.now() - 86_400_000
+    const untilMs = query.until ? new Date(query.until).getTime() : Number.POSITIVE_INFINITY
+    const floor = SIGNIFICANCE_RANK[query.minSignificance ?? mockState.settings.changes_min_significance ?? 'low']
+    const rows = (estate?.changeLog ?? [])
+      .filter(c => { const t = new Date(c.observed_at).getTime(); return t >= sinceMs && t <= untilMs })
+      .filter(c => SIGNIFICANCE_RANK[c.significance] >= floor)
+      .filter(c => !query.resourceId || c.resource_id === query.resourceId)
+      .sort((a, b) => b.observed_at.localeCompare(a.observed_at))
+    return delay(rows.slice(0, query.limit ?? 500), 300)
+  }
+  return apiGet<ChangeLogEntry[]>(`/changes/log${qs({
+    connection_id: query.connectionId, since: query.since, until: query.until,
+    min_significance: query.minSignificance, resource_id: query.resourceId, limit: query.limit,
+  })}`)
 }

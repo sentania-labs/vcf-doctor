@@ -16,8 +16,12 @@ class Settings(BaseSettings):
     llm_model: str = "claude-opus-5"
     # Directory containing the built frontend (index.html). Empty disables static serving.
     static_dir: str = ""
-    # Snapshot retention default; overridable in the GUI.
-    default_retention: int = 96
+    # Snapshot retention tier defaults (days); the effective policy lives in
+    # the settings table and is edited in the GUI. The old
+    # VCF_DOCTOR_DEFAULT_RETENTION count is no longer read.
+    retention_recent_days: int = 14
+    retention_hourly_days: int = 30
+    retention_daily_days: int = 365
     # Scheduler floor in minutes.
     min_interval_minutes: int = 5
     # "on" requires the shared operator password; "off" for deployments that

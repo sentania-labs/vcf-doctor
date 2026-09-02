@@ -1,9 +1,11 @@
 """All /api routes except /api/assistant (Agent E) and /api/health (main.py)."""
 
+import re
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from app import db, scheduler
 from app.assistant import settings as assistant_settings
@@ -24,6 +26,8 @@ from app.models import (
     Snapshot,
     SnapshotSummary,
 )
+from app.models.change import ChangeRecord
+from app.models.snapshot import RetentionPolicy
 from app.snapshots import store
 
 router = APIRouter(prefix="/api")
@@ -97,6 +101,48 @@ def _changes(
 ) -> list:
     floor = _resolve_min_significance(min_significance)
     return _at_least(_all_changes(connection_id, from_id, to_id), floor)
+
+
+def _recent_changes(connection_id: str | None, min_significance: str | None) -> list:
+    """Overview feed: the persisted log (last 24 h, or the newest observation
+    when the last scan is older than that) for each connection that has one;
+    the on-demand diff of the latest pair for connections that do not
+    (databases predating the log). Sorted high significance first, then newest."""
+    floor = _resolve_min_significance(min_significance)
+    since = store.now() - timedelta(hours=24)
+    out: list = []
+    for conn in _target_connections(connection_id):
+        if store.count_changes(conn.id):
+            out.extend(_logged_changes(conn.id, since, floor))
+            continue
+        pair = store.latest_snapshots(conn.id, 2)
+        if len(pair) == 2:
+            out.extend(
+                _at_least(scheduler.compute_changes(pair[1].resources, pair[0].resources), floor)
+            )
+    out.sort(
+        key=lambda c: (
+            SIGNIFICANCE_RANK.get(getattr(c, "significance", "low"), 9),
+            -(getattr(c, "observed_at", None) or since).timestamp(),
+        )
+    )
+    return out
+
+
+def _logged_changes(connection_id: str, since: datetime, floor: str) -> list:
+    """Change rows observed since `since`; when there are none (the last scan
+    that found anything is older than the window) the rows of the newest
+    observation instead, so the Overview never empties out between scans."""
+    rows = store.list_change_log(connection_id, since=since, min_significance=floor)
+    if rows:
+        return rows
+    newest = store.list_change_log(connection_id, min_significance=floor, limit=1)
+    if not newest:
+        return []
+    observed = newest[0].observed_at
+    return store.list_change_log(
+        connection_id, since=observed, until=observed, min_significance=floor
+    )
 
 
 def _all_changes(connection_id: str | None, from_id: str | None, to_id: str | None) -> list:
@@ -211,6 +257,45 @@ def get_changes(
         c.model_dump(mode="json") if hasattr(c, "model_dump") else c
         for c in _changes(connection_id, from_id, to_id, min_significance)
     ]
+
+
+def _parse_time(value: str | None, name: str) -> datetime | None:
+    if value is None or value == "":
+        return None
+    # An unencoded "+HH:MM" offset reaches us as " HH:MM"; put the plus back.
+    text = re.sub(r" (\d{2}:\d{2})$", r"+\1", value.strip().replace("Z", "+00:00"))
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError as exc:
+        raise HTTPException(400, f"{name} must be an ISO 8601 timestamp") from exc
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+@router.get("/changes/log", response_model=list[ChangeRecord])
+def get_change_log(
+    connection_id: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    min_significance: str | None = None,
+    resource_id: str | None = None,
+    limit: int = Query(default=500, ge=1, le=5000),
+):
+    """Persisted per-scan diffs, newest first. Defaults: last 24 h, limit 500,
+    min_significance from the changes_min_significance setting."""
+    if connection_id:
+        _connection_or_404(connection_id)
+    since_dt = _parse_time(since, "since") or (store.now() - timedelta(hours=24))
+    until_dt = _parse_time(until, "until")
+    if until_dt is not None and until_dt < since_dt:
+        raise HTTPException(400, "until must not be earlier than since")
+    return store.list_change_log(
+        connection_id,
+        since=since_dt,
+        until=until_dt,
+        min_significance=_resolve_min_significance(min_significance),
+        resource_id=resource_id,
+        limit=limit,
+    )
 
 
 # --- scans ---------------------------------------------------------------
@@ -333,7 +418,7 @@ def put_schedule(connection_id: str, body: ScheduleUpdate):
 
 
 class AppSettings(BaseModel):
-    retention: int
+    retention_policy: RetentionPolicy
     min_interval_minutes: int
     demo_mode: bool
     scheduler_running: bool
@@ -342,7 +427,9 @@ class AppSettings(BaseModel):
 
 
 class AppSettingsUpdate(BaseModel):
-    retention: int | None = None
+    # Partial: omitted tiers keep their stored value. Ints, each >= 1,
+    # recent_days <= hourly_days <= daily_days.
+    retention_policy: dict[str, Any] | None = None
     changes_min_significance: str | None = None
     # Partial assistant update; may carry "api_key", which is stored and never echoed.
     assistant: dict[str, Any] | None = None
@@ -351,7 +438,7 @@ class AppSettingsUpdate(BaseModel):
 @router.get("/settings", response_model=AppSettings)
 def get_settings():
     return AppSettings(
-        retention=scheduler.retention(),
+        retention_policy=scheduler.retention_policy(),
         min_interval_minutes=settings.min_interval_minutes,
         demo_mode=settings.demo_mode,
         scheduler_running=scheduler.running(),
@@ -360,12 +447,31 @@ def get_settings():
     )
 
 
+_TIER_KEYS = ("recent_days", "hourly_days", "daily_days")
+
+
+def _merge_retention_policy(update: dict[str, Any]) -> RetentionPolicy:
+    unknown = set(update) - set(_TIER_KEYS)
+    if unknown:
+        raise HTTPException(400, f"unknown retention_policy keys: {', '.join(sorted(unknown))}")
+    merged = scheduler.retention_policy().model_dump()
+    for key, value in update.items():
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise HTTPException(400, f"retention_policy.{key} must be an integer number of days")
+        merged[key] = value
+    try:
+        return RetentionPolicy.model_validate(merged)
+    except ValidationError as exc:
+        first = exc.errors()[0]
+        loc = ".".join(str(x) for x in first.get("loc", ()))
+        where = f"retention_policy.{loc}" if loc else "retention_policy"
+        raise HTTPException(400, f"{where}: {first.get('msg', 'invalid')}") from exc
+
+
 @router.put("/settings", response_model=AppSettings)
 def put_settings(body: AppSettingsUpdate):
-    if body.retention is not None:
-        if body.retention < 1:
-            raise HTTPException(400, "retention must be at least 1")
-        db.set_setting("retention", body.retention)
+    if body.retention_policy is not None:
+        store.set_retention_policy(_merge_retention_policy(body.retention_policy))
     if body.changes_min_significance is not None:
         if body.changes_min_significance not in SIGNIFICANCE_LEVELS:
             raise HTTPException(400, "changes_min_significance must be one of low, medium, high")
@@ -384,7 +490,7 @@ def overview(
 ) -> dict[str, Any]:
     resources = _latest_resources(connection_id)
     findings = _latest_findings(connection_id)
-    changes = _changes(connection_id, None, None, min_significance)
+    changes = _recent_changes(connection_id, min_significance)
 
     by_sev = {"critical": 0, "warning": 0, "info": 0}
     for f in findings:

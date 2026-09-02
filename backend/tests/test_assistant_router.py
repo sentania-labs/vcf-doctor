@@ -93,7 +93,7 @@ def test_sse_end_to_end_with_mock(client):
     assert "Host disconnected" in text and "esx03" in text
     done = events[-1][1]
     assert done["stop_reason"] == "end_turn"
-    assert done["evidence"] == {"findings": 1, "changes": 0, "resources": 1}
+    assert done["evidence"] == {"findings": 1, "changes": 0, "resources": 1, "events": 0}
 
 
 def test_disabled_assistant_reports_reason(client):

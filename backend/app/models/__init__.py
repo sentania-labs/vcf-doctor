@@ -23,6 +23,7 @@ from app.models.connection import (
     Schedule,
     ScheduleUpdate,
 )
+from app.models.event import Event, EventCategory, EventSource
 from app.models.finding import Finding, Severity
 from app.models.resource import Relationship, Resource
 from app.models.snapshot import Snapshot, SnapshotSummary
@@ -38,6 +39,9 @@ __all__ = [
     "ConnectionCreate",
     "ConnectionPublic",
     "ConnectionResult",
+    "Event",
+    "EventCategory",
+    "EventSource",
     "Finding",
     "Relationship",
     "Resource",

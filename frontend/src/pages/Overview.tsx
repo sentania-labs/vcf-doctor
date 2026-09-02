@@ -1,11 +1,12 @@
 import { Link, useNavigate } from 'react-router-dom'
 import { ArrowRight, Boxes, HardDrive, MonitorSmartphone, Plug, Server } from 'lucide-react'
-import { getChangesMinSignificance, getOverview } from '@/api'
+import { getChangesMinSignificance, getEvents, getOverview } from '@/api'
+import type { Event } from '@/types'
 import { useAsync } from '@/hooks/useAsync'
 import { useAppState } from '@/state/AppState'
 import { Button, Card, CardHeader, EmptyState, ErrorState, Skeleton } from '@/components/ui'
-import { ChangeRow, FindingRow, StatCard } from '@/components/domain'
-import { pct, relativeTime } from '@/lib/format'
+import { ChangeRow, EventCategoryDot, FindingRow, StatCard } from '@/components/domain'
+import { formatDateTime, pct, relativeTime } from '@/lib/format'
 import { cn } from '@/lib/cn'
 
 function HealthRing({ score }: { score: number }) {
@@ -30,6 +31,8 @@ export default function OverviewPage() {
   const { connectionId, refreshKey, connections, connectionsLoading, selected, backend } = useAppState()
   // Recent changes honour the Settings significance floor; a settings failure falls back to everything.
   const ov = useAsync(() => getChangesMinSignificance().then(min => getOverview(connectionId, min)), [connectionId, refreshKey])
+  // Notable vCenter events from the last day (user actions, warnings, errors). Best effort: the card hides on failure.
+  const ev = useAsync<Event[] | null>(() => getEvents({ connectionId, limit: 60 }).then(list => list.filter(e => e.category !== 'info').slice(0, 5)).catch(() => null), [connectionId, refreshKey])
   const nav = useNavigate()
 
   if (!connectionsLoading && connections.length === 0 && !ov.data && !ov.error && backend !== 'down') {
@@ -82,10 +85,10 @@ export default function OverviewPage() {
         </> : [0, 1, 2, 3].map(i => <Skeleton key={i} className="h-[124px] rounded-xl" />)}
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-2">
+      <div className="grid gap-5 xl:grid-cols-2 2xl:grid-cols-3">
         <Card>
           <CardHeader title="Important findings" subtitle="Highest severity first"
-            action={<Link to="/health" className="text-sm text-accent hover:underline inline-flex items-center gap-1">All findings <ArrowRight size={14} /></Link>} />
+            action={<Link to="/health" className="text-sm text-accent hover:underline inline-flex items-center gap-1 whitespace-nowrap shrink-0">All findings <ArrowRight size={14} /></Link>} />
           <div className="px-5 pb-5 space-y-2">
             {!d ? [0, 1, 2].map(i => <Skeleton key={i} className="h-16" />)
               : d.top_findings.length === 0 ? <EmptyState title="No findings" body="Every diagnostic check passed on the last scan." />
@@ -94,13 +97,40 @@ export default function OverviewPage() {
         </Card>
         <Card>
           <CardHeader title="Recent changes" subtitle="Since the previous snapshot, at the significance set in Settings"
-            action={<Link to="/changes" className="text-sm text-accent hover:underline inline-flex items-center gap-1">Time machine <ArrowRight size={14} /></Link>} />
+            action={<Link to="/changes" className="text-sm text-accent hover:underline inline-flex items-center gap-1 whitespace-nowrap shrink-0">Time machine <ArrowRight size={14} /></Link>} />
           <div className="px-5 pb-5 space-y-2">
             {!d ? [0, 1, 2].map(i => <Skeleton key={i} className="h-16" />)
               : d.recent_changes.length === 0 ? <EmptyState title="No changes" body="Nothing has changed between the last two snapshots." />
               : d.recent_changes.map((c, i) => <ChangeRow key={`${c.resource_id}-${i}`} change={c} compact />)}
           </div>
         </Card>
+        {ev.data !== null || ev.loading ? (
+          <Card className="xl:col-span-2 2xl:col-span-1">
+            <CardHeader title="Recent events" subtitle="User actions, warnings and errors vCenter recorded in the last day"
+              action={<Link to="/events" className="text-sm text-accent hover:underline inline-flex items-center gap-1 whitespace-nowrap shrink-0">All events <ArrowRight size={14} /></Link>} />
+            <div className="px-5 pb-5">
+              {!ev.data ? <div className="space-y-2">{[0, 1, 2].map(i => <Skeleton key={i} className="h-10" />)}</div>
+                : ev.data.length === 0 ? <EmptyState title="Quiet day" body="No user actions, warnings or errors in the last 24 hours." />
+                : (
+                  <ul className="divide-y divide-border rounded-lg border border-border overflow-hidden">
+                    {ev.data.map(e => (
+                      <li key={e.id} className="px-3.5 py-2.5 flex items-start gap-2.5 bg-surface">
+                        <EventCategoryDot category={e.category} className="mt-[7px]" />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm leading-snug line-clamp-2">{e.message}</p>
+                          <p className="text-xs text-faint mt-0.5 flex items-center gap-2 min-w-0">
+                            <span className="tnum" title={formatDateTime(e.time)}>{relativeTime(e.time)}</span>
+                            {e.user ? <span className="truncate">{e.user}</span> : null}
+                            {e.resource_name ? <span className="truncate">{e.resource_name}</span> : null}
+                          </p>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+            </div>
+          </Card>
+        ) : null}
       </div>
     </div>
   )

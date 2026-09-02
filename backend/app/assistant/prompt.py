@@ -15,6 +15,7 @@ from app.models import AssistantRequest
 MAX_FINDINGS = 40
 MAX_CHANGES = 80
 MAX_RESOURCES = 60
+MAX_EVENTS = 60
 
 EVIDENCE_RULE = (
     "Only make factual statements about the environment that are supported "
@@ -51,9 +52,11 @@ TASK_GUIDANCE = f"""
 Additional guidance:
 
 - {EVIDENCE_RULE}
-- The evidence arrives as JSON blocks labelled FINDINGS, CHANGES and RESOURCES.
-  A block may carry a "truncated" note; if so, treat the evidence as partial and
-  say so where it matters.
+- The evidence arrives as JSON blocks labelled FINDINGS, CHANGES, RESOURCES and
+  EVENTS. EVENTS is what vCenter itself recorded in the window (events and tasks,
+  with the user who triggered them when there was one); use it to explain who or
+  what caused a change, never to invent one. A block may carry a "truncated"
+  note; if so, treat the evidence as partial and say so where it matters.
 - Refer to resources by the names given in the evidence. Do not guess hostnames,
   IP addresses, versions or credentials.
 - Use Markdown headings for the four categories: "## Observed facts",
@@ -162,11 +165,14 @@ def build_user_message(request: AssistantRequest) -> str:
         "",
         "RESOURCES:",
         _dump(ctx.resources, MAX_RESOURCES, "resources"),
+        "",
+        "EVENTS (what vCenter recorded in the window, newest first):",
+        _dump(ctx.events, MAX_EVENTS, "events"),
     ]
-    if not (ctx.findings or ctx.changes or ctx.resources):
+    if not (ctx.findings or ctx.changes or ctx.resources or ctx.events):
         lines += [
             "",
-            "No findings, changes or resources were supplied. Say what evidence "
+            "No findings, changes, resources or events were supplied. Say what evidence "
             "should be collected instead of speculating.",
         ]
     return "\n".join(lines)
@@ -178,4 +184,5 @@ def evidence_counts(request: AssistantRequest) -> dict[str, int]:
         "findings": len(ctx.findings),
         "changes": len(ctx.changes),
         "resources": len(ctx.resources),
+        "events": len(ctx.events),
     }

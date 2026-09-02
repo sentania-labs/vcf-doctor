@@ -2,13 +2,14 @@ import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { CheckCircle2, Lightbulb, Search, Sparkles, Terminal } from 'lucide-react'
 import type { Finding, Severity } from '@/types'
-import { getChanges, getFindings, getResources, getSnapshots } from '@/api'
+import { getChanges, getEvents, getFindings, getResources, getSnapshots } from '@/api'
 import { useAsync } from '@/hooks/useAsync'
 import { useAppState } from '@/state/AppState'
 import { useAssistantDrawer } from '@/state/AssistantState'
 import { Button, Card, Drawer, EmptyState, ErrorState, PageHeader, Segmented, Skeleton } from '@/components/ui'
-import { EvidenceTable, FindingRow, ResourceIcon, ResourceTypeLabel, SeverityBadge } from '@/components/domain'
-import type { AssistantTask, Change, Resource } from '@/types'
+import { EvidenceTable, EventCategoryDot, FindingRow, ResourceIcon, ResourceTypeLabel, SeverityBadge } from '@/components/domain'
+import { formatDateTime, formatTime, relativeTime } from '@/lib/format'
+import type { AssistantTask, Change, Event, Resource } from '@/types'
 
 type Filter = 'all' | Severity
 
@@ -67,16 +68,22 @@ function Count({ n }: { n: number }) {
   return <span className="ml-0.5 rounded bg-surface-3 px-1.5 text-[11px] text-muted tnum">{n}</span>
 }
 
+interface Related { changes: Change[]; resources: Resource[]; events: Event[]; window: { since: string; until: string | null } | null }
+
 function FindingDrawer({ finding, onClose }: { finding: Finding | null; onClose: () => void }) {
   const { connectionId } = useAppState()
   const { openDrawer } = useAssistantDrawer()
-  const [related, setRelated] = useState<{ changes: Change[]; resources: Resource[] }>({ changes: [], resources: [] })
+  const empty: Related = { changes: [], resources: [], events: [], window: null }
+  const [related, setRelated] = useState<Related>(empty)
 
-  // Gather related changes and resources for the evidence package (best effort, page still works if it fails).
+  // Gather related changes, resources and vCenter events for the evidence package (best effort, page still works if it fails).
   useEffect(() => {
     if (!finding) return
     let cancelled = false
+    setRelated(empty)
     ;(async () => {
+      let window: Related['window'] = null
+      let events: Event[] = []
       try {
         const [resources, snaps] = await Promise.all([getResources(connectionId), getSnapshots(connectionId)])
         const target = resources.find(r => r.id === finding.resource_id)
@@ -97,10 +104,22 @@ function FindingDrawer({ finding, onClose }: { finding: Finding | null; onClose:
           const all = await getChanges(mine[0].connection_id, mine[1].id, mine[0].id)
           changes = all.filter(c => near.has(c.resource_id) || c.significance === 'high').slice(0, 8)
         }
-        if (!cancelled) setRelated({ changes, resources: relRes })
-      } catch { if (!cancelled) setRelated({ changes: [], resources: [] }) }
+        // Events between the previous and current snapshot: the finding's resource first, then the rest of the
+        // connection. With a single snapshot the window is the last 24 h. Best effort: failures leave the list empty.
+        if (conn) {
+          window = mine.length >= 2 ? { since: mine[1].created_at, until: mine[0].created_at } : { since: new Date(Date.now() - 86_400_000).toISOString(), until: null }
+          try {
+            const own = finding.resource_id ? await getEvents({ connectionId: conn, since: window.since, until: window.until, resourceId: finding.resource_id, limit: 10 }) : []
+            const rest = own.length < 10 ? await getEvents({ connectionId: conn, since: window.since, until: window.until, limit: 20 }) : []
+            const seen = new Set(own.map(e => e.id))
+            events = [...own, ...rest.filter(e => !seen.has(e.id))].slice(0, 10)
+          } catch { events = [] }
+        }
+        if (!cancelled) setRelated({ changes, resources: relRes, events, window })
+      } catch { if (!cancelled) setRelated({ changes: [], resources: [], events, window }) }
     })()
     return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [finding, connectionId])
 
   const ask = (task: AssistantTask) => {
@@ -108,7 +127,7 @@ function FindingDrawer({ finding, onClose }: { finding: Finding | null; onClose:
     const q = task === 'explain' ? `Explain the finding "${finding.title}" and why it matters.`
       : task === 'investigate' ? `How should I investigate "${finding.title}"? What changed around it?`
       : `Generate an investigation script for "${finding.title}".`
-    openDrawer({ task, question: q, findings: [finding], changes: related.changes, resources: related.resources, autoSend: true, scriptFormat: 'powercli' })
+    openDrawer({ task, question: q, findings: [finding], changes: related.changes, resources: related.resources, events: related.events, autoSend: true, scriptFormat: 'powercli' })
   }
 
   return (
@@ -153,10 +172,34 @@ function FindingDrawer({ finding, onClose }: { finding: Finding | null; onClose:
             </section>
           ) : null}
 
+          <section>
+            <div className="flex items-baseline justify-between gap-3 mb-2.5">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-faint">Events in this window</h3>
+              {related.window ? <span className="text-xs text-faint tnum">{formatDateTime(related.window.since)} to {related.window.until ? formatTime(related.window.until) : 'now'}</span> : null}
+            </div>
+            {related.events.length === 0 ? <p className="text-sm text-faint">{related.window ? 'No vCenter events recorded in this window.' : 'Loading events'}</p> : (
+              <ul className="divide-y divide-border rounded-lg border border-border overflow-hidden">
+                {related.events.map(e => (
+                  <li key={e.id} className="px-3.5 py-2 flex items-start gap-2.5 bg-surface">
+                    <EventCategoryDot category={e.category} className="mt-[7px]" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[13px] leading-snug">{e.message}</p>
+                      <p className="text-xs text-faint mt-0.5 flex items-center gap-2 min-w-0">
+                        <span className="tnum" title={formatDateTime(e.time)}>{formatTime(e.time)} ({relativeTime(e.time)})</span>
+                        {e.user ? <span className="truncate">{e.user}</span> : null}
+                        {e.resource_name && e.resource_id !== finding.resource_id ? <span className="truncate">{e.resource_name}</span> : null}
+                      </p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
           <section className="pt-2 border-t border-border">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-xs font-semibold uppercase tracking-wider text-faint">Assistant</h3>
-              <span className="text-xs text-faint">Using: 1 finding, {related.changes.length} {related.changes.length === 1 ? 'change' : 'changes'}, {related.resources.length} {related.resources.length === 1 ? 'resource' : 'resources'}</span>
+              <span className="text-xs text-faint">Using: 1 finding, {related.changes.length} {related.changes.length === 1 ? 'change' : 'changes'}, {related.resources.length} {related.resources.length === 1 ? 'resource' : 'resources'}, {related.events.length} {related.events.length === 1 ? 'event' : 'events'}</span>
             </div>
             <div className="grid grid-cols-3 gap-2">
               <Button onClick={() => ask('explain')}><Sparkles size={14} /> Explain</Button>

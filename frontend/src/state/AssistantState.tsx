@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react'
-import type { AssistantTask, Change, Finding, Resource, ScriptFormat } from '@/types'
+import type { AssistantTask, Change, Event, Finding, Resource, ScriptFormat } from '@/types'
 
 export interface AssistantSeed {
   task: AssistantTask
@@ -7,6 +7,7 @@ export interface AssistantSeed {
   findings?: Finding[]
   changes?: Change[]
   resources?: Resource[]
+  events?: Event[]
   scriptFormat?: ScriptFormat
   autoSend?: boolean
 }

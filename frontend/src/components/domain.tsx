@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
-import { ArrowRight, Boxes, Database, HardDrive, Layers, Minus, MonitorSmartphone, Network, Plus, Server } from 'lucide-react'
-import type { Finding, Severity, Significance, Change } from '@/types'
+import { ArrowRight, Boxes, Clock, Database, Hand, HardDrive, Layers, Minus, MonitorSmartphone, Network, Plus, Server } from 'lucide-react'
+import type { Finding, Severity, Significance, Change, SnapshotSummary, SnapshotTier, EventCategory } from '@/types'
 import { Badge, type Tone } from '@/components/ui'
 import { cn } from '@/lib/cn'
 import { formatBytes, formatProperty, formatValue, humanKey, isByteKey } from '@/lib/format'
@@ -11,6 +11,25 @@ export const significanceLabel: Record<Significance, string> = { high: 'High imp
 
 export function SeverityBadge({ severity }: { severity: Severity }) {
   return <Badge tone={severityTone[severity]} dot>{severity}</Badge>
+}
+
+/* ---------- Snapshot retention tiers ---------- */
+export const tierLabel: Record<SnapshotTier, string> = { manual: 'Manual', recent: 'Recent', hourly: 'Hourly', daily: 'Daily' }
+const tierTone: Record<SnapshotTier, Tone> = { manual: 'info', recent: 'neutral', hourly: 'neutral', daily: 'neutral' }
+// Tier with a fallback for rows written before the retention tiers existed.
+export function snapshotTier(s: Pick<SnapshotSummary, 'tier' | 'scheduled'>): SnapshotTier {
+  return s.tier ?? (s.scheduled ? 'recent' : 'manual')
+}
+export function TierBadge({ snapshot }: { snapshot: Pick<SnapshotSummary, 'tier' | 'scheduled'> }) {
+  const tier = snapshotTier(snapshot)
+  return <Badge tone={tierTone[tier]}>{tier === 'manual' ? <Hand size={11} /> : <Clock size={11} />} {tierLabel[tier]}</Badge>
+}
+
+/* ---------- vCenter event categories ---------- */
+export const eventCategoryLabel: Record<EventCategory, string> = { user: 'User action', warning: 'Warning', error: 'Error', info: 'Info' }
+export const eventCategoryDot: Record<EventCategory, string> = { user: 'bg-accent', warning: 'bg-warning', error: 'bg-critical', info: 'bg-faint' }
+export function EventCategoryDot({ category, className }: { category: EventCategory; className?: string }) {
+  return <span aria-hidden className={cn('inline-block h-2 w-2 rounded-full shrink-0', eventCategoryDot[category] ?? 'bg-faint', className)} title={eventCategoryLabel[category] ?? category} />
 }
 
 export function ResourceIcon({ type, size = 15, className }: { type: string; size?: number; className?: string }) {
@@ -110,22 +129,35 @@ export function ChangeRow({ change, compact }: { change: Change; compact?: boole
           {change.summary ? <p className="text-sm text-muted mt-0.5">{change.summary}</p> : null}
         </div>
       </div>
-      {entries.length > 0 ? (
-        <div className={cn('mt-3 grid gap-2', compact ? '' : 'sm:grid-cols-2')}>
-          {entries.map(([k, v]) => {
-            const listy = Array.isArray(v.old) || Array.isArray(v.new)
-            return (
-              <div key={k} className={cn('rounded-md bg-surface-2 border border-border px-3 py-2 min-w-0', listy && !compact && 'sm:col-span-2')}>
-                <div className="text-[11px] uppercase tracking-wider text-faint font-semibold mb-1">{humanKey(k)}</div>
-                {listy ? <ListDiff propertyKey={k} oldList={asList(v.old)} newList={asList(v.new)} compact={compact} />
-                  : <ValueArrow oldValue={bytesIfNeeded(k, v.old)} newValue={bytesIfNeeded(k, v.new)} />}
-              </div>
-            )
-          })}
-        </div>
-      ) : change.change_type !== 'modified' ? (
-        <div className="mt-3 text-[13px] font-mono text-muted">{change.change_type === 'added' ? 'new resource' : 'resource no longer present'}</div>
-      ) : null}
+      {entries.length > 0 ? <PropertyChanges change={change} compact={compact} className="mt-3" />
+        : change.change_type !== 'modified' ? (
+          <div className="mt-3 text-[13px] font-mono text-muted">{change.change_type === 'added' ? 'new resource' : 'resource no longer present'}</div>
+        ) : null}
+    </div>
+  )
+}
+
+// The property-by-property diff grid shared by ChangeRow and the Changes timeline. List-valued
+// properties get the ListDiff rendering, byte counts read as GiB/TiB.
+export function PropertyChanges({ change, compact, className }: { change: Change; compact?: boolean; className?: string }) {
+  const entries = Object.entries(change.property_changes)
+  if (entries.length === 0) {
+    return change.change_type !== 'modified'
+      ? <div className={cn('text-[13px] font-mono text-muted', className)}>{change.change_type === 'added' ? 'new resource' : 'resource no longer present'}</div>
+      : <div className={cn('text-[13px] text-faint', className)}>No property detail recorded.</div>
+  }
+  return (
+    <div className={cn('grid gap-2', compact ? '' : 'sm:grid-cols-2', className)}>
+      {entries.map(([k, v]) => {
+        const listy = Array.isArray(v.old) || Array.isArray(v.new)
+        return (
+          <div key={k} className={cn('rounded-md bg-surface-2 border border-border px-3 py-2 min-w-0', listy && !compact && 'sm:col-span-2')}>
+            <div className="text-[11px] uppercase tracking-wider text-faint font-semibold mb-1">{humanKey(k)}</div>
+            {listy ? <ListDiff propertyKey={k} oldList={asList(v.old)} newList={asList(v.new)} compact={compact} />
+              : <ValueArrow oldValue={bytesIfNeeded(k, v.old)} newValue={bytesIfNeeded(k, v.new)} />}
+          </div>
+        )
+      })}
     </div>
   )
 }
