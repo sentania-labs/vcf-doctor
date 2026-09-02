@@ -13,8 +13,8 @@ from app.api.auth_router import router as auth_router
 from app.api.encryption_router import router as encryption_router
 from app.api.environment_router import router as environment_router
 from app.api.events_router import router as events_router
-from app.api.health_score_router import router as health_score_router
 from app.api.findings_related import router as findings_related_router
+from app.api.health_score_router import router as health_score_router
 from app.api.router import router as api_router
 from app.config import settings
 from app.snapshots import store
