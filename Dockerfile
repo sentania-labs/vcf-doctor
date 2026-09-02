@@ -17,7 +17,7 @@ RUN uv pip install --system --no-cache .
 # does (uv installed everything above, uvicorn is what runs). pip's vendored
 # copies of msgpack and setuptools are what the image scan flags, and they
 # are only patched when the base image ships a newer pip, so drop pip entirely.
-RUN uv pip uninstall --system pip
+RUN uv pip uninstall --system pip && rm -f /usr/local/bin/pip
 COPY fixtures/ /app/fixtures/
 COPY --from=frontend /src/dist /app/static
 RUN useradd -r -u 10001 -d /app -s /usr/sbin/nologin app \
