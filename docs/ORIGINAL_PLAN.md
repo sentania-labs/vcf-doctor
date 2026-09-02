@@ -1,3 +1,13 @@
+> Historical (2026-09-02): this is the original hackathon plan. It does not describe the current product. Kept for the record; the shipped product is described in the [README](../README.md).
+>
+> **Decisions since this was written**
+>
+> - 2026-09-02: demo mode retired (#34). Bundled fixture data is a test-only hook (`VCF_DOCTOR_TEST_FIXTURES`), not a run mode.
+> - Authentication and encryption at rest were originally out of scope and were shipped: shared operator password (#4), secrets encrypted at rest (#46), per-client login lockout and trusted proxies (#47).
+> - Retention moved from a snapshot count to tiered days, 14/30/365, editable in Settings (#31).
+> - Cross-vCenter comparison was redefined as an estate-wide time-1 vs time-2 view and delivered as the Environment page (#38).
+> - The Investigate action is an LLM prompt over the recorded evidence. The guided, deterministic evidence collection described in the vision is not built.
+
 # VCF Doctor
 
 **Tagline:** What’s wrong, what changed, and what should I do about it?

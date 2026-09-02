@@ -1,7 +1,7 @@
-"""Shared contracts. See docs/PLAN.md Phase 0 and startup.md section 7.
+"""Shared contracts. See docs/PLAN.md Phase 0 and docs/ORIGINAL_PLAN.md section 7.
 
 These are frozen for Phase 1. Do not change field names or types without a
-compelling reason and a note in STATUS.md.
+compelling reason and a note in the PR body.
 """
 
 from app.models.assistant import (

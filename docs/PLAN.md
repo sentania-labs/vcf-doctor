@@ -1,6 +1,16 @@
+> Historical (2026-09-02): the MVP plan that narrowed the original hackathon spec. Kept for the record; the shipped product is described in the [README](../README.md).
+>
+> **Decisions since this was written**
+>
+> - 2026-09-02: demo mode retired (#34). Bundled fixture data is a test-only hook (`VCF_DOCTOR_TEST_FIXTURES`), not a run mode.
+> - Authentication and encryption at rest were originally out of scope and were shipped: shared operator password (#4), secrets encrypted at rest (#46), per-client login lockout and trusted proxies (#47).
+> - Retention moved from a snapshot count to tiered days, 14/30/365, editable in Settings (#31).
+> - Cross-vCenter comparison was redefined as an estate-wide time-1 vs time-2 view and delivered as the Environment page (#38).
+> - The Investigate action is an LLM prompt over the recorded evidence. The guided, deterministic evidence collection described in the vision is not built.
+
 # VCF Doctor: MVP Plan, Schedulable Inventory
 
-Companion to `startup.md`. That document is the full hackathon spec. This one
+Companion to `docs/ORIGINAL_PLAN.md`. That document is the full hackathon spec. This one
 narrows it to a first shippable MVP and adds what the spec is missing for
 unattended, scheduled inventory.
 
@@ -46,7 +56,7 @@ Consequences:
   names, vSAN datastores, NSX-backed segments) so the fallback does not
   look like a different product.
 
-## Gaps in startup.md this plan closes
+## Gaps in docs/ORIGINAL_PLAN.md this plan closes
 
 1. **No scheduler.** The spec only has "Scan Now". Nothing runs unattended.
 2. **Connections are not persisted.** The spec keeps credentials in memory,
@@ -113,7 +123,7 @@ Duration: about 30 minutes. One agent.
 
 ### Repository layout
 
-As in `startup.md` section 6, plus `docs/PLAN.md` (this file).
+As in `docs/ORIGINAL_PLAN.md` section 6, plus `docs/PLAN.md` (this file).
 
 ### Contracts
 
@@ -208,7 +218,7 @@ Duration: about 90 minutes. Six agents in parallel, disjoint ownership.
 Six agents run in parallel. Token spend is authorized; speed is the
 constraint, not cost.
 
-Agent prompts are in `startup.md` sections 20 through 25. Agent A's prompt is
+Agent prompts are in `docs/ORIGINAL_PLAN.md` sections 20 through 25. Agent A's prompt is
 extended with the scheduler requirements below; Agent E's prompt is replaced
 by the assistant design below. Agent D starts on mock data and is not blocked
 on the backend.
