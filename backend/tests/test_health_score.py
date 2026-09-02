@@ -183,6 +183,18 @@ def test_overview_reports_three_counts_and_weights_move_score(client):
     assert client.get(f"/api/overview?connection_id={cid}").json()["health_score"] < h["score"]
 
 
+def test_overview_before_first_scan_is_all_not_evaluated(client):
+    r = client.post(
+        "/api/connections",
+        json={"name": "fx", "host": "fixture", "username": "u", "password": "p", "kind": "fixture"},
+    )
+    cid = r.json()["id"]
+    h = client.get(f"/api/overview?connection_id={cid}").json()["health"]
+    assert h["score"] == 100
+    assert (h["passed"], h["findings"]) == (0, 0)
+    assert h["not_evaluated"] == len(get_checks())
+
+
 def test_env_seed_for_defaults(monkeypatch, tmp_path):
     db.reset_for_tests(str(tmp_path / "e.db"))
     monkeypatch.setenv("VCF_DOCTOR_HEALTH_WEIGHTS", "critical=50, warning=bad, nope=3")

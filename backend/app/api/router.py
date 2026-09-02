@@ -62,9 +62,11 @@ def _check_coverage(connection_id: str | None) -> dict[str, int]:
     """Objects each check evaluated on the latest snapshot(s), summed across
     connections. Checks that compare against the previous snapshot count the
     previous snapshot's objects, and zero when there is none."""
-    from app.diagnostics.registry import coverage
+    from app.diagnostics.registry import coverage, get_checks
 
-    out: dict[str, int] = {}
+    # Every check starts at zero so a connection with no snapshot yet reports
+    # all checks as not evaluated rather than silently passed.
+    out: dict[str, int] = {c.id: 0 for c in get_checks()}
     for conn in _target_connections(connection_id):
         snaps = store.latest_snapshots(conn.id, 2)
         if not snaps:
