@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app import auth, db, scheduler
 from app.api.auth_router import router as auth_router
+from app.api.environment_router import router as environment_router
 from app.api.events_router import router as events_router
 from app.api.health_score_router import router as health_score_router
 from app.api.router import router as api_router
@@ -136,6 +137,7 @@ def health() -> dict:
 app.include_router(api_router)
 app.include_router(events_router)
 app.include_router(health_score_router)
+app.include_router(environment_router)
 
 try:
     from app.assistant.router import router as assistant_router

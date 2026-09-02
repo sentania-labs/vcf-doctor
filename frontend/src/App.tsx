@@ -8,6 +8,7 @@ import LoginPage from '@/pages/Login'
 import OverviewPage from '@/pages/Overview'
 import HealthPage from '@/pages/Health'
 import ChangesPage from '@/pages/Changes'
+import EnvironmentPage from '@/pages/Environment'
 import EventsPage from '@/pages/Events'
 import InventoryPage from '@/pages/Inventory'
 import SnapshotsPage from '@/pages/Snapshots'
@@ -27,6 +28,7 @@ function Console() {
               <Route index element={<OverviewPage />} />
               <Route path="health" element={<HealthPage />} />
               <Route path="changes" element={<ChangesPage />} />
+              <Route path="environment" element={<EnvironmentPage />} />
               <Route path="events" element={<EventsPage />} />
               <Route path="inventory" element={<InventoryPage />} />
               <Route path="snapshots" element={<SnapshotsPage />} />

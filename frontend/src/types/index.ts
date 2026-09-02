@@ -104,3 +104,24 @@ export type AssistantStreamEvent =
   | { type: 'delta'; text: string }
   | { type: 'done'; stop_reason: string; evidence: AssistantEvidenceCount }
   | { type: 'error'; message: string }
+// GET /environment/changes: what changed across every connection between two points in time.
+export interface SignificanceCounts { high: number; medium: number; low: number; total: number }
+// Findings present at the end of the window but not at its start (appeared), and the reverse (cleared),
+// compared between the findings cached with the two boundary snapshots.
+export interface FindingsDelta {
+  baseline_snapshot_id: string; baseline_at: string; end_snapshot_id: string; end_at: string
+  appeared: Finding[]; cleared: Finding[]
+}
+export interface EnvironmentConnection {
+  connection_id: string; name: string; host: string; kind: string
+  has_data: boolean; snapshots_in_window: number; counts: SignificanceCounts
+  changes: ChangeLogEntry[]; truncated: boolean; findings: FindingsDelta | null
+}
+export interface EnvironmentTotals {
+  connections: number; covered: number; no_data: number; changes: SignificanceCounts
+  findings_appeared: number; findings_cleared: number
+}
+export interface EnvironmentChanges {
+  since: string; until: string; window: 'last_cycle' | 'custom'; min_significance: Significance
+  totals: EnvironmentTotals; connections: EnvironmentConnection[]
+}

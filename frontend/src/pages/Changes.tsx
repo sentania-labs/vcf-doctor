@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { AlertTriangle, ArrowDown, Camera, ChevronDown, ChevronRight, GitCompareArrows, History } from 'lucide-react'
-import type { Change, ChangeLogEntry, Significance, SnapshotSummary } from '@/types'
+import { AlertTriangle, ArrowDown, Camera, GitCompareArrows, History } from 'lucide-react'
+import type { Change, Significance, SnapshotSummary } from '@/types'
 import { getChangeLog, getChanges, getChangesMinSignificance, getSnapshots } from '@/api'
 import { useAsync } from '@/hooks/useAsync'
 import { useAppState } from '@/state/AppState'
-import { Badge, Button, Card, EmptyState, ErrorState, Input, PageHeader, Segmented, Select, Skeleton } from '@/components/ui'
-import { PropertyChanges, ChangeRow, ResourceIcon, ResourceTypeLabel, significanceLabel, significanceTone, snapshotTier, tierLabel } from '@/components/domain'
+import { Button, Card, EmptyState, ErrorState, Input, PageHeader, Segmented, Select, Skeleton } from '@/components/ui'
+import { ChangeRow, significanceLabel, snapshotTier, tierLabel } from '@/components/domain'
+import { ChangeLogRow, SignificanceSummary as Summary } from '@/components/changes/ChangeLogRow'
 import { RANGE_PRESETS, formatDateTime, formatTime, groupByDay, relativeTime, sinceFor, type RangePreset } from '@/lib/format'
 import { cn } from '@/lib/cn'
 
@@ -122,7 +123,7 @@ function Timeline({ connectionId, minSig, setMinSig, refreshKey, onCompare }: { 
               <section key={g.key}>
                 <h2 className="flex items-baseline gap-2 text-xs font-semibold uppercase tracking-wider text-faint mb-2.5">{g.label} <span className="tnum font-medium normal-case tracking-normal">{g.items.length}</span></h2>
                 <Card className="divide-y divide-border overflow-hidden">
-                  {g.items.map(r => <LogRow key={r.id} row={r} open={openIds.has(r.id)} onToggle={() => toggle(r.id)} onCompare={onCompare} />)}
+                  {g.items.map(r => <ChangeLogRow key={r.id} row={r} open={openIds.has(r.id)} onToggle={() => toggle(r.id)} onCompare={onCompare} />)}
                 </Card>
               </section>
             ))}
@@ -131,38 +132,6 @@ function Timeline({ connectionId, minSig, setMinSig, refreshKey, onCompare }: { 
             ) : null}
           </div>
         )}
-    </div>
-  )
-}
-
-function LogRow({ row, open, onToggle, onCompare }: { row: ChangeLogEntry; open: boolean; onToggle: () => void; onCompare: (from: string, to: string) => void }) {
-  const typeTone = row.change_type === 'added' ? 'ok' : row.change_type === 'removed' ? 'critical' : null
-  const n = Object.keys(row.property_changes).length
-  return (
-    <div className={cn(open && 'bg-surface-2/50')}>
-      <button onClick={onToggle} aria-expanded={open}
-        className="w-full text-left px-4 py-2.5 grid grid-cols-[76px_auto_minmax(0,1fr)_16px] items-center gap-3 hover:bg-surface-2 transition-colors">
-        <span className="text-[13px] text-muted tnum" title={formatDateTime(row.observed_at)}>{formatTime(row.observed_at)}</span>
-        <span className="flex items-center gap-1.5">
-          <Badge tone={significanceTone[row.significance]} dot>{row.significance}</Badge>
-          {typeTone ? <Badge tone={typeTone}>{row.change_type}</Badge> : null}
-        </span>
-        <span className="min-w-0 flex items-baseline gap-2 flex-wrap">
-          <span className="inline-flex items-center gap-1.5 text-sm font-semibold tracking-tight"><ResourceIcon type={row.resource_type} size={13} className="text-muted" />{row.resource_name}</span>
-          <span className="text-xs text-faint"><ResourceTypeLabel type={row.resource_type} /></span>
-          <span className="text-sm text-muted truncate">{row.summary}</span>
-        </span>
-        {open ? <ChevronDown size={15} className="text-faint" /> : <ChevronRight size={15} className="text-faint" />}
-      </button>
-      {open ? (
-        <div className="px-4 pb-4 pl-[108px] space-y-3">
-          <PropertyChanges change={row} />
-          <div className="flex items-center gap-3 text-xs text-faint">
-            <span>{n} {n === 1 ? 'property' : 'properties'} changed, observed {relativeTime(row.observed_at)}</span>
-            <button className="text-accent hover:underline ml-auto" onClick={() => onCompare(row.from_snapshot_id, row.to_snapshot_id)}>Compare these two snapshots</button>
-          </div>
-        </div>
-      ) : null}
     </div>
   )
 }
@@ -284,8 +253,4 @@ function SnapPicker({ label, value, onChange, snaps }: { label: string; value: s
       {s ? <span className="block text-xs text-muted mt-1.5">{formatDateTime(s.created_at)}, {relativeTime(s.created_at)}, {tierLabel[snapshotTier(s)].toLowerCase()}{needle && visible.length !== snaps.length ? <span className="text-faint"> ({visible.length} of {snaps.length} shown)</span> : null}</span> : null}
     </div>
   )
-}
-
-function Summary({ n, label, dot }: { n: number; label: string; dot: string }) {
-  return <span className="inline-flex items-center gap-2 text-sm"><span className={cn('h-2 w-2 rounded-full', dot)} /><span className="font-semibold tnum">{n}</span><span className="text-muted">{label}</span></span>
 }

@@ -1,6 +1,6 @@
 import { NavLink, Outlet } from 'react-router-dom'
 import { useState } from 'react'
-import { Activity, Bot, Boxes, Camera, GitCompareArrows, HeartPulse, LayoutDashboard, LogOut, Plug, ScrollText, Settings as SettingsIcon, Stethoscope } from 'lucide-react'
+import { Activity, Bot, Boxes, Camera, GitCompareArrows, Globe, HeartPulse, LayoutDashboard, LogOut, Plug, ScrollText, Settings as SettingsIcon, Stethoscope } from 'lucide-react'
 import { TopBar } from './TopBar'
 import { AssistantDrawer } from '@/components/assistant/AssistantDrawer'
 import { useAppState } from '@/state/AppState'
@@ -12,6 +12,7 @@ const primary = [
   { to: '/', label: 'Overview', icon: LayoutDashboard, end: true },
   { to: '/health', label: 'Health', icon: HeartPulse },
   { to: '/changes', label: 'Changes', icon: GitCompareArrows },
+  { to: '/environment', label: 'Environment', icon: Globe },
   { to: '/events', label: 'Events', icon: ScrollText },
   { to: '/inventory', label: 'Inventory', icon: Boxes },
   { to: '/snapshots', label: 'Snapshots', icon: Camera },
