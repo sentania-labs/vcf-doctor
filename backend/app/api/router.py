@@ -58,23 +58,31 @@ def _latest_resources(connection_id: str | None) -> list[Resource]:
     return out
 
 
-def _check_coverage(connection_id: str | None) -> dict[str, int]:
-    """Objects each check evaluated on the latest snapshot(s), summed across
-    connections. Checks that compare against the previous snapshot count the
+def _health_inputs(
+    connection_id: str | None,
+) -> tuple[list[Resource], list[Finding], dict[str, int]]:
+    """Latest resources, their cached findings, and the objects each check
+    evaluated (summed across connections), from one snapshot read per
+    connection. Checks that compare against the previous snapshot count the
     previous snapshot's objects, and zero when there is none."""
     from app.diagnostics.registry import coverage, get_checks
 
+    resources: list[Resource] = []
+    findings: list[Finding] = []
     # Every check starts at zero so a connection with no snapshot yet reports
     # all checks as not evaluated rather than silently passed.
-    out: dict[str, int] = {c.id: 0 for c in get_checks()}
+    cov: dict[str, int] = {c.id: 0 for c in get_checks()}
     for conn in _target_connections(connection_id):
         snaps = store.latest_snapshots(conn.id, 2)
         if not snaps:
             continue
+        resources.extend(snaps[0].resources)
+        findings.extend(store.get_findings(snaps[0].id))
         previous = snaps[1].resources if len(snaps) > 1 else None
         for check_id, n in coverage(snaps[0].resources, previous).items():
-            out[check_id] = out.get(check_id, 0) + n
-    return out
+            cov[check_id] = cov.get(check_id, 0) + n
+    findings.sort(key=lambda f: SEVERITY_RANK.get(f.severity, 9))
+    return resources, findings, cov
 
 
 def _latest_findings(connection_id: str | None) -> list[Finding]:
@@ -507,8 +515,7 @@ def put_settings(body: AppSettingsUpdate):
 def overview(
     connection_id: str | None = None, min_significance: str | None = None
 ) -> dict[str, Any]:
-    resources = _latest_resources(connection_id)
-    findings = _latest_findings(connection_id)
+    resources, findings, cov = _health_inputs(connection_id)
     changes = _recent_changes(connection_id, min_significance)
 
     by_sev = {"critical": 0, "warning": 0, "info": 0}
@@ -525,7 +532,10 @@ def overview(
     free = sum(float(r.properties.get("freeSpace") or 0) for r in stores)
     storage_free_pct = round(free / capacity * 100, 1) if capacity else None
 
-    health = compute_health(findings, _check_coverage(connection_id))
+    # Findings cached for a check that no longer exists (renamed or removed
+    # in an upgrade) still list, but do not score: the three check counts
+    # must add up to the number of checks.
+    health = compute_health([f for f in findings if f.check_id in cov], cov)
     last_scan = store.latest_run(connection_id)
     by_sev["passed"] = health["passed"]
     return {

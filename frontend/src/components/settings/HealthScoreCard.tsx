@@ -24,20 +24,22 @@ function problem(w: HealthWeights): string | null {
 export default function HealthScoreCard() {
   const s = useAsync(() => getHealthScoreSettings(), [])
   const [weights, setWeights] = useState<HealthWeights>({ critical: 40, warning: 15, info: 0 })
+  // What the server currently holds; dirty and Defaults are judged against this, not the initial load.
+  const [applied, setApplied] = useState<HealthScoreSettings | null>(null)
   const [busy, setBusy] = useState(false)
   const [saved, setSaved] = useState(false)
   const [err, setErr] = useState<string | null>(null)
-  useEffect(() => { if (s.data) setWeights(s.data.weights) }, [s.data])
+  useEffect(() => { if (s.data) { setWeights(s.data.weights); setApplied(s.data) } }, [s.data])
 
   const set = (k: HealthSeverity) => (e: ChangeEvent<HTMLInputElement>) => setWeights(w => ({ ...w, [k]: e.target.value === '' ? 0 : Math.floor(Number(e.target.value)) }))
-  const apply = (d: HealthScoreSettings) => { setWeights(d.weights); setSaved(true); setTimeout(() => setSaved(false), 2500) }
+  const apply = (d: HealthScoreSettings) => { setWeights(d.weights); setApplied(d); setSaved(true); setTimeout(() => setSaved(false), 2500) }
   const run = async (op: () => Promise<HealthScoreSettings>) => {
     setBusy(true); setErr(null); setSaved(false)
     try { apply(await op()) } catch (e) { setErr(e instanceof Error ? e.message : String(e)) } finally { setBusy(false) }
   }
   const invalid = problem(weights)
-  const dirty = s.data ? SEVERITIES.some(({ key }) => s.data!.weights[key] !== weights[key]) : false
-  const isDefault = s.data ? SEVERITIES.every(({ key }) => s.data!.defaults[key] === weights[key]) : true
+  const dirty = applied ? SEVERITIES.some(({ key }) => applied.weights[key] !== weights[key]) : false
+  const isDefault = applied ? SEVERITIES.every(({ key }) => applied.defaults[key] === weights[key]) : true
 
   return (
     <Card>

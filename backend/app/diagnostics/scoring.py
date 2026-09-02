@@ -122,7 +122,7 @@ def compute_health(
     a check missing from coverage still count; its denominator becomes the
     number of findings so the deduction is the full weight."""
     w = dict(DEFAULT_WEIGHTS)
-    w.update(weights or get_weights())
+    w.update(weights if weights is not None else get_weights())
     cap = max(w.values()) if w else 0
     per_check: dict[str, dict[str, Any]] = {}
     for check_id, n in coverage.items():
@@ -148,13 +148,15 @@ def compute_health(
             passed += 1
         total += entry["deduction"]
     score = int(round(max(0.0, 100.0 - total)))
+    # What the operator sees as "lost" must add up to the score shown next to it.
+    lost = 100 - score
     checks = sorted(per_check.values(), key=lambda e: (-e["deduction"], e["check_id"]))
     return {
         "score": score,
         "passed": passed,
         "findings": with_findings,
         "not_evaluated": not_evaluated,
-        "deduction": round(min(100.0, total), 2),
+        "deduction": lost,
         "weights": w,
         "formula": FORMULA,
         "checks": checks,

@@ -71,6 +71,12 @@ class HostMaintenanceMode(DiagnosticCheck):
     description = "An ESXi host is in maintenance mode and not running workloads."
     resource_type = "host"
 
+    def applicable(
+        self, resources: list[Resource], previous: list[Resource] | None = None
+    ) -> list[Resource]:
+        hosts = by_type(resources, "host")
+        return [h for h in hosts if h.properties.get("maintenanceMode") is not None]
+
     def evaluate(
         self, resources: list[Resource], previous: list[Resource] | None = None
     ) -> list[Finding]:

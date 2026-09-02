@@ -114,6 +114,31 @@ def test_coverage_marks_previous_snapshot_checks_not_evaluated():
     assert cov2["RESOURCE_REMOVED"] == 2
 
 
+def test_objects_without_the_inspected_property_are_not_counted():
+    # An object the collector could not report on must not pad the denominator.
+    hosts = [_host("h1", maintenanceMode=False), _host("h2", maintenanceMode=None)]
+    assert coverage(hosts, None)["HOST_MAINTENANCE_MODE"] == 1
+    judged = {"powerState": "poweredOn", "toolsStatus": "toolsOk", "snapshotCount": 0}
+    bare = {"powerState": "poweredOn"}
+    vms = [
+        Resource(id="v1", type="vm", name="v1", source="vc01", properties=judged),
+        Resource(id="v2", type="vm", name="v2", source="vc01", properties=bare),
+    ]
+    cov = coverage(vms, None)
+    assert cov["VM_TOOLS_NOT_RUNNING"] == 1
+    assert cov["VM_SNAPSHOT_STALE"] == 1
+    assert cov["VM_ORPHANED_OR_INACCESSIBLE"] == 0
+    assert cov["VM_POWERED_OFF"] == 2
+
+
+def test_deduction_shown_adds_up_to_score():
+    f = [_finding("A", "warning", "x")]
+    h = scoring.compute_health(f, {"A": 4}, {"warning": 15})  # 3.75 lost, score 96
+    assert h["score"] == 96 and h["deduction"] == 4
+    h = scoring.compute_health(f, {"A": 1}, {"warning": 100})
+    assert h["score"] == 0 and h["deduction"] == 100
+
+
 def test_every_check_has_coverage_and_findings_never_exceed_it():
     from app.collectors.fixture import FixtureCollector
 

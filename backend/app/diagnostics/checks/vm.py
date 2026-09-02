@@ -49,6 +49,18 @@ class VmOrphanedOrInaccessible(DiagnosticCheck):
     description = "A virtual machine is orphaned, inaccessible, or invalid."
     resource_type = "vm"
 
+    def applicable(
+        self, resources: list[Resource], previous: list[Resource] | None = None
+    ) -> list[Resource]:
+        # Judged when the collector reported any of the three signals.
+        return [
+            vm for vm in by_type(resources, "vm")
+            if any(
+                vm.properties.get(k) is not None
+                for k in ("connectionState", "orphaned", "inaccessible")
+            )
+        ]
+
     def evaluate(
         self, resources: list[Resource], previous: list[Resource] | None = None
     ) -> list[Finding]:
@@ -131,6 +143,16 @@ class VmSnapshotStale(DiagnosticCheck):
     )
     resource_type = "vm"
 
+    def applicable(
+        self, resources: list[Resource], previous: list[Resource] | None = None
+    ) -> list[Resource]:
+        # Older snapshots carry no snapshot tree at all; those VMs were not judged.
+        return [
+            vm for vm in by_type(resources, "vm")
+            if vm.properties.get("snapshotCount") is not None
+            or vm.properties.get("oldestSnapshotTime") is not None
+        ]
+
     def evaluate(
         self, resources: list[Resource], previous: list[Resource] | None = None
     ) -> list[Finding]:
@@ -187,7 +209,9 @@ class VmToolsNotRunning(DiagnosticCheck):
         # Only powered-on, non-template VMs can be judged on Tools state.
         return [
             vm for vm in by_type(resources, "vm")
-            if not is_template(vm) and vm.properties.get("powerState") == "poweredOn"
+            if not is_template(vm)
+            and vm.properties.get("powerState") == "poweredOn"
+            and vm.properties.get("toolsStatus") is not None
         ]
 
     def evaluate(
