@@ -460,11 +460,62 @@ def list_snapshots(connection_id: str | None = None) -> list[SnapshotSummary]:
     return [_row_to_summary(r, policy, at) for r in db.fetchall(q, args)]
 
 
-def count_snapshots(connection_id: str) -> int:
-    row = db.fetchone(
-        "SELECT COUNT(*) AS n FROM snapshots WHERE connection_id = ?", (connection_id,)
-    )
-    return int(row["n"])
+def count_snapshots(
+    connection_id: str, since: datetime | None = None, until: datetime | None = None
+) -> int:
+    """Snapshots for a connection, optionally only those created inside [since, until]."""
+    q = "SELECT COUNT(*) AS n FROM snapshots WHERE connection_id = ?"
+    args: list[object] = [connection_id]
+    if since is not None:
+        q += " AND created_at >= ?"
+        args.append(since.isoformat())
+    if until is not None:
+        q += " AND created_at <= ?"
+        args.append(until.isoformat())
+    return int(db.fetchone(q, tuple(args))["n"])
+
+
+def snapshot_summary_at(
+    connection_id: str, *, before: datetime | None = None, at_or_before: datetime | None = None
+) -> SnapshotSummary | None:
+    """The newest snapshot created strictly before `before`, or at or before
+    `at_or_before` (one of the two). Used to find window boundaries."""
+    q = f"SELECT {_SUMMARY_COLS} FROM snapshots WHERE connection_id = ?"
+    args: list[object] = [connection_id]
+    if before is not None:
+        q += " AND created_at < ?"
+        args.append(before.isoformat())
+    if at_or_before is not None:
+        q += " AND created_at <= ?"
+        args.append(at_or_before.isoformat())
+    row = db.fetchone(q + " ORDER BY created_at DESC LIMIT 1", tuple(args))
+    return _row_to_summary(row) if row is not None else None
+
+
+def earliest_snapshot_summary_since(
+    connection_id: str, since: datetime, until: datetime | None = None
+) -> SnapshotSummary | None:
+    """The oldest snapshot created at or after `since` (and at or before `until`)."""
+    q = f"SELECT {_SUMMARY_COLS} FROM snapshots WHERE connection_id = ? AND created_at >= ?"
+    args: list[object] = [connection_id, since.isoformat()]
+    if until is not None:
+        q += " AND created_at <= ?"
+        args.append(until.isoformat())
+    row = db.fetchone(q + " ORDER BY created_at ASC LIMIT 1", tuple(args))
+    return _row_to_summary(row) if row is not None else None
+
+
+def existing_snapshot_ids(snapshot_ids: list[str]) -> set[str]:
+    """Which of the given ids still have a snapshot row (change rows outlive pruning)."""
+    ids = sorted(set(snapshot_ids))
+    found: set[str] = set()
+    for i in range(0, len(ids), _SQL_CHUNK):
+        chunk = ids[i : i + _SQL_CHUNK]
+        rows = db.fetchall(
+            f"SELECT id FROM snapshots WHERE id IN ({','.join('?' * len(chunk))})", tuple(chunk)
+        )
+        found.update(r["id"] for r in rows)
+    return found
 
 
 def get_snapshot(snapshot_id: str) -> Snapshot | None:
@@ -675,6 +726,27 @@ def list_change_log(
     return [_row_to_change(r) for r in db.fetchall(q, tuple(args))]
 
 
+def count_changes_by_significance(
+    connection_id: str,
+    since: datetime | None = None,
+    until: datetime | None = None,
+) -> dict[str, int]:
+    """{"high": n, "medium": n, "low": n} for the rows observed inside [since, until]."""
+    q = "SELECT significance, COUNT(*) AS n FROM changes WHERE connection_id = ?"
+    args: list[object] = [connection_id]
+    if since is not None:
+        q += " AND observed_at >= ?"
+        args.append(since.isoformat())
+    if until is not None:
+        q += " AND observed_at <= ?"
+        args.append(until.isoformat())
+    out = {level: 0 for level in _SIG_ORDER}
+    for row in db.fetchall(q + " GROUP BY significance", tuple(args)):
+        if row["significance"] in out:
+            out[row["significance"]] = int(row["n"])
+    return out
+
+
 def count_changes(connection_id: str) -> int:
     row = db.fetchone("SELECT COUNT(*) AS n FROM changes WHERE connection_id = ?", (connection_id,))
     return int(row["n"])
@@ -700,6 +772,11 @@ def save_findings(snapshot_id: str, findings: list[Finding]) -> None:
             "ON CONFLICT(snapshot_id) DO UPDATE SET findings = excluded.findings",
             (snapshot_id, payload),
         )
+
+
+def findings_cached(snapshot_id: str) -> bool:
+    """True when a findings row exists for the snapshot (an empty list still counts)."""
+    return db.fetchone("SELECT 1 FROM findings WHERE snapshot_id = ?", (snapshot_id,)) is not None
 
 
 def get_findings(snapshot_id: str) -> list[Finding]:
