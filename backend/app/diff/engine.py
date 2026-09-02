@@ -166,7 +166,7 @@ def _norm(value: Any) -> Any:
 
 def _fmt(value: Any) -> str:
     if value is None:
-        return "none"
+        return "unknown"
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, list | tuple):
@@ -177,8 +177,10 @@ def _fmt(value: Any) -> str:
 
 
 def _short(value: Any) -> str:
-    """Last segment of a namespaced id, e.g. host:vc01:esx02 -> esx02."""
-    if isinstance(value, str) and ":" in value:
+    """Last segment of a namespaced id, e.g. host:vc01:esx02 -> esx02. Only
+    plain id-like strings are shortened; a JSON rendering of a dict or list
+    also contains colons and must be shown whole."""
+    if isinstance(value, str) and ":" in value and not value.lstrip().startswith(("{", "[")):
         return value.rsplit(":", 1)[-1]
     return _fmt(value)
 
@@ -190,6 +192,16 @@ def _item_str(value: Any) -> str:
     if isinstance(value, dict | list | tuple):
         return _json_key(value)
     return _fmt(value)
+
+
+def _pct(value: float | None) -> str:
+    return "unknown" if value is None else f"{value}%"
+
+
+def _empty(value: Any) -> bool:
+    """None and an empty list both mean 'nothing here'; treating them as
+    different would report a change with nothing to show."""
+    return value is None or (isinstance(value, list | tuple | set | frozenset) and not value)
 
 
 def _band(pct: float) -> int:
@@ -265,6 +277,8 @@ def _scalar_summary(prop: str, old: Any, new: Any) -> str:
 
 
 def _scalar_list_summary(prop: str, old: Any, new: Any) -> str:
+    # Items are rendered to strings before set arithmetic so dicts and lists
+    # (unhashable) inside a scalar list cannot crash the diff.
     before = {_item_str(x) for x in _as_list(old)}
     after = {_item_str(x) for x in _as_list(new)}
     show = _short if prop in _ID_VALUED else str
@@ -338,7 +352,7 @@ def _diff_free_space(
     )
     props["usagePct"] = PropertyChange(old=o_pct, new=n_pct)
     sigs.append("high" if (n_pct or 0) >= USAGE_BANDS[1] else "medium")
-    parts.append(f"usage {_fmt(o_pct)}% -> {_fmt(n_pct)}%")
+    parts.append(f"usage {_pct(o_pct)} -> {_pct(n_pct)}")
 
 
 def _diff_modified(
@@ -355,6 +369,8 @@ def _diff_modified(
             o = _value(old, prop, old_members)
             n = _value(new, prop, new_members)
             if _norm(o) == _norm(n):
+                continue
+            if _empty(o) and _empty(n):
                 continue
             if prop in _BOTH_SIDES_REQUIRED and (o is None or n is None):
                 continue
@@ -379,6 +395,28 @@ def _diff_modified(
     )
 
 
+def _added(r: Resource) -> Change:
+    return Change(
+        change_type="added",
+        resource_id=r.id,
+        resource_type=r.type,
+        resource_name=r.name,
+        significance=_added_significance(r),
+        summary=f"{r.type} {r.name} added",
+    )
+
+
+def _removed(r: Resource) -> Change:
+    return Change(
+        change_type="removed",
+        resource_id=r.id,
+        resource_type=r.type,
+        resource_name=r.name,
+        significance=_removed_significance(r),
+        summary=f"{r.type} {r.name} removed",
+    )
+
+
 def diff(
     old: list[Resource], new: list[Resource], min_significance: Significance = "low"
 ) -> list[Change]:
@@ -397,31 +435,19 @@ def diff(
 
     for rid, r in new_by_id.items():
         if rid not in old_by_id:
-            changes.append(
-                Change(
-                    change_type="added",
-                    resource_id=rid,
-                    resource_type=r.type,
-                    resource_name=r.name,
-                    significance=_added_significance(r),
-                    summary=f"{r.type} {r.name} added",
-                )
-            )
+            changes.append(_added(r))
     for rid, r in old_by_id.items():
         if rid not in new_by_id:
-            changes.append(
-                Change(
-                    change_type="removed",
-                    resource_id=rid,
-                    resource_type=r.type,
-                    resource_name=r.name,
-                    significance=_removed_significance(r),
-                    summary=f"{r.type} {r.name} removed",
-                )
-            )
+            changes.append(_removed(r))
     for rid, r in new_by_id.items():
         prev = old_by_id.get(rid)
         if prev is None:
+            continue
+        if prev.type != r.type:
+            # Same id, different kind of object: nothing to compare property
+            # by property. Report the old one gone and the new one arrived.
+            changes.append(_removed(prev))
+            changes.append(_added(r))
             continue
         change = _diff_modified(prev, r, old_members, new_members)
         if change is not None:
