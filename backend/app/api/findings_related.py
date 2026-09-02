@@ -192,6 +192,11 @@ def related_changes(connection_id: str, finding: Finding, resources: list[Resour
         # the log (which outlives snapshots) may still hold the cause: read back to the cap.
         log_since = floor if first.all_surviving else max(first.interval_start, floor)
         rows = _logged(connection_id, log_since, near)
+        if not first.all_surviving:
+            # The store's since is inclusive; a row stamped at interval_start is the diff that
+            # ended at the pre-finding snapshot, so it predates the interval in which the
+            # finding appeared. Keep only rows observed after that boundary.
+            rows = [r for r in rows if r.observed_at > first.interval_start]
         since = max(first.interval_start, floor)
         if first.all_surviving and rows:
             since = min(since, max(min(r.observed_at for r in rows), floor))

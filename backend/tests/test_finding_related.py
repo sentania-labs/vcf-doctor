@@ -124,6 +124,27 @@ def test_pruned_middle_snapshot_keeps_the_cause_in_the_query(client):
     assert body["changes"][0]["summary"] == "connectionState connected -> disconnected"
 
 
+def test_rows_ending_at_the_pre_finding_snapshot_are_excluded(client):
+    """A row stamped with the snapshot before the finding appeared belongs to the
+    diff that ended there (Z -> A), not to the A -> B interval that introduced it."""
+    cid = _connection(client, 3)
+    snaps = client.get(f"/api/snapshots?connection_id={cid}").json()
+    finding = _finding(client, cid, "HOST_DISCONNECTED")
+    stale = Change(
+        change_type="modified",
+        resource_id=finding["resource_id"],
+        resource_type="host",
+        resource_name="esx03",
+        significance="high",
+        summary="STALE: before the finding",
+    )
+    store.save_changes(cid, "z", snaps[2]["id"], store.list_snapshots(cid)[2].created_at, [stale])
+    body = client.get(f"/api/findings/{finding['id']}/related?connection_id={cid}").json()
+    summaries = [c["summary"] for c in body["changes"]]
+    assert "STALE: before the finding" not in summaries
+    assert summaries[0] == "connectionState connected -> disconnected"
+
+
 def test_no_log_falls_back_to_latest_differing_pair(client):
     """A database from before the change log has no rows: diff the newest pair that differs."""
     cid = _connection(client, 3)
