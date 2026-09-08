@@ -214,7 +214,7 @@ def test_capture_events_enriches_stores_prunes_and_never_raises(monkeypatch):
     assert service.capture_events(conn, collector, snap) == 2  # c1:3 is past retention
     assert collector.calls == [(NOW - timedelta(hours=48), NOW)]
     rows = {e.id: e for e in events_store.list_events("c1", since=NOW - timedelta(days=365))}
-    assert set(rows) == {"c1:1", "c1:2"}  # c1:3 never stored under the 30 day policy
+    assert set(rows) == {"c1:1", "c1:2"}  # c1:3 never stored under the 48-hour policy
     assert rows["c1:1"].resource_name == "web03" and rows["c1:1"].resource_type == "vm"
     assert rows["c1:2"].resource_name is None  # not in the snapshot: id kept, no name
     # second capture of the same window is a no-op thanks to dedup
