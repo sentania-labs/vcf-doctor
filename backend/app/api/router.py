@@ -494,6 +494,14 @@ def get_settings():
     )
 
 
+@router.post("/settings/events/compaction-migration", response_model=EventMaintenanceStatus)
+def run_compaction_migration():
+    from app.events import store as events_store
+
+    db.migrate_compaction()
+    return events_store.bounded_maintenance()
+
+
 _TIER_KEYS = ("recent_days", "hourly_days", "daily_days")
 
 

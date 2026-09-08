@@ -10,10 +10,13 @@ from the API threads do not block the scheduler thread.
 """
 
 import json
+import math
+import shutil
 import sqlite3
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -120,14 +123,13 @@ def connect() -> sqlite3.Connection:
             _conn = sqlite3.connect(cfg.db_path, check_same_thread=False)
             _conn.row_factory = sqlite3.Row
             if new_database:
-                # Must be selected before tables are created. Existing databases
-                # keep their current mode because changing it requires a full VACUUM.
                 _conn.execute("PRAGMA auto_vacuum=INCREMENTAL")
             _conn.execute("PRAGMA journal_mode=WAL")
             _conn.execute("PRAGMA foreign_keys=ON")
             _conn.executescript(SCHEMA)
             _add_missing_columns(_conn)
             _conn.commit()
+            migrate_compaction()
         return _conn
 
 
@@ -177,3 +179,35 @@ def set_setting(key: str, value: Any) -> None:
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             (key, json.dumps(value)),
         )
+
+
+COMPACTION_MIGRATION_KEY = "incremental_compaction_migration"
+
+
+def migrate_compaction() -> dict[str, Any]:
+    with _lock:
+        c = connect()
+        state = get_setting(COMPACTION_MIGRATION_KEY, {})
+        mode = c.execute("PRAGMA auto_vacuum").fetchone()[0]
+        if mode == 2:
+            if not state.get("migrated_at"):
+                state = {"migrated_at": datetime.now(UTC).isoformat(), "last_error": None}
+                set_setting(COMPACTION_MIGRATION_KEY, state)
+            return state
+        try:
+            if mode != 0 or state.get("migrated_at"):
+                raise RuntimeError("compaction unavailable: database is not in incremental mode")
+            c.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchall()
+            path = Path(cfg.db_path)
+            required = math.ceil(path.stat().st_size * 1.5)
+            if shutil.disk_usage(path.parent).free < required:
+                raise RuntimeError(
+                    f"compaction unavailable: needs {math.ceil(required / 1_000_000)} MB free"
+                )
+            c.execute("PRAGMA auto_vacuum=INCREMENTAL")
+            c.execute("VACUUM")
+            state = {"migrated_at": datetime.now(UTC).isoformat(), "last_error": None}
+        except Exception as exc:
+            state = {**state, "last_error": str(exc)[:500]}
+        set_setting(COMPACTION_MIGRATION_KEY, state)
+        return state

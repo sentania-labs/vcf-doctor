@@ -65,11 +65,15 @@ Both values apply per connection after the next scan. Existing databases gain
 the setting and supporting tables during startup. A result that reaches the
 20,000-item vCenter safety limit is split into smaller time windows. If the
 minimum window still reaches the limit, its interval is persisted, shown on
-the Events page, and retried on later scans.
+the Events page, and retried on later scans. Overlapping gaps are coalesced;
+gaps covered by the checkpoint window are not queried separately.
 
 Pruning is followed by bounded `incremental_vacuum` maintenance. Settings shows
 its last run, reclaimed page count, and last error. A scan never runs a full
-database vacuum.
+database vacuum. Existing databases receive a guarded one-time startup migration
+to incremental mode, requiring free volume space of at least 1.5 times the file
+size. Settings exposes migration failures and a retry button; see the README
+upgrade notes.
 
 - `GET /api/events?connection_id=&since=&until=&resource_id=&category=&q=&limit=`
   newest first, default last 24 h, limit 500.

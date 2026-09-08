@@ -143,3 +143,72 @@ def test_incremental_maintenance_records_reclamation():
     assert status.last_error is None
     assert status.pages_reclaimed == before - after
     assert after < before
+
+
+def test_persistent_burst_coalesces_gaps_without_extra_retries(monkeypatch):
+    monkeypatch.setattr(service, "MAX_ITEMS", 10)
+    events_store.set_capture_checkpoint("c1", NOW - timedelta(minutes=30))
+    burst = NOW - timedelta(minutes=10, microseconds=123456)
+    rows = [_event(i, burst) for i in range(12)]
+    inserted_batches = []
+    original_upsert = events_store.upsert_events
+
+    def upsert(events):
+        inserted_batches.append(len(events))
+        return original_upsert(events)
+
+    monkeypatch.setattr(events_store, "upsert_events", upsert)
+
+    class Dense:
+        def __init__(self):
+            self.calls = []
+
+        def collect_events(self, since, until):
+            self.calls.append((since, until))
+            return [e for e in rows if since <= e.time <= until][:10]
+
+    collector = Dense()
+    for i in range(40):
+        collector.calls.clear()
+        snapshot = _snapshot(NOW + timedelta(minutes=i))
+        expected_window = service.capture_window("c1", snapshot)
+        service.capture_events(SimpleNamespace(id="c1"), collector, snapshot)
+        assert collector.calls[0] == expected_window
+        assert len(collector.calls) < 35
+        assert inserted_batches[-1] <= 20
+        assert len(events_store.capture_status("c1").incomplete_intervals) == 1
+    assert events_store.count_events("c1") == 10
+    assert events_store.capture_checkpoint("c1") == NOW - timedelta(minutes=30)
+
+
+def test_gap_coalescing_is_transitive_and_connection_scoped():
+    def record(connection, start, end):
+        events_store.record_incomplete_interval(
+            connection, NOW + timedelta(seconds=start), NOW + timedelta(seconds=end), "capped"
+        )
+
+    record("c1", 0, 2)
+    record("c1", 4, 6)
+    record("c2", 1, 5)
+    record("c1", 1, 5)
+    gaps = events_store.capture_status("c1").incomplete_intervals
+    assert len(gaps) == 1
+    assert (gaps[0].since, gaps[0].until) == (NOW, NOW + timedelta(seconds=6))
+    assert len(events_store.capture_status("c2").incomplete_intervals) == 1
+
+
+def test_gap_outside_capture_window_is_still_retried():
+    events_store.set_capture_checkpoint("c1", NOW - timedelta(minutes=5))
+    start, end = NOW - timedelta(minutes=20), NOW - timedelta(minutes=19)
+    events_store.record_incomplete_interval("c1", start, end, "failure")
+    calls = []
+
+    def collect(since, until):
+        calls.append((since, until))
+        return [_event(1, end)] if (since, until) == (start, end) else []
+
+    assert service.capture_events(
+        SimpleNamespace(id="c1"), SimpleNamespace(collect_events=collect), _snapshot()
+    ) == 1
+    assert calls[0] == (start, end)
+    assert events_store.capture_status("c1").incomplete_intervals == []

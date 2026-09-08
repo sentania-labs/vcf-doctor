@@ -1,4 +1,4 @@
-import type { Settings, SettingsUpdate, Significance } from '@/types'
+import type { EventMaintenanceStatus, Settings, SettingsUpdate, Significance } from '@/types'
 import { apiGet, apiSend } from './client'
 import { USE_MOCKS, delay, mockState } from './mocks'
 
@@ -37,4 +37,9 @@ export async function getChangesMinSignificance(): Promise<Significance> {
   } catch {
     return 'low'
   }
+}
+
+export function runCompactionMigration(): Promise<EventMaintenanceStatus> {
+  if (USE_MOCKS) return delay(mockState.settings.event_maintenance, 120)
+  return apiSend<EventMaintenanceStatus>('POST', '/settings/events/compaction-migration', {})
 }

@@ -52,6 +52,7 @@ class EventCaptureStatus(BaseModel):
 
 
 class EventMaintenanceStatus(BaseModel):
+    migration_required: bool = False
     last_run: datetime | None = None
     last_error: str | None = None
     pages_reclaimed: int = 0

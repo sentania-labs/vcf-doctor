@@ -57,7 +57,7 @@ def _fetch_window(
     raw = collect(since, until)
     rows, complete = _result(raw)
     if complete:
-        events_store.resolve_incomplete_interval(connection_id, since, until)
+        events_store.resolve_incomplete_range(connection_id, since, until)
         return rows, True
     if until - since <= MIN_WINDOW:
         events_store.record_incomplete_interval(
@@ -104,13 +104,15 @@ def capture_events(connection: Any, collector: Any, snapshot: Snapshot) -> int:
     events_store.prune_incomplete_intervals(connection_id, cutoff)
     retry_rows: list[Event] = []
     for interval in events_store.capture_status(connection_id).incomplete_intervals:
+        if since <= interval.since and interval.until <= until:
+            continue
         try:
             retried, retry_complete = _fetch_window(
                 connection_id, collect, interval.since, interval.until
             )
             retry_rows.extend(retried)
             if retry_complete:
-                events_store.resolve_incomplete_interval(
+                events_store.resolve_incomplete_range(
                     connection_id, interval.since, interval.until
                 )
         except Exception as exc:  # noqa: BLE001

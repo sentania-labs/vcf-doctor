@@ -278,25 +278,29 @@ def record_incomplete_interval(
     ensure_schema()
     stamp = _iso(at or datetime.now(UTC))
     with db.transaction() as c:
+        start, end = _iso(since), _iso(until)
+        attempts = 0
+        while True:
+            overlaps = c.execute(
+                "SELECT * FROM event_incomplete_intervals "
+                "WHERE connection_id = ? AND since <= ? AND until >= ?",
+                (connection_id, end, start),
+            ).fetchall()
+            if not overlaps:
+                break
+            start = min(start, *(row["since"] for row in overlaps))
+            end = max(end, *(row["until"] for row in overlaps))
+            attempts = max(attempts, *(row["attempts"] for row in overlaps))
+            c.executemany(
+                "DELETE FROM event_incomplete_intervals WHERE id = ?",
+                [(row["id"],) for row in overlaps],
+            )
         c.execute(
             "INSERT INTO event_incomplete_intervals"
             "(connection_id, since, until, attempts, last_error, updated_at) "
-            "VALUES(?, ?, ?, 1, ?, ?) "
-            "ON CONFLICT(connection_id, since, until) DO UPDATE SET "
-            "attempts = attempts + 1, last_error = excluded.last_error, "
-            "updated_at = excluded.updated_at",
-            (connection_id, _iso(since), _iso(until), error, stamp),
+            "VALUES(?, ?, ?, ?, ?, ?)",
+            (connection_id, start, end, attempts + 1, error, stamp),
         )
-
-
-def resolve_incomplete_interval(connection_id: str, since: datetime, until: datetime) -> int:
-    ensure_schema()
-    with db.transaction() as c:
-        return c.execute(
-            "DELETE FROM event_incomplete_intervals "
-            "WHERE connection_id = ? AND since = ? AND until = ?",
-            (connection_id, _iso(since), _iso(until)),
-        ).rowcount
 
 
 def resolve_incomplete_range(connection_id: str, since: datetime, until: datetime) -> int:
@@ -350,6 +354,11 @@ def bounded_maintenance(*, at: datetime | None = None, pages: int = 1000) -> Eve
     before = int(db.fetchone("PRAGMA freelist_count")[0])
     try:
         with db.transaction() as c:
+            if c.execute("PRAGMA auto_vacuum").fetchone()[0] != 2:
+                migration = db.get_setting(db.COMPACTION_MIGRATION_KEY, {})
+                raise RuntimeError(
+                    migration.get("last_error") or "compaction unavailable: migration required"
+                )
             c.execute(f"PRAGMA incremental_vacuum({max(1, int(pages))})")
         after = int(db.fetchone("PRAGMA freelist_count")[0])
         reclaimed = max(0, before - after)
@@ -371,9 +380,11 @@ def bounded_maintenance(*, at: datetime | None = None, pages: int = 1000) -> Eve
 def maintenance_status() -> EventMaintenanceStatus:
     ensure_schema()
     row = db.fetchone("SELECT * FROM event_maintenance WHERE id = 1")
+    migration = db.get_setting(db.COMPACTION_MIGRATION_KEY, {})
     return EventMaintenanceStatus(
         last_run=_dt(row["last_run"]) if row and row["last_run"] else None,
-        last_error=row["last_error"] if row else None,
+        last_error=migration.get("last_error") or (row["last_error"] if row else None),
+        migration_required=int(db.fetchone("PRAGMA auto_vacuum")[0]) == 0,
         pages_reclaimed=int(row["pages_reclaimed"]) if row else 0,
     )
 

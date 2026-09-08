@@ -1,7 +1,7 @@
 import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react'
 import { AlertTriangle, CheckCircle2, Database, KeyRound, ShieldCheck } from 'lucide-react'
 import type { AssistantSettings, EventPolicy, RetentionPolicy, Settings, Significance } from '@/types'
-import { getSettings, updateSettings, getAssistantStatus, changePassword, getAssistantModels, type AssistantModel } from '@/api'
+import { getSettings, runCompactionMigration, updateSettings, getAssistantStatus, changePassword, getAssistantModels, type AssistantModel } from '@/api'
 import { useAuth } from '@/state/AuthState'
 import { useAsync } from '@/hooks/useAsync'
 import { Badge, Button, Card, CardHeader, ErrorState, Field, Input, PageHeader, Select, Skeleton, Toggle } from '@/components/ui'
@@ -119,7 +119,16 @@ function eventProblem(p: EventPolicy): { field: keyof EventPolicy; message: stri
 function EventsRetentionCard({ value, onChange, settings }: { value: EventPolicy; onChange: (p: EventPolicy) => void; settings: Settings }) {
   const problem = eventProblem(value)
   const set = (k: keyof EventPolicy) => (e: ChangeEvent<HTMLInputElement>) => onChange({ ...value, [k]: e.target.value === '' ? 0 : Math.floor(Number(e.target.value)) })
-  const maintenance = settings.event_maintenance
+  const [maintenance, setMaintenance] = useState(settings.event_maintenance)
+  const [migrating, setMigrating] = useState(false)
+  const [migrationError, setMigrationError] = useState<string | null>(null)
+  useEffect(() => { setMaintenance(settings.event_maintenance) }, [settings.event_maintenance])
+  const migrate = async () => {
+    setMigrating(true); setMigrationError(null)
+    try { setMaintenance(await runCompactionMigration()) }
+    catch (e) { setMigrationError(e instanceof Error ? e.message : String(e)) }
+    finally { setMigrating(false) }
+  }
   return (
     <Card>
       <CardHeader title="Events retention" subtitle="Limits event history independently for each connection. Changes apply on the next scan."
@@ -136,8 +145,13 @@ function EventsRetentionCard({ value, onChange, settings }: { value: EventPolicy
         {problem ? <p className="text-sm text-critical bg-critical-bg rounded-md px-3 py-2" role="alert">{problem.message}</p> : null}
         <div className="flex items-start gap-2 text-xs text-faint bg-surface-2 rounded-md px-3 py-2">
           <Database size={14} className="mt-0.5 shrink-0" />
-          <span>{maintenance.last_run ? `Bounded cleanup last ran ${new Date(maintenance.last_run).toLocaleString()} and reclaimed ${maintenance.pages_reclaimed.toLocaleString()} page${maintenance.pages_reclaimed === 1 ? '' : 's'}.` : 'Bounded cleanup has not run yet.'}{maintenance.last_error ? ` Last error: ${maintenance.last_error}` : ''} Full database vacuum is never run during a scan.</span>
+          <span>{maintenance.last_run ? `Bounded cleanup last ran ${new Date(maintenance.last_run).toLocaleString()} and reclaimed ${maintenance.pages_reclaimed.toLocaleString()} page${maintenance.pages_reclaimed === 1 ? '' : 's'}.` : 'Bounded cleanup has not run yet.'}{maintenance.last_error ? ` Last error: ${maintenance.last_error}` : ''} Routine scan cleanup uses bounded reclamation.</span>
         </div>
+        {maintenance.migration_required ? <div className="space-y-2">
+          <p className="text-xs text-faint">The one-time migration pauses database writes and needs free space of at least 1.5 times the database size.</p>
+          <Button onClick={() => void migrate()} loading={migrating} disabled={migrating}>Run compaction migration now</Button>
+        </div> : null}
+        {migrationError ? <p className="text-sm text-critical" role="alert">{migrationError}</p> : null}
       </div>
     </Card>
   )
