@@ -359,7 +359,7 @@ def bounded_maintenance(*, at: datetime | None = None, pages: int = 1000) -> Eve
                 raise RuntimeError(
                     migration.get("last_error") or "compaction unavailable: migration required"
                 )
-            c.execute(f"PRAGMA incremental_vacuum({max(1, int(pages))})")
+            c.execute(f"PRAGMA incremental_vacuum({max(1, int(pages))})").fetchall()
         after = int(db.fetchone("PRAGMA freelist_count")[0])
         reclaimed = max(0, before - after)
         with db.transaction() as c:

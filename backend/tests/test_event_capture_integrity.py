@@ -130,19 +130,23 @@ def test_independent_pruning_and_per_connection_row_cap():
     assert {e.id for e in kept}.isdisjoint({"c1:1000", "c1:1001", "c1:1002", "c1:1003", "c1:1004"})
 
 
-def test_incremental_maintenance_records_reclamation():
+@pytest.mark.parametrize("pages", [7, 1000, 10000])
+def test_incremental_maintenance_records_reclamation(pages):
     assert db.fetchone("PRAGMA auto_vacuum")[0] == 2
     payload = "x" * 4000
     events_store.upsert_events([_event(i, NOW, payload) for i in range(1500)])
     events_store.prune_events("c1", 1, now=NOW + timedelta(hours=2))
     before = int(db.fetchone("PRAGMA freelist_count")[0])
-    status = events_store.bounded_maintenance(at=NOW, pages=1000)
+    assert before > 1000
+    expected = min(pages, before)
+    status = events_store.bounded_maintenance(at=NOW, pages=pages)
     after = int(db.fetchone("PRAGMA freelist_count")[0])
 
     assert status.last_run == NOW
     assert status.last_error is None
-    assert status.pages_reclaimed == before - after
-    assert after < before
+    assert status.pages_reclaimed == expected
+    assert before - after == expected
+    assert events_store.maintenance_status() == status
 
 
 def test_persistent_burst_coalesces_gaps_without_extra_retries(monkeypatch):
