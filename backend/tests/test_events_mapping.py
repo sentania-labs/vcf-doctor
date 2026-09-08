@@ -47,6 +47,25 @@ def test_drain_reports_cap_instead_of_silently_truncating(monkeypatch):
     assert result.complete is True
 
 
+def test_collect_events_keeps_complete_events_when_task_history_is_unavailable(monkeypatch):
+    raw = VmPoweredOffEvent(**_base(111, "web03 powered off"))
+    monkeypatch.setattr(
+        collector_events,
+        "fetch_events",
+        lambda *_args: collector_events.FetchBatch(items=[raw], complete=True),
+    )
+
+    def unavailable(*_args):
+        raise RuntimeError("task history unavailable")
+
+    monkeypatch.setattr(collector_events, "fetch_tasks", unavailable)
+
+    result = collector_events.collect_events(object(), NS_ID, T - timedelta(minutes=1), T)
+
+    assert [event.id for event in result.events] == ["conn1:111"]
+    assert result.complete is True
+
+
 class Ref:
     """Stand-in for a pyVmomi managed object reference."""
 

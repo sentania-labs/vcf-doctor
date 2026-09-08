@@ -289,7 +289,11 @@ def collect_events(si: Any, namespace: str, begin: datetime, end: datetime) -> C
             out.append(map_event(raw, namespace))
         except Exception as exc:  # noqa: BLE001  one odd event must not drop the batch
             log.debug("skipping unmappable event %r: %s", getattr(raw, "key", "?"), exc)
-    task_batch = fetch_tasks(si, begin, end)
+    try:
+        task_batch = fetch_tasks(si, begin, end)
+    except Exception as exc:  # noqa: BLE001  some endpoints expose no task history
+        log.warning("task history unavailable, events only: %s", exc)
+        return CaptureBatch(events=out, complete=event_batch.complete)
     for raw in task_batch.items:
         try:
             out.append(map_task(raw, namespace))
