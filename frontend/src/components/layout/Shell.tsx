@@ -51,7 +51,7 @@ function SignOutItem() {
 }
 
 export function Shell() {
-  const { backend, backendError } = useAppState()
+  const { backend, backendError, version } = useAppState()
   return (
     <div className="h-full flex bg-bg text-fg">
       <aside className="w-[232px] shrink-0 border-r border-border bg-surface flex flex-col">
@@ -68,9 +68,12 @@ export function Shell() {
           {secondary.map(n => <NavItem key={n.to} {...n} />)}
           <div className="mt-auto pt-4"><SignOutItem /></div>
         </nav>
-        <div className="px-5 py-4 border-t border-border text-[11px] text-faint flex items-center justify-between">
-          <span>Read-only by design</span>
-          {USE_MOCKS ? <span className="rounded bg-warning-bg text-warning px-1.5 py-0.5 font-semibold uppercase tracking-wider">mock data</span> : null}
+        <div className="px-5 py-4 border-t border-border text-[11px] text-faint space-y-1.5">
+          <div className="flex items-center justify-between gap-2">
+            <span>Read-only by design</span>
+            {USE_MOCKS ? <span className="rounded bg-warning-bg text-warning px-1.5 py-0.5 font-semibold uppercase tracking-wider">mock data</span> : null}
+          </div>
+          {version ? <div className="font-mono truncate" title={version}>{version}</div> : null}
         </div>
       </aside>
       <div className="flex-1 min-w-0 flex flex-col">

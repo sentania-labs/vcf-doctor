@@ -1,4 +1,5 @@
 export * from './health'
+export * from './version'
 export * from './overview'
 export * from './resources'
 export * from './findings'

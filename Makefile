@@ -29,7 +29,11 @@ dev-frontend:
 	cd frontend && npm run dev
 
 image:
-	docker build -t vcf-doctor:local .
+	docker build \
+		--build-arg BUILD_VERSION=dev \
+		--build-arg BUILD_SHA=$$(git rev-parse HEAD 2>/dev/null || echo unknown) \
+		--build-arg BUILD_DATE=$$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+		-t vcf-doctor:local .
 
 # ---- security scans ---------------------------------------------------------
 # Fast path: trivy / gitleaks binaries on PATH (see README, "Security posture").

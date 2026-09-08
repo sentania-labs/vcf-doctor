@@ -20,6 +20,7 @@ def _client(tmp_path, monkeypatch, **env):
 def test_first_run_setup_login_logout_change(tmp_path, monkeypatch):
     with _client(tmp_path, monkeypatch) as c:
         assert c.get("/api/health").status_code == 200
+        assert c.get("/api/version").status_code == 200
         assert c.get("/api/connections").status_code == 401
         st = c.get("/api/auth/status").json()
         assert st == {"enabled": True, "configured": False, "authenticated": False}

@@ -13,6 +13,7 @@ application state set through the GUI and stored on the volume.
 | Image | `ghcr.io/sentania-labs/vcf-doctor:<tag>` where tag is `v0.1.N` (release), `sha-<7>` or `latest` |
 | Port | `8000` (HTTP) |
 | Health | `GET /api/health` (the container also declares a `HEALTHCHECK` on it) |
+| Build identity | Settings, About and `GET /api/version` report the version, full Git commit, UTC build time, and Python version |
 | Persistent volume | `/data` (SQLite at `/data/vcf-doctor.db`, encryption key file next to it) |
 | Replicas | **exactly 1**, `strategy: Recreate`. Two pods would double-scan and contend for SQLite. |
 | User | runs as uid `10001`; set `fsGroup: 10001` so the volume is writable |
@@ -20,6 +21,11 @@ application state set through the GUI and stored on the volume.
 Only a main-branch push that passed every CI gate publishes an image, and
 the digest that was scanned and smoke-tested is the digest that is pushed.
 Release numbers continue from the highest existing `v0.1.N` tag.
+CI supplies that release number, the full commit SHA, and the UTC build time to
+the single image build before it is scanned and smoke-tested. `make image`
+uses `dev`, the current checkout SHA, and the current UTC time. A backend run
+directly from a checkout reports `dev`, its checkout SHA, and an unknown build
+time because there was no image build.
 
 ## Environment variables
 

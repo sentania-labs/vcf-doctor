@@ -1,6 +1,6 @@
 # STATUS
 
-Current state of the product against `main`. Updated 2026-09-02. Every claim
+Current state of the product against `main`. Updated 2026-09-08. Every claim
 here was checked against the code on that date; the earlier hackathon-era
 version of this file is in git history.
 
@@ -39,7 +39,9 @@ version of this file is in git history.
   SBOM, and CI publishes the exact digest it tested with one-by-one release
   numbers (#17, #36).
 - Python 3.14 base image, pip dropped from the runtime image (#52).
-- 500 backend tests pass (`make test`, 2026-09-02).
+- Build identity stamped by CI and visible in Settings, `/api/version`, and
+  `/api/health` (#60). Local runs identify themselves as development builds.
+- 526 backend tests pass (`make test`, 2026-09-08).
 
 ## In progress
 
@@ -49,8 +51,7 @@ version of this file is in git history.
 
 ## Broken
 
-- Nothing known. Open follow-ups: #27, #28, #30, #33, #37, #40, #41, #43,
-  #44, #45, #48.
+- Nothing known. Open follow-ups are tracked in GitHub Issues.
 
 ## Stretch
 

@@ -88,7 +88,8 @@ first Overview will be quieter than the second.
   [event limits and cleanup status](RETENTION_EVENTS.md#events-and-tasks),
   health score weights, change significance,
   the assistant and its API key, encryption status, trusted proxies (set
-  this to your ingress so login lockouts are per visitor), and the password.
+  this to your ingress so login lockouts are per visitor), the password, and
+  the running build identity under About.
 
 ## Before you rely on it: the encryption key
 

@@ -8,6 +8,7 @@ import { Badge, Button, Card, CardHeader, ErrorState, Field, Input, PageHeader, 
 import HealthScoreCard from '@/components/settings/HealthScoreCard'
 import EncryptionCard from '@/components/settings/EncryptionCard'
 import TrustedProxiesCard from '@/components/settings/TrustedProxiesCard'
+import AboutCard from '@/components/settings/AboutCard'
 
 function AccessCard() {
   const { status } = useAuth()
@@ -251,6 +252,7 @@ export default function SettingsPage() {
           <EncryptionCard reloadKey={`${assistant.api_key_set}:${assistant.api_key_unreadable ?? false}`} />
           <AccessCard />
           <TrustedProxiesCard />
+          <AboutCard />
           {err ? <p className="text-sm text-critical">{err}</p> : null}
         </div>
       )}

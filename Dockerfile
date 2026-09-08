@@ -8,10 +8,15 @@ COPY frontend/ .
 RUN npm run build
 
 FROM python:3.14-slim@sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6 AS backend
+ARG BUILD_VERSION=dev
+ARG BUILD_SHA=unknown
+ARG BUILD_DATE=unknown
 COPY --from=ghcr.io/astral-sh/uv:0.12.8 /uv /usr/local/bin/uv
 WORKDIR /app
 COPY backend/pyproject.toml ./
 COPY backend/app ./app
+RUN python3 -c 'import json,sys; print(json.dumps({"version":sys.argv[1],"sha":sys.argv[2],"built_at":sys.argv[3]}))' \
+    "$BUILD_VERSION" "$BUILD_SHA" "$BUILD_DATE" > /app/VERSION
 RUN uv pip install --system --no-cache .
 # The base image ships pip only so users can install things; this image never
 # does (uv installed everything above, uvicorn is what runs). pip's vendored
