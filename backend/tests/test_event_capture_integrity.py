@@ -237,3 +237,63 @@ def test_existing_capture_state_upgrades_with_task_history_status(tmp_path):
     status = events_store.capture_status("c1")
     assert status.task_history_unavailable is True
     assert status.last_complete_end == NOW
+
+
+def test_outage_longer_than_retention_uses_one_bounded_query_per_scan():
+    from app.collectors.vsphere.events import CaptureBatch
+
+    events_store.set_event_policy(EventPolicy(retention_hours=48, row_cap=250_000))
+    checkpoint = NOW - timedelta(minutes=5)
+    events_store.set_capture_checkpoint("c1", checkpoint)
+    calls = []
+    failing = True
+
+    def collect(since, until):
+        calls.append((since, until))
+        return CaptureBatch(
+            events=[_event(1, until)],
+            complete=not failing,
+            error="task history fetch failed" if failing else None,
+        )
+
+    collector = SimpleNamespace(collect_events=collect)
+    for hour in range(61):
+        end = NOW + timedelta(hours=hour)
+        cutoff = end - timedelta(hours=48)
+        expected_start = max(checkpoint - service.OVERLAP, cutoff)
+        calls.clear()
+        service.capture_events(SimpleNamespace(id="c1"), collector, _snapshot(end))
+        assert calls == [(expected_start, end)]
+        status = events_store.capture_status("c1")
+        assert status.last_complete_end == checkpoint
+        assert len(status.incomplete_intervals) == 1
+        gap = status.incomplete_intervals[0]
+        assert (gap.since, gap.until) == (expected_start, end)
+
+    failing = False
+    end = NOW + timedelta(hours=61)
+    calls.clear()
+    service.capture_events(SimpleNamespace(id="c1"), collector, _snapshot(end))
+    assert calls == [(end - timedelta(hours=48), end)]
+    status = events_store.capture_status("c1")
+    assert status.last_complete_end == end
+    assert status.incomplete_intervals == []
+
+
+def test_gap_pruning_trims_crossing_interval_and_preserves_other_connections():
+    events_store.record_incomplete_interval(
+        "c1", NOW - timedelta(hours=4), NOW - timedelta(hours=3), "expired"
+    )
+    for connection_id in ("c1", "c2"):
+        events_store.record_incomplete_interval(
+            connection_id, NOW - timedelta(hours=2), NOW, "task failure", at=NOW
+        )
+    original = events_store.capture_status("c1").incomplete_intervals[-1]
+    cutoff = NOW - timedelta(hours=1)
+    assert events_store.prune_incomplete_intervals("c1", cutoff) == 1
+    gaps = events_store.capture_status("c1").incomplete_intervals
+    assert len(gaps) == 1
+    assert gaps[0] == original.model_copy(update={"since": cutoff})
+    assert events_store.capture_status("c2").incomplete_intervals[0].since == (
+        NOW - timedelta(hours=2)
+    )

@@ -335,10 +335,17 @@ def resolve_incomplete_range(connection_id: str, since: datetime, until: datetim
 def prune_incomplete_intervals(connection_id: str, before: datetime) -> int:
     ensure_schema()
     with db.transaction() as c:
-        return c.execute(
+        cutoff = _iso(before)
+        deleted = c.execute(
             "DELETE FROM event_incomplete_intervals WHERE connection_id = ? AND until < ?",
-            (connection_id, _iso(before)),
+            (connection_id, cutoff),
         ).rowcount
+        c.execute(
+            "UPDATE event_incomplete_intervals SET since = ? "
+            "WHERE connection_id = ? AND since < ?",
+            (cutoff, connection_id, cutoff),
+        )
+        return deleted
 
 
 def capture_status(connection_id: str) -> EventCaptureStatus:
