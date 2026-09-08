@@ -128,7 +128,7 @@ def is_authenticated(request: Request) -> bool:
 
 
 # Paths under /api that never require a session.
-PUBLIC_PREFIXES = ("/api/health", "/api/auth/")
+PUBLIC_PREFIXES = ("/api/health", "/api/version", "/api/auth/")
 
 
 def requires_auth(path: str) -> bool:

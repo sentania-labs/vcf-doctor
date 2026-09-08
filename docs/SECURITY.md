@@ -2,6 +2,9 @@
 
 ## Access
 
+Health, build identity, and authentication routes are exempt from the session
+gate; the exact public paths are defined in [auth.py](../backend/app/auth.py).
+
 A single shared operator password gates the UI and API (session cookie, 7
 days, PBKDF2 hash, signing secret rotated on password change). Failed
 sign-ins are counted per client address: five, then an exponential wait

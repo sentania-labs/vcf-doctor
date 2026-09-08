@@ -1,4 +1,4 @@
-"""All /api routes except /api/assistant (Agent E) and /api/health (main.py)."""
+"""Inventory, connections, snapshots, changes, and application settings routes."""
 
 import re
 from datetime import UTC, datetime, timedelta

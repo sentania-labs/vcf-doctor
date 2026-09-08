@@ -1,4 +1,4 @@
-"""FastAPI entrypoint. Agent A owns routing beyond /api/health."""
+"""FastAPI entrypoint, middleware, and router registration."""
 
 import logging
 from contextlib import asynccontextmanager
@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import auth, db, proxies, scheduler, vault
+from app._version import BUILD_INFO
 from app.api.auth_router import router as auth_router
 from app.api.encryption_router import router as encryption_router
 from app.api.environment_router import router as environment_router
@@ -44,7 +45,7 @@ async def lifespan(application: FastAPI):
 
 app = FastAPI(
     title="VCF Doctor",
-    version="0.1.0",
+    version=BUILD_INFO.version,
     docs_url=None,
     redoc_url=None,
     openapi_url=None,
@@ -130,6 +131,11 @@ def health() -> dict:
         "version": app.version,
         "scheduler": scheduler.running(),
     }
+
+
+@app.get("/api/version")
+def version() -> dict[str, str]:
+    return BUILD_INFO.as_dict()
 
 
 app.include_router(api_router)
