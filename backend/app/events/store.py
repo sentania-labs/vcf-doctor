@@ -40,7 +40,8 @@ CREATE INDEX IF NOT EXISTS ix_events_conn_time ON events(connection_id, time);
 CREATE INDEX IF NOT EXISTS ix_events_resource ON events(resource_id, time);
 CREATE TABLE IF NOT EXISTS event_capture_state (
     connection_id TEXT PRIMARY KEY,
-    last_complete_end TEXT
+    last_complete_end TEXT,
+    task_history_unavailable INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS event_incomplete_intervals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -80,6 +81,12 @@ def ensure_schema() -> sqlite3.Connection:
         if _schema_conn is not conn:
             with db.transaction() as c:
                 c.executescript(SCHEMA)
+                columns = {row["name"] for row in c.execute("PRAGMA table_info(event_capture_state)")}
+                if "task_history_unavailable" not in columns:
+                    c.execute(
+                        "ALTER TABLE event_capture_state ADD COLUMN "
+                        "task_history_unavailable INTEGER NOT NULL DEFAULT 0"
+                    )
             _schema_conn = conn
     if db.get_setting(EVENT_POLICY_KEY) is None:
         set_event_policy(default_event_policy())
@@ -267,6 +274,17 @@ def set_capture_checkpoint(connection_id: str, end: datetime) -> None:
         )
 
 
+def set_task_history_unavailable(connection_id: str, unavailable: bool) -> None:
+    ensure_schema()
+    with db.transaction() as c:
+        c.execute(
+            "INSERT INTO event_capture_state(connection_id, task_history_unavailable) VALUES(?, ?) "
+            "ON CONFLICT(connection_id) DO UPDATE SET "
+            "task_history_unavailable = excluded.task_history_unavailable",
+            (connection_id, int(unavailable)),
+        )
+
+
 def record_incomplete_interval(
     connection_id: str,
     since: datetime,
@@ -329,7 +347,12 @@ def capture_status(connection_id: str) -> EventCaptureStatus:
         "SELECT * FROM event_incomplete_intervals WHERE connection_id = ? ORDER BY since",
         (connection_id,),
     )
+    state = db.fetchone(
+        "SELECT task_history_unavailable FROM event_capture_state WHERE connection_id = ?",
+        (connection_id,),
+    )
     return EventCaptureStatus(
+        task_history_unavailable=bool(state and state["task_history_unavailable"]),
         connection_id=connection_id,
         last_complete_end=capture_checkpoint(connection_id),
         incomplete_intervals=[

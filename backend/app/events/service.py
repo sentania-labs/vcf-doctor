@@ -56,6 +56,13 @@ def _fetch_window(
 ) -> tuple[list[Event], bool]:
     raw = collect(since, until)
     rows, complete = _result(raw)
+    unavailable = getattr(raw, "task_history_unavailable", None)
+    if unavailable is not None:
+        events_store.set_task_history_unavailable(connection_id, unavailable)
+    error = getattr(raw, "error", None)
+    if error:
+        events_store.record_incomplete_interval(connection_id, since, until, error)
+        return rows, False
     if complete:
         events_store.resolve_incomplete_range(connection_id, since, until)
         return rows, True

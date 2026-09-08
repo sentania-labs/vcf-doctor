@@ -47,7 +47,7 @@ def test_drain_reports_cap_instead_of_silently_truncating(monkeypatch):
     assert result.complete is True
 
 
-def test_collect_events_keeps_complete_events_when_task_history_is_unavailable(monkeypatch):
+def test_collect_events_keeps_events_but_is_incomplete_when_task_query_fails(monkeypatch):
     raw = VmPoweredOffEvent(**_base(111, "web03 powered off"))
     monkeypatch.setattr(
         collector_events,
@@ -63,7 +63,9 @@ def test_collect_events_keeps_complete_events_when_task_history_is_unavailable(m
     result = collector_events.collect_events(object(), NS_ID, T - timedelta(minutes=1), T)
 
     assert [event.id for event in result.events] == ["conn1:111"]
-    assert result.complete is True
+    assert result.complete is False
+    assert result.error == "task history fetch failed"
+    assert result.task_history_unavailable is None
 
 
 class Ref:

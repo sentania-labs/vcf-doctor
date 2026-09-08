@@ -216,3 +216,24 @@ def test_gap_outside_capture_window_is_still_retried():
     ) == 1
     assert calls[0] == (start, end)
     assert events_store.capture_status("c1").incomplete_intervals == []
+
+
+def test_existing_capture_state_upgrades_with_task_history_status(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "old-capture.db"
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "CREATE TABLE event_capture_state "
+            "(connection_id TEXT PRIMARY KEY, last_complete_end TEXT)"
+        )
+        conn.execute("INSERT INTO event_capture_state VALUES (?, ?)", ("c1", NOW.isoformat()))
+    db.reset_for_tests(str(path))
+    status = events_store.capture_status("c1")
+    assert status.last_complete_end == NOW
+    assert status.task_history_unavailable is False
+    events_store.set_task_history_unavailable("c1", True)
+    db.reset_for_tests(str(path))
+    status = events_store.capture_status("c1")
+    assert status.task_history_unavailable is True
+    assert status.last_complete_end == NOW

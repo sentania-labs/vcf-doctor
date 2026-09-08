@@ -48,6 +48,7 @@ class IncompleteInterval(BaseModel):
 class EventCaptureStatus(BaseModel):
     connection_id: str
     last_complete_end: datetime | None = None
+    task_history_unavailable: bool = False
     incomplete_intervals: list[IncompleteInterval] = Field(default_factory=list)
 
 

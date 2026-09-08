@@ -35,6 +35,6 @@ export function getEvents(query: EventQuery = {}): Promise<Event[]> {
 }
 
 export function getEventCaptureStatus(connectionId: string): Promise<EventCaptureStatus> {
-  if (USE_MOCKS) return delay({ connection_id: connectionId, last_complete_end: new Date().toISOString(), incomplete_intervals: [] }, 120)
+  if (USE_MOCKS) return delay({ task_history_unavailable: false, connection_id: connectionId, last_complete_end: new Date().toISOString(), incomplete_intervals: [] }, 120)
   return apiGet<EventCaptureStatus>(`/events/status${qs({ connection_id: connectionId })}`)
 }

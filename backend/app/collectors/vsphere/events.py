@@ -236,6 +236,8 @@ class FetchBatch:
 class CaptureBatch:
     events: list[Event]
     complete: bool
+    task_history_unavailable: bool | None = None
+    error: str | None = None
 
 
 def _drain(collector: Any, reader: str) -> FetchBatch:
@@ -282,6 +284,8 @@ def fetch_tasks(si: Any, begin: datetime, end: datetime) -> FetchBatch:
 
 def collect_events(si: Any, namespace: str, begin: datetime, end: datetime) -> CaptureBatch:
     """Events plus tasks for the window, with explicit cap completeness."""
+    from pyVmomi import vim, vmodl
+
     out: list[Event] = []
     event_batch = fetch_events(si, begin, end)
     for raw in event_batch.items:
@@ -291,12 +295,21 @@ def collect_events(si: Any, namespace: str, begin: datetime, end: datetime) -> C
             log.debug("skipping unmappable event %r: %s", getattr(raw, "key", "?"), exc)
     try:
         task_batch = fetch_tasks(si, begin, end)
-    except Exception as exc:  # noqa: BLE001  some endpoints expose no task history
+    except (vmodl.fault.NotSupported, vim.fault.NoPermission) as exc:
         log.warning("task history unavailable, events only: %s", exc)
-        return CaptureBatch(events=out, complete=event_batch.complete)
+        return CaptureBatch(
+            events=out, complete=event_batch.complete, task_history_unavailable=True
+        )
+    except Exception as exc:
+        log.warning("task history fetch failed: %s", exc)
+        return CaptureBatch(events=out, complete=False, error="task history fetch failed")
     for raw in task_batch.items:
         try:
             out.append(map_task(raw, namespace))
         except Exception as exc:  # noqa: BLE001
             log.debug("skipping unmappable task %r: %s", getattr(raw, "key", "?"), exc)
-    return CaptureBatch(events=out, complete=event_batch.complete and task_batch.complete)
+    return CaptureBatch(
+        events=out,
+        complete=event_batch.complete and task_batch.complete,
+        task_history_unavailable=False,
+    )
