@@ -38,9 +38,9 @@ healthy and never runs anything. The console is read-only by design.
 - **Sensible defaults.** Every setting has a GUI control and a working default.
   A fresh install runs with nothing pre-configured. There is no
   sample-data mode; it expects a live vCenter.
-- **Visible build identity.** Settings shows the running version, Git commit,
-  and build time. The same identity is available from
-  `GET /api/version`, and `GET /api/health` reports the real version.
+- **Visible build identity.** Settings, About shows the running version, Git
+  commit, and build time in your browser's local time. See the
+  [build identity contract](docs/DEPLOYMENT.md#contract) for API and local-build details.
 
 ## Getting started
 

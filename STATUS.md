@@ -39,8 +39,7 @@ version of this file is in git history.
   SBOM, and CI publishes the exact digest it tested with one-by-one release
   numbers (#17, #36).
 - Python 3.14 base image, pip dropped from the runtime image (#52).
-- Build identity stamped by CI and visible in Settings, `/api/version`, and
-  `/api/health` (#60). Local runs identify themselves as development builds.
+- Build identity is available (#60); see the [deployment contract](docs/DEPLOYMENT.md#contract).
 - 526 backend tests pass (`make test`, 2026-09-08).
 
 ## In progress

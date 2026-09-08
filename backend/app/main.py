@@ -1,4 +1,4 @@
-"""FastAPI entrypoint. Agent A owns routing beyond /api/health."""
+"""FastAPI entrypoint, middleware, and router registration."""
 
 import logging
 from contextlib import asynccontextmanager
