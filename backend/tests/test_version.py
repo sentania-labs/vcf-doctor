@@ -20,6 +20,7 @@ def test_version_endpoint_and_health_share_build_identity(client):
     identity = client.get("/api/version")
     assert identity.status_code == 200
     assert identity.json() == BUILD_INFO.as_dict()
+    assert set(identity.json()) == {"version", "sha", "built_at"}
     assert client.get("/api/health").json()["version"] == identity.json()["version"]
     assert app.version == identity.json()["version"]
 

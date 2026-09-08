@@ -1,7 +1,6 @@
 """Build identity loaded from the image, with a useful checkout fallback."""
 
 import json
-import platform
 import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -12,7 +11,6 @@ class BuildInfo:
     version: str
     sha: str
     built_at: str
-    python: str
 
     def as_dict(self) -> dict[str, str]:
         return asdict(self)
@@ -43,7 +41,6 @@ def load_build_info(
             version=str(raw["version"]),
             sha=str(raw["sha"]),
             built_at=str(raw["built_at"]),
-            python=platform.python_version(),
         )
     except (OSError, KeyError, TypeError, ValueError):
         cwd = git_cwd or Path(__file__).resolve().parents[2]
@@ -51,7 +48,6 @@ def load_build_info(
             version="dev",
             sha=_checkout_sha(cwd),
             built_at="unknown",
-            python=platform.python_version(),
         )
 
 

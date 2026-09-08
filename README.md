@@ -39,7 +39,7 @@ healthy and never runs anything. The console is read-only by design.
   A fresh install runs with nothing pre-configured. There is no
   sample-data mode; it expects a live vCenter.
 - **Visible build identity.** Settings shows the running version, Git commit,
-  build time, and Python version. The same identity is available from
+  and build time. The same identity is available from
   `GET /api/version`, and `GET /api/health` reports the real version.
 
 ## Getting started
@@ -61,8 +61,6 @@ click Scan Now.
 | ![Health page with a finding drawer open](docs/screenshots/health-finding.png) | ![Environment Changes page](docs/screenshots/environment-changes.png) |
 
 ![Settings: retention tiers and health score weights, with working defaults](docs/screenshots/settings.png)
-
-![About: the running release, Git commit, build time, and Python version](docs/screenshots/about.png)
 
 ## Documentation
 

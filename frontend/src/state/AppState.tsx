@@ -18,7 +18,6 @@ interface AppState {
   setSelectedId: (id: string) => void
   backend: BackendStatus
   backendError: string | null
-  version: string | null
   scans: ScanRun[]
   lastScan: string | null
   scanning: boolean
@@ -40,7 +39,6 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   })
   const [backend, setBackend] = useState<BackendStatus>('checking')
   const [backendError, setBackendError] = useState<string | null>(null)
-  const [version, setVersion] = useState<string | null>(null)
   const [scans, setScans] = useState<ScanRun[]>([])
   const [scanError, setScanError] = useState<string | null>(null)
   const [scanning, setScanning] = useState(false)
@@ -56,8 +54,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
   const checkBackend = useCallback(async () => {
     try {
-      const health = await getHealth()
-      setVersion(health.version)
+      await getHealth()
       setBackend('up'); setBackendError(null)
     } catch (e) {
       setBackend('down'); setBackendError(e instanceof Error ? e.message : String(e))
@@ -128,7 +125,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
   const value: AppState = {
     connections, connectionsLoading, selectedId, connectionId, selected, setSelectedId,
-    backend, backendError, version, scans, lastScan, scanning, scanNow, scanError,
+    backend, backendError, scans, lastScan, scanning, scanNow, scanError,
     refreshKey, refreshAll: () => setRefreshKey(k => k + 1), reloadConnections,
   }
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>

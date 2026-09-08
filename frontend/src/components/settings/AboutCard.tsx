@@ -22,7 +22,6 @@ export default function AboutCard() {
           <div><dt className="text-xs font-medium text-muted mb-1">Version</dt><dd className="font-mono text-fg break-all">{identity.data.version}</dd></div>
           <div><dt className="text-xs font-medium text-muted mb-1">Built</dt><dd className="text-fg">{displayDate(identity.data.built_at)}</dd></div>
           <div><dt className="text-xs font-medium text-muted mb-1">Git commit</dt><dd className="font-mono text-fg break-all">{identity.data.sha}</dd></div>
-          <div><dt className="text-xs font-medium text-muted mb-1">Python</dt><dd className="font-mono text-fg">{identity.data.python}</dd></div>
         </dl>
       ) : null}
     </Card>

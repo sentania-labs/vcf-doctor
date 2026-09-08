@@ -13,7 +13,7 @@ application state set through the GUI and stored on the volume.
 | Image | `ghcr.io/sentania-labs/vcf-doctor:<tag>` where tag is `v0.1.N` (release), `sha-<7>` or `latest` |
 | Port | `8000` (HTTP) |
 | Health | `GET /api/health` (the container also declares a `HEALTHCHECK` on it) |
-| Build identity | Settings, About and `GET /api/version` report the version, full Git commit, UTC build time, and Python version |
+| Build identity | Settings, About and `GET /api/version` report the version, full Git commit, and UTC build time |
 | Persistent volume | `/data` (SQLite at `/data/vcf-doctor.db`, encryption key file next to it) |
 | Replicas | **exactly 1**, `strategy: Recreate`. Two pods would double-scan and contend for SQLite. |
 | User | runs as uid `10001`; set `fsGroup: 10001` so the volume is writable |
