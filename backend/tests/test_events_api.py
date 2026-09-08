@@ -1,9 +1,12 @@
 """GET /api/events with the fixture collector: fixture events appear after the second scan."""
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 from fastapi.testclient import TestClient
 
 from app import db
+from app.events import store as events_store
 from app.main import app
 from tests.conftest import seed_fixture_connection
 
@@ -73,3 +76,14 @@ def test_validation_and_unscoped_listing(client):
     # explicit window: since far in the future returns nothing
     assert client.get("/api/events?since=2999-01-01T00:00:00Z").json() == []
     assert len(client.get("/api/events?since=2000-01-01T00:00:00Z").json()) == len(everything)
+
+
+def test_capture_status_surfaces_incomplete_intervals(client):
+    cid = _conn_id(client)
+    end = datetime(2026, 9, 8, 12, tzinfo=UTC)
+    events_store.record_incomplete_interval(cid, end - timedelta(seconds=1), end, "capped")
+    body = client.get(f"/api/events/status?connection_id={cid}").json()
+    assert body["connection_id"] == cid
+    assert body["last_complete_end"] is not None
+    assert body["incomplete_intervals"][0]["last_error"] == "capped"
+    assert client.get("/api/events/status?connection_id=missing").status_code == 404

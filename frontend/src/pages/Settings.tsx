@@ -1,6 +1,6 @@
 import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react'
-import { AlertTriangle, CheckCircle2, KeyRound, ShieldCheck } from 'lucide-react'
-import type { AssistantSettings, RetentionPolicy, Settings, Significance } from '@/types'
+import { AlertTriangle, CheckCircle2, Database, KeyRound, ShieldCheck } from 'lucide-react'
+import type { AssistantSettings, EventPolicy, RetentionPolicy, Settings, Significance } from '@/types'
 import { getSettings, updateSettings, getAssistantStatus, changePassword, getAssistantModels, type AssistantModel } from '@/api'
 import { useAuth } from '@/state/AuthState'
 import { useAsync } from '@/hooks/useAsync'
@@ -67,6 +67,7 @@ function AccessCard() {
 }
 
 const DEFAULT_RETENTION: RetentionPolicy = { recent_days: 14, hourly_days: 30, daily_days: 365 }
+const DEFAULT_EVENTS: EventPolicy = { retention_hours: 48, row_cap: 250000 }
 
 // Inline validation for the retention tiers. Returns the field in error and a message, or null.
 function retentionProblem(p: RetentionPolicy): { field: keyof RetentionPolicy; message: string } | null {
@@ -102,8 +103,41 @@ function RetentionCard({ value, onChange }: { value: RetentionPolicy; onChange: 
           : <p className="text-sm text-muted">Every scan for {value.recent_days} {value.recent_days === 1 ? 'day' : 'days'}, then hourly to {value.hourly_days} {value.hourly_days === 1 ? 'day' : 'days'}, then daily to {value.daily_days} {value.daily_days === 1 ? 'day' : 'days'}.</p>}
         <ul className="text-xs text-faint space-y-1 list-disc pl-4">
           <li>Manual snapshots are never pruned. Scheduled snapshots follow the tiers above.</li>
-          <li>vCenter events and the change log follow the daily window ({value.daily_days || '?'} {value.daily_days === 1 ? 'day' : 'days'}).</li>
+          <li>The change log follows the daily window. Event history has its own limit below.</li>
         </ul>
+      </div>
+    </Card>
+  )
+}
+
+function eventProblem(p: EventPolicy): { field: keyof EventPolicy; message: string } | null {
+  if (!Number.isInteger(p.retention_hours) || p.retention_hours < 1 || p.retention_hours > 8760) return { field: 'retention_hours', message: 'Event retention must be a whole number from 1 to 8,760 hours.' }
+  if (!Number.isInteger(p.row_cap) || p.row_cap < 1000 || p.row_cap > 10000000) return { field: 'row_cap', message: 'The row cap must be a whole number from 1,000 to 10,000,000 per connection.' }
+  return null
+}
+
+function EventsRetentionCard({ value, onChange, settings }: { value: EventPolicy; onChange: (p: EventPolicy) => void; settings: Settings }) {
+  const problem = eventProblem(value)
+  const set = (k: keyof EventPolicy) => (e: ChangeEvent<HTMLInputElement>) => onChange({ ...value, [k]: e.target.value === '' ? 0 : Math.floor(Number(e.target.value)) })
+  const maintenance = settings.event_maintenance
+  return (
+    <Card>
+      <CardHeader title="Events retention" subtitle="Limits event history independently for each connection. Changes apply on the next scan."
+        action={problem ? <Badge tone="critical"><AlertTriangle size={11} /> Check values</Badge> : <Badge tone="ok" dot>Valid</Badge>} />
+      <div className="px-5 pb-5 space-y-4">
+        <div className="grid sm:grid-cols-2 gap-4">
+          <Field label="Keep events for (hours)" hint="Events older than this are removed after a scan. Default: 48 hours.">
+            <Input type="number" min={1} max={8760} inputMode="numeric" value={value.retention_hours || ''} onChange={set('retention_hours')} aria-invalid={problem?.field === 'retention_hours'} className={problem?.field === 'retention_hours' ? 'border-critical focus:border-critical focus:ring-critical/25' : undefined} />
+          </Field>
+          <Field label="Maximum rows per connection" hint="A hard backstop after time-based pruning. The newest rows are kept. Default: 250,000.">
+            <Input type="number" min={1000} max={10000000} inputMode="numeric" value={value.row_cap || ''} onChange={set('row_cap')} aria-invalid={problem?.field === 'row_cap'} className={problem?.field === 'row_cap' ? 'border-critical focus:border-critical focus:ring-critical/25' : undefined} />
+          </Field>
+        </div>
+        {problem ? <p className="text-sm text-critical bg-critical-bg rounded-md px-3 py-2" role="alert">{problem.message}</p> : null}
+        <div className="flex items-start gap-2 text-xs text-faint bg-surface-2 rounded-md px-3 py-2">
+          <Database size={14} className="mt-0.5 shrink-0" />
+          <span>{maintenance.last_run ? `Bounded cleanup last ran ${new Date(maintenance.last_run).toLocaleString()} and reclaimed ${maintenance.pages_reclaimed.toLocaleString()} page${maintenance.pages_reclaimed === 1 ? '' : 's'}.` : 'Bounded cleanup has not run yet.'}{maintenance.last_error ? ` Last error: ${maintenance.last_error}` : ''} Full database vacuum is never run during a scan.</span>
+        </div>
       </div>
     </Card>
   )
@@ -113,6 +147,7 @@ export default function SettingsPage() {
   const s = useAsync(() => getSettings(), [])
   const status = useAsync(() => getAssistantStatus(), [s.data])
   const [retention, setRetention] = useState<RetentionPolicy>(DEFAULT_RETENTION)
+  const [eventPolicy, setEventPolicy] = useState<EventPolicy>(DEFAULT_EVENTS)
   const [minSig, setMinSig] = useState<Significance>('low')
   const [assistant, setAssistant] = useState<AssistantSettings>({ enabled: true, provider: 'anthropic', model: 'claude-opus-5', api_key_set: false })
   const [models, setModels] = useState<AssistantModel[]>([])
@@ -127,14 +162,14 @@ export default function SettingsPage() {
   const [saved, setSaved] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
-  useEffect(() => { if (s.data) { setRetention(s.data.retention_policy ?? DEFAULT_RETENTION); setAssistant(s.data.assistant); setMinSig(s.data.changes_min_significance ?? 'low') } }, [s.data])
-  const apply = (d: Settings) => { setRetention(d.retention_policy ?? DEFAULT_RETENTION); setAssistant(d.assistant); setMinSig(d.changes_min_significance ?? 'low'); setApiKey('') }
-  const retentionInvalid = retentionProblem(retention) !== null
+  useEffect(() => { if (s.data) { setRetention(s.data.retention_policy ?? DEFAULT_RETENTION); setEventPolicy(s.data.event_policy ?? DEFAULT_EVENTS); setAssistant(s.data.assistant); setMinSig(s.data.changes_min_significance ?? 'low') } }, [s.data])
+  const apply = (d: Settings) => { setRetention(d.retention_policy ?? DEFAULT_RETENTION); setEventPolicy(d.event_policy ?? DEFAULT_EVENTS); setAssistant(d.assistant); setMinSig(d.changes_min_significance ?? 'low'); setApiKey('') }
+  const retentionInvalid = retentionProblem(retention) !== null || eventProblem(eventPolicy) !== null
 
   const save = async () => {
     setSaving(true); setErr(null); setSaved(false)
     try {
-      const body = { retention_policy: retention, changes_min_significance: minSig, assistant: { enabled: assistant.enabled, provider: assistant.provider, model: assistant.model.trim() || 'claude-opus-5', ...(apiKey ? { api_key: apiKey } : {}) } }
+      const body = { retention_policy: retention, event_policy: eventPolicy, changes_min_significance: minSig, assistant: { enabled: assistant.enabled, provider: assistant.provider, model: assistant.model.trim() || 'claude-opus-5', ...(apiKey ? { api_key: apiKey } : {}) } }
       apply(await updateSettings(body))
       setSaved(true); setTimeout(() => setSaved(false), 2500)
       status.reload()
@@ -151,6 +186,7 @@ export default function SettingsPage() {
       {!s.data ? <div className="space-y-5"><Skeleton className="h-40 rounded-xl" /><Skeleton className="h-72 rounded-xl" /></div> : (
         <div className="space-y-5">
           <RetentionCard value={retention} onChange={setRetention} />
+          <EventsRetentionCard value={eventPolicy} onChange={setEventPolicy} settings={s.data} />
           <HealthScoreCard />
 
           <Card>

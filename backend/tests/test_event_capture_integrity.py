@@ -1,0 +1,145 @@
+"""Event capture checkpoints, cap recovery, row limits, and bounded cleanup."""
+
+from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
+
+import pytest
+
+from app import db
+from app.events import service
+from app.events import store as events_store
+from app.models.event import Event, EventPolicy
+from app.models.snapshot import Snapshot
+
+NOW = datetime(2026, 9, 8, 12, 0, tzinfo=UTC)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_db(tmp_path):
+    db.reset_for_tests(str(tmp_path / "events.db"))
+    events_store.ensure_schema()
+
+
+def _snapshot(at: datetime = NOW) -> Snapshot:
+    return Snapshot(id="s", connection_id="c1", created_at=at, label="scan", resources=[])
+
+
+def _event(key: int, at: datetime, message: str = "event") -> Event:
+    return Event(
+        id=f"c1:{key}",
+        connection_id="c1",
+        time=at,
+        type="SyntheticEvent",
+        message=message,
+    )
+
+
+def test_failed_fetch_keeps_checkpoint_and_next_scan_retries_gap():
+    events_store.set_event_policy(EventPolicy(retention_hours=2, row_cap=250_000))
+    checkpoint = NOW - timedelta(minutes=30)
+    events_store.set_capture_checkpoint("c1", checkpoint)
+
+    class Flaky:
+        def __init__(self):
+            self.calls = []
+            self.fail = True
+
+        def collect_events(self, since, until):
+            self.calls.append((since, until))
+            if self.fail:
+                raise RuntimeError("temporary vCenter failure")
+            return [_event(1, checkpoint + timedelta(minutes=2))]
+
+    collector = Flaky()
+    connection = SimpleNamespace(id="c1")
+    assert service.capture_events(connection, collector, _snapshot()) == 0
+    assert events_store.capture_checkpoint("c1") == checkpoint
+
+    collector.fail = False
+    next_scan = NOW + timedelta(minutes=5)
+    assert service.capture_events(connection, collector, _snapshot(next_scan)) == 1
+    assert collector.calls[-1][0] == checkpoint - service.OVERLAP
+    assert events_store.capture_checkpoint("c1") == next_scan
+
+
+def test_capped_high_volume_window_is_split_and_deduplicated(monkeypatch):
+    monkeypatch.setattr(service, "MAX_ITEMS", 10)
+    events_store.set_event_policy(EventPolicy(retention_hours=2, row_cap=250_000))
+    rows = [_event(i, NOW - timedelta(seconds=i * 30)) for i in range(100)]
+
+    class Capped:
+        def __init__(self):
+            self.calls = []
+
+        def collect_events(self, since, until):
+            self.calls.append((since, until))
+            matching = [e for e in rows if since < e.time <= until]
+            return matching[: service.MAX_ITEMS]
+
+    collector = Capped()
+    assert service.capture_events(SimpleNamespace(id="c1"), collector, _snapshot()) == 100
+    assert len(collector.calls) > 1
+    assert events_store.count_events("c1") == 100
+    assert events_store.capture_status("c1").incomplete_intervals == []
+
+    overlap = _snapshot(NOW + timedelta(minutes=5))
+    assert service.capture_events(SimpleNamespace(id="c1"), collector, overlap) == 0
+    assert events_store.count_events("c1") == 100
+
+
+def test_minimum_capped_interval_is_recorded_then_retried(monkeypatch):
+    monkeypatch.setattr(service, "MAX_ITEMS", 10)
+    monkeypatch.setattr(service, "MIN_WINDOW", timedelta(minutes=5))
+    events_store.set_event_policy(EventPolicy(retention_hours=1, row_cap=250_000))
+    rows = [_event(i, NOW - timedelta(minutes=10)) for i in range(12)]
+
+    class Dense:
+        complete = False
+
+        def collect_events(self, since, until):
+            matching = [e for e in rows if since <= e.time <= until]
+            if self.complete:
+                return SimpleNamespace(events=matching, complete=True)
+            return matching[: service.MAX_ITEMS]
+
+    collector = Dense()
+    connection = SimpleNamespace(id="c1")
+    assert service.capture_events(connection, collector, _snapshot()) == 10
+    status = events_store.capture_status("c1")
+    assert status.last_complete_end is None
+    assert status.incomplete_intervals
+
+    collector.complete = True
+    assert service.capture_events(connection, collector, _snapshot(NOW + timedelta(minutes=1))) == 2
+    status = events_store.capture_status("c1")
+    assert status.last_complete_end == NOW + timedelta(minutes=1)
+    assert status.incomplete_intervals == []
+    assert events_store.count_events("c1") == 12
+
+
+def test_independent_pruning_and_per_connection_row_cap():
+    events_store.set_event_policy(EventPolicy(retention_hours=48, row_cap=1000))
+    rows = [_event(i, NOW - timedelta(seconds=i)) for i in range(1005)]
+    rows.append(_event(2000, NOW - timedelta(hours=49)))
+    events_store.upsert_events(rows)
+
+    assert events_store.prune_events("c1", 48, now=NOW) == 1
+    assert events_store.enforce_row_cap("c1", 1000) == 5
+    kept = events_store.list_events("c1", limit=5000)
+    assert len(kept) == 1000
+    assert {e.id for e in kept}.isdisjoint({"c1:1000", "c1:1001", "c1:1002", "c1:1003", "c1:1004"})
+
+
+def test_incremental_maintenance_records_reclamation():
+    assert db.fetchone("PRAGMA auto_vacuum")[0] == 2
+    payload = "x" * 4000
+    events_store.upsert_events([_event(i, NOW, payload) for i in range(1500)])
+    events_store.prune_events("c1", 1, now=NOW + timedelta(hours=2))
+    before = int(db.fetchone("PRAGMA freelist_count")[0])
+    status = events_store.bounded_maintenance(at=NOW, pages=1000)
+    after = int(db.fetchone("PRAGMA freelist_count")[0])
+
+    assert status.last_run == NOW
+    assert status.last_error is None
+    assert status.pages_reclaimed == before - after
+    assert after < before

@@ -1,4 +1,4 @@
-import type { Event, EventCategory } from '@/types'
+import type { Event, EventCaptureStatus, EventCategory } from '@/types'
 import { apiGet } from './client'
 import { qs } from '@/lib/format'
 import { USE_MOCKS, delay, mockEstate } from './mocks'
@@ -32,4 +32,9 @@ export function getEvents(query: EventQuery = {}): Promise<Event[]> {
     connection_id: query.connectionId, since: query.since, until: query.until, resource_id: query.resourceId,
     category: query.category, q: query.q?.trim() || undefined, limit: query.limit,
   })}`)
+}
+
+export function getEventCaptureStatus(connectionId: string): Promise<EventCaptureStatus> {
+  if (USE_MOCKS) return delay({ connection_id: connectionId, last_complete_end: new Date().toISOString(), incomplete_intervals: [] }, 120)
+  return apiGet<EventCaptureStatus>(`/events/status${qs({ connection_id: connectionId })}`)
 }

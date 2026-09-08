@@ -104,18 +104,21 @@ export interface Overview {
   recent_changes: Change[]
 }
 export interface ConnectionTestResult { ok: boolean; message: string; version?: string | null; build?: string | null }
-// Retention policy in days per tier; must satisfy recent_days <= hourly_days <= daily_days.
-// Events and the change log follow daily_days.
+// Snapshot retention in days per tier; changes follow daily_days.
 export interface RetentionPolicy { recent_days: number; hourly_days: number; daily_days: number }
+export interface EventPolicy { retention_hours: number; row_cap: number }
+export interface EventMaintenanceStatus { last_run: string | null; last_error: string | null; pages_reclaimed: number }
+export interface IncompleteEventInterval { id: number; connection_id: string; since: string; until: string; attempts: number; last_error: string | null; updated_at: string }
+export interface EventCaptureStatus { connection_id: string; last_complete_end: string | null; incomplete_intervals: IncompleteEventInterval[] }
 // changes_min_significance: lowest significance the Changes page and Overview show by default (low = everything).
-export interface Settings { retention_policy: RetentionPolicy; assistant: AssistantSettings; changes_min_significance?: Significance }
+export interface Settings { retention_policy: RetentionPolicy; event_policy: EventPolicy; event_maintenance: EventMaintenanceStatus; assistant: AssistantSettings; changes_min_significance?: Significance }
 // Trusted proxies: addresses allowed to set X-Forwarded-For / X-Forwarded-Proto (the ingress).
 export interface TrustedProxies {
   trusted_proxies: string[]; source: 'env' | 'settings'; stored: string[]; env_problem: string | null
   // Where this request came from, so the page can point at the ingress.
   peer: string | null; peer_trusted: boolean; ignored_forwarded_headers: boolean; scheme: string
 }
-export interface SettingsUpdate { retention_policy: RetentionPolicy; assistant: Partial<AssistantSettings> & { api_key?: string }; changes_min_significance?: Significance }
+export interface SettingsUpdate { retention_policy: RetentionPolicy; event_policy: EventPolicy; assistant: Partial<AssistantSettings> & { api_key?: string }; changes_min_significance?: Significance }
 export interface AssistantEvidenceCount { findings: number; changes: number; resources: number; events: number }
 export type AssistantStreamEvent =
   | { type: 'delta'; text: string }

@@ -618,9 +618,7 @@ def select_retention_victims(
 def apply_retention(
     connection_id: str, policy: RetentionPolicy | None = None, at: datetime | None = None
 ) -> int:
-    """Prune scheduled snapshots per the tier policy and expire change rows
-    and vCenter events older than daily_days. Manual snapshots are never
-    touched. Returns the number of snapshots deleted."""
+    """Apply snapshot, change-log, and independent event limits."""
     policy = policy or retention_policy()
     at = at or now()
     rows = db.fetchall(
@@ -631,14 +629,20 @@ def apply_retention(
     victims = select_retention_victims([(r["id"], _dt(r["created_at"])) for r in rows], policy, at)
     deleted = delete_snapshots(victims) if victims else 0
     expired = prune_changes(connection_id, before=at - timedelta(days=policy.daily_days))
-    events_gone = events_store.prune_events(connection_id, policy.daily_days, now=at)
-    if deleted or expired or events_gone:
+    event_policy = events_store.event_policy()
+    events_gone = events_store.prune_events(connection_id, event_policy.retention_hours, now=at)
+    over_cap = events_store.enforce_row_cap(connection_id, event_policy.row_cap)
+    maintenance = events_store.bounded_maintenance(at=at)
+    if deleted or expired or events_gone or over_cap:
         log.info(
-            "retention for %s: pruned %d snapshot(s), expired %d change row(s), %d event(s)",
+            "retention for %s: pruned %d snapshot(s), expired %d change row(s), "
+            "%d old event(s), %d over-cap event(s), reclaimed %d page(s)",
             connection_id,
             deleted,
             expired,
             events_gone,
+            over_cap,
+            maintenance.pages_reclaimed,
         )
     return deleted
 

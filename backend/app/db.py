@@ -116,8 +116,13 @@ def connect() -> sqlite3.Connection:
     with _lock:
         if _conn is None:
             Path(cfg.db_path).parent.mkdir(parents=True, exist_ok=True)
+            new_database = not Path(cfg.db_path).exists()
             _conn = sqlite3.connect(cfg.db_path, check_same_thread=False)
             _conn.row_factory = sqlite3.Row
+            if new_database:
+                # Must be selected before tables are created. Existing databases
+                # keep their current mode because changing it requires a full VACUUM.
+                _conn.execute("PRAGMA auto_vacuum=INCREMENTAL")
             _conn.execute("PRAGMA journal_mode=WAL")
             _conn.execute("PRAGMA foreign_keys=ON")
             _conn.executescript(SCHEMA)

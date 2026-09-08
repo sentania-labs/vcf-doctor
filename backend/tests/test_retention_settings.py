@@ -22,6 +22,9 @@ def test_defaults_come_from_config_and_old_count_is_ignored(client):
     db.set_setting("retention", 2)  # a pre-tier database that only has the old count
     body = client.get("/api/settings").json()
     assert body["retention_policy"] == {"recent_days": 14, "hourly_days": 30, "daily_days": 365}
+    assert body["event_policy"] == {"retention_hours": 48, "row_cap": 250000}
+    assert body["event_maintenance"]["last_run"] is None
+    assert db.get_setting("event_policy") == {"retention_hours": 48, "row_cap": 250000}
     assert "retention" not in body
 
 
@@ -62,3 +65,13 @@ def test_rejects_bad_policies_with_400(client, policy, fragment):
 def test_invalid_stored_policy_falls_back_to_defaults(client):
     db.set_setting("retention_policy", {"recent_days": 99, "hourly_days": 1, "daily_days": 1})
     assert client.get("/api/settings").json()["retention_policy"]["recent_days"] == 14
+
+
+def test_event_policy_partial_update_persists_and_validates(client):
+    r = client.put("/api/settings", json={"event_policy": {"retention_hours": 72}})
+    assert r.status_code == 200
+    assert r.json()["event_policy"] == {"retention_hours": 72, "row_cap": 250000}
+    assert db.get_setting("event_policy") == {"retention_hours": 72, "row_cap": 250000}
+
+    for bad in ({"retention_hours": 0}, {"row_cap": 999}, {"row_cap": True}):
+        assert client.put("/api/settings", json={"event_policy": bad}).status_code == 400

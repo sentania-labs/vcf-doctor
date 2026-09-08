@@ -426,7 +426,13 @@ function buildManagementDomain(): MockEstate {
 
 export const mockState = {
   estates: [buildWorkloadDomain(), buildManagementDomain()] as MockEstate[],
-  settings: { retention_policy: { recent_days: 14, hourly_days: 30, daily_days: 365 }, changes_min_significance: 'low', assistant: { enabled: true, provider: 'mock', model: 'claude-opus-5', api_key_set: false } } as Settings,
+  settings: {
+    retention_policy: { recent_days: 14, hourly_days: 30, daily_days: 365 },
+    event_policy: { retention_hours: 48, row_cap: 250000 },
+    event_maintenance: { last_run: hoursAgo(1), last_error: null, pages_reclaimed: 36 },
+    changes_min_significance: 'low',
+    assistant: { enabled: true, provider: 'mock', model: 'claude-opus-5', api_key_set: false },
+  } as Settings,
   assistantStatus: { available: true, provider: 'mock', model: 'claude-opus-5', reason: null } as AssistantStatus,
   nextId: 100,
 }

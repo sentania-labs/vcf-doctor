@@ -18,6 +18,8 @@ from app.models import (
     ConnectionCreate,
     ConnectionPublic,
     ConnectionResult,
+    EventMaintenanceStatus,
+    EventPolicy,
     Finding,
     Resource,
     ScanRun,
@@ -366,7 +368,7 @@ def list_connections():
 
 
 def _check_kind(kind: str | None) -> None:
-    """"vcenter" is the only operator-facing kind. "fixture" (bundled test
+    """ "vcenter" is the only operator-facing kind. "fixture" (bundled test
     data) is accepted only when the VCF_DOCTOR_TEST_FIXTURES hook is on."""
     if kind is None or kind == "vcenter":
         return
@@ -459,6 +461,8 @@ def put_schedule(connection_id: str, body: ScheduleUpdate):
 
 class AppSettings(BaseModel):
     retention_policy: RetentionPolicy
+    event_policy: EventPolicy
+    event_maintenance: EventMaintenanceStatus
     min_interval_minutes: int
     scheduler_running: bool
     changes_min_significance: str
@@ -469,6 +473,7 @@ class AppSettingsUpdate(BaseModel):
     # Partial: omitted tiers keep their stored value. Ints, each >= 1,
     # recent_days <= hourly_days <= daily_days.
     retention_policy: dict[str, Any] | None = None
+    event_policy: dict[str, Any] | None = None
     changes_min_significance: str | None = None
     # Partial assistant update; may carry "api_key", which is stored and never echoed.
     assistant: dict[str, Any] | None = None
@@ -476,8 +481,12 @@ class AppSettingsUpdate(BaseModel):
 
 @router.get("/settings", response_model=AppSettings)
 def get_settings():
+    from app.events import store as events_store
+
     return AppSettings(
         retention_policy=scheduler.retention_policy(),
+        event_policy=events_store.event_policy(),
+        event_maintenance=events_store.maintenance_status(),
         min_interval_minutes=settings.min_interval_minutes,
         scheduler_running=scheduler.running(),
         changes_min_significance=changes_min_significance(),
@@ -506,10 +515,34 @@ def _merge_retention_policy(update: dict[str, Any]) -> RetentionPolicy:
         raise HTTPException(400, f"{where}: {first.get('msg', 'invalid')}") from exc
 
 
+def _merge_event_policy(update: dict[str, Any]) -> EventPolicy:
+    from app.events import store as events_store
+
+    allowed = {"retention_hours", "row_cap"}
+    unknown = set(update) - allowed
+    if unknown:
+        raise HTTPException(400, f"unknown event_policy keys: {', '.join(sorted(unknown))}")
+    merged = events_store.event_policy().model_dump()
+    for key, value in update.items():
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise HTTPException(400, f"event_policy.{key} must be an integer")
+        merged[key] = value
+    try:
+        return EventPolicy.model_validate(merged)
+    except ValidationError as exc:
+        first = exc.errors()[0]
+        loc = ".".join(str(x) for x in first.get("loc", ()))
+        raise HTTPException(400, f"event_policy.{loc}: {first.get('msg', 'invalid')}") from exc
+
+
 @router.put("/settings", response_model=AppSettings)
 def put_settings(body: AppSettingsUpdate):
+    from app.events import store as events_store
+
     if body.retention_policy is not None:
         store.set_retention_policy(_merge_retention_policy(body.retention_policy))
+    if body.event_policy is not None:
+        events_store.set_event_policy(_merge_event_policy(body.event_policy))
     if body.changes_min_significance is not None:
         if body.changes_min_significance not in SIGNIFICANCE_LEVELS:
             raise HTTPException(400, "changes_min_significance must be one of low, medium, high")

@@ -6,7 +6,7 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Query
 
 from app.events import store as events_store
-from app.models.event import Event
+from app.models.event import Event, EventCaptureStatus
 from app.snapshots import store
 
 router = APIRouter(prefix="/api/events", tags=["events"])
@@ -47,3 +47,10 @@ def list_events(
         q=q,
         limit=limit,
     )
+
+
+@router.get("/status", response_model=EventCaptureStatus)
+def capture_status(connection_id: str) -> EventCaptureStatus:
+    if store.get_connection(connection_id) is None:
+        raise HTTPException(404, f"connection {connection_id} not found")
+    return events_store.capture_status(connection_id)

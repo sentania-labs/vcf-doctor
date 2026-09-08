@@ -39,11 +39,11 @@ Diff additions: `bootTime` tracked (host medium, vm low, summary
 
 ## Events and tasks
 
-Per scan, the vSphere collector also fetches vCenter events and tasks for
-the window (last_scan_time - 60 s, now] via EventManager.QueryEvents with
-an EventFilterSpec time range (and TaskManager / TaskHistoryCollector for
-tasks; if tasks prove awkward, events alone are acceptable for this PR and
-tasks become a follow-up). First scan of a connection fetches the last 24 h.
+Per scan, the vSphere collector also fetches vCenter events and tasks. The
+window starts at the connection's last complete capture checkpoint with a
+60-second overlap and ends at the current snapshot. A failed or incomplete
+query does not advance the checkpoint, so the next scan retries the gap. The
+recovery window is bounded by the configured event retention period.
 Normalized `Event`:
 
 ```
@@ -54,10 +54,27 @@ user (str | null), resource_id (str | null, mapped via moref when the entity
 is in the snapshot), resource_name (str | null), resource_type (str | null)
 ```
 
-Stored in an `events` table (dedup on id), retained daily_days.
+Stored in an `events` table and deduplicated on id. Event storage is independent
+from snapshot retention and is controlled by the Settings card:
+
+```json
+{"retention_hours": 48, "row_cap": 250000}
+```
+
+Both values apply per connection after the next scan. Existing databases gain
+the setting and supporting tables during startup. A result that reaches the
+20,000-item vCenter safety limit is split into smaller time windows. If the
+minimum window still reaches the limit, its interval is persisted, shown on
+the Events page, and retried on later scans.
+
+Pruning is followed by bounded `incremental_vacuum` maintenance. Settings shows
+its last run, reclaimed page count, and last error. A scan never runs a full
+database vacuum.
 
 - `GET /api/events?connection_id=&since=&until=&resource_id=&category=&q=&limit=`
   newest first, default last 24 h, limit 500.
+- `GET /api/events/status?connection_id=` returns the last complete checkpoint
+  and any incomplete intervals awaiting retry.
 - `AssistantContext` gains `events: list[Event] = []` (additive); the prompt
   renders them as an EVENTS block ("what vCenter recorded in the window").
 - Fixture collector (tests only): `fixtures/events_b.json` holds about 25 realistic events
