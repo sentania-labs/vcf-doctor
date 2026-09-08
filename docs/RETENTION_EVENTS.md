@@ -39,11 +39,18 @@ Diff additions: `bootTime` tracked (host medium, vm low, summary
 
 ## Events and tasks
 
-Per scan, the vSphere collector also fetches vCenter events and tasks for
-the window (last_scan_time - 60 s, now] via EventManager.QueryEvents with
-an EventFilterSpec time range (and TaskManager / TaskHistoryCollector for
-tasks; if tasks prove awkward, events alone are acceptable for this PR and
-tasks become a follow-up). First scan of a connection fetches the last 24 h.
+Per scan, the vSphere collector also fetches vCenter events and tasks. The
+window starts at the connection's last complete capture checkpoint with a
+60-second overlap and ends at the current snapshot. A failed or incomplete
+query does not advance the checkpoint, so the next scan retries the gap. A
+successful empty query advances it too. The checkpoint window is bounded by
+the event retention cutoff. Without a checkpoint, capture starts at that
+cutoff; older history is not recovered. A generic task-history fetch failure
+keeps fetched events but leaves the checkpoint unchanged without failing the
+scan. Only `NotSupported` or `NoPermission` faults allow event-only capture to
+complete the window. These faults persist a per-connection
+`task_history_unavailable` flag, shown as a warning on the Events page. Task
+access is checked again on each scan; a successful task query clears the flag.
 Normalized `Event`:
 
 ```
@@ -54,10 +61,41 @@ user (str | null), resource_id (str | null, mapped via moref when the entity
 is in the snapshot), resource_name (str | null), resource_type (str | null)
 ```
 
-Stored in an `events` table (dedup on id), retained daily_days.
+Stored in an `events` table and deduplicated on id. Event storage is independent
+from snapshot retention and is controlled by Settings > Events retention.
+`event_policy` contains `retention_hours` and `row_cap`; defaults come from
+[backend configuration](../backend/app/config.py), and accepted ranges are
+defined by [EventPolicy](../backend/app/models/event.py).
 
+Both limits apply per connection at startup and after each scan, including
+when event capture fails. Time-based pruning runs first, then the row cap
+keeps the newest remaining rows. Saving settings takes effect at the next
+retention pass. Existing databases gain the defaults and supporting tables
+automatically at startup, so existing history is subject to these limits.
+A result that reaches the 20,000-item vCenter safety limit is split into
+smaller time windows. If the
+minimum window still reaches the limit, its interval is persisted, shown on
+the Events page, and retried on later scans. Overlapping gaps are coalesced;
+gaps covered by the checkpoint window are not queried separately. Recorded
+gaps expire when their end precedes the retention cutoff. Before retry selection,
+surviving gaps are trimmed to that cutoff so a prolonged outage does not trigger
+queries for expired history.
+
+Pruning is followed by bounded `incremental_vacuum` maintenance. Settings shows
+its last run, reclaimed page count, and last error. A scan never runs a full
+database vacuum. For existing databases, see the
+[compaction upgrade notes](../README.md#upgrade-notes-event-compaction).
+
+- `GET /api/settings` returns `event_policy` and `event_maintenance`;
+  `PUT /api/settings` accepts partial `event_policy` updates.
+- `POST /api/settings/events/compaction-migration` retries migration and runs
+  bounded maintenance, returning its status. Check `last_error` even when the
+  request succeeds.
 - `GET /api/events?connection_id=&since=&until=&resource_id=&category=&q=&limit=`
   newest first, default last 24 h, limit 500.
+- `GET /api/events/status?connection_id=` returns
+  [EventCaptureStatus](../backend/app/models/event.py), including the checkpoint,
+  retry intervals, and task-history availability described above.
 - `AssistantContext` gains `events: list[Event] = []` (additive); the prompt
   renders them as an EVENTS block ("what vCenter recorded in the window").
 - Fixture collector (tests only): `fixtures/events_b.json` holds about 25 realistic events

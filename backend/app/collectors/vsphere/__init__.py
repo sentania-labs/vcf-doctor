@@ -31,7 +31,6 @@ from app.collectors.vsphere.normalize import (
     vcenter_key,
 )
 from app.models import ConnectionResult, Resource
-from app.models.event import Event
 
 log = logging.getLogger(__name__)
 
@@ -92,18 +91,18 @@ class VSphereCollector(Collector):
         log.info("vsphere collect %s: %d resources", self.host, len(resources))
         return resources
 
-    def collect_events(self, since: datetime, until: datetime) -> list[Event]:
+    def collect_events(self, since: datetime, until: datetime):
         """vCenter events and tasks in (since, until], mapped to Event with
         resource ids in this collector's namespace. Raises VSphereError."""
         try:
             with self._session() as s:
-                events = _collect_events(s.si, self.namespace, since, until)
+                batch = _collect_events(s.si, self.namespace, since, until)
         except VSphereError:
             raise
         except Exception as exc:  # noqa: BLE001
             raise classify_exception(exc, self.host) from exc
-        log.info("vsphere events %s: %d events/tasks", self.host, len(events))
-        return events
+        log.info("vsphere events %s: %d events/tasks", self.host, len(batch.events))
+        return batch
 
 
 __all__ = [

@@ -3,7 +3,9 @@
 from datetime import UTC, datetime, timedelta, timezone
 from types import SimpleNamespace as NS
 
+from app.collectors.vsphere import events as collector_events
 from app.collectors.vsphere.events import (
+    _drain,
     classify_event,
     is_system_user,
     map_event,
@@ -13,6 +15,57 @@ from app.collectors.vsphere.events import (
 
 NS_ID = "conn1"
 T = datetime(2026, 8, 31, 6, 15, 0, tzinfo=UTC)
+
+
+class HistoryCollector:
+    def __init__(self, rows):
+        self.rows = list(rows)
+        self.destroyed = False
+
+    def RewindCollector(self):
+        pass
+
+    def ReadNextEvents(self, size):
+        page, self.rows = self.rows[:size], self.rows[size:]
+        return page
+
+    def DestroyCollector(self):
+        self.destroyed = True
+
+
+def test_drain_reports_cap_instead_of_silently_truncating(monkeypatch):
+    monkeypatch.setattr(collector_events, "MAX_ITEMS", 3)
+    capped = HistoryCollector(range(5))
+    result = _drain(capped, "ReadNextEvents")
+    assert result.items == [0, 1, 2]
+    assert result.complete is False
+    assert capped.destroyed is True
+
+    complete = HistoryCollector(range(2))
+    result = _drain(complete, "ReadNextEvents")
+    assert result.items == [0, 1]
+    assert result.complete is True
+
+
+def test_collect_events_keeps_events_but_is_incomplete_when_task_query_fails(monkeypatch):
+    raw = VmPoweredOffEvent(**_base(111, "web03 powered off"))
+    monkeypatch.setattr(
+        collector_events,
+        "fetch_events",
+        lambda *_args: collector_events.FetchBatch(items=[raw], complete=True),
+    )
+
+    def unavailable(*_args):
+        raise RuntimeError("task history unavailable")
+
+    monkeypatch.setattr(collector_events, "fetch_tasks", unavailable)
+
+    result = collector_events.collect_events(object(), NS_ID, T - timedelta(minutes=1), T)
+
+    assert [event.id for event in result.events] == ["conn1:111"]
+    assert result.complete is False
+    assert result.error == "task history fetch failed"
+    assert result.task_history_unavailable is None
 
 
 class Ref:

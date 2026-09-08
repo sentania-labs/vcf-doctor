@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     retention_recent_days: int = 14
     retention_hourly_days: int = 30
     retention_daily_days: int = 365
+    # Event history is intentionally independent from snapshot history. The
+    # effective values live in the settings table and are editable in the GUI.
+    event_retention_hours: int = 48
+    event_row_cap: int = 250_000
     # Scheduler floor in minutes.
     min_interval_minutes: int = 5
     # "on" requires the shared operator password; "off" for deployments that

@@ -28,6 +28,7 @@ Mapping rules
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -225,14 +226,30 @@ def map_task(task: Any, namespace: str) -> Event:
 # ---- live fetch ------------------------------------------------------------------
 
 
-def _drain(collector: Any, reader: str) -> list[Any]:
+@dataclass(frozen=True)
+class FetchBatch:
+    items: list[Any]
+    complete: bool
+
+
+@dataclass(frozen=True)
+class CaptureBatch:
+    events: list[Event]
+    complete: bool
+    task_history_unavailable: bool | None = None
+    error: str | None = None
+
+
+def _drain(collector: Any, reader: str) -> FetchBatch:
     """Rewind a history collector and page through it."""
     out: list[Any] = []
+    complete = False
     try:
         collector.RewindCollector()
         while len(out) < MAX_ITEMS:
-            page = getattr(collector, reader)(PAGE_SIZE)
+            page = list(getattr(collector, reader)(min(PAGE_SIZE, MAX_ITEMS - len(out))) or [])
             if not page:
+                complete = True
                 break
             out.extend(page)
     finally:
@@ -240,10 +257,10 @@ def _drain(collector: Any, reader: str) -> list[Any]:
             collector.DestroyCollector()
         except Exception:  # noqa: BLE001  best effort teardown
             pass
-    return out
+    return FetchBatch(items=out[:MAX_ITEMS], complete=complete and len(out) < MAX_ITEMS)
 
 
-def fetch_events(si: Any, begin: datetime, end: datetime) -> list[Any]:
+def fetch_events(si: Any, begin: datetime, end: datetime) -> FetchBatch:
     from pyVmomi import vim
 
     content = si.RetrieveContent()
@@ -254,7 +271,7 @@ def fetch_events(si: Any, begin: datetime, end: datetime) -> list[Any]:
     return _drain(collector, "ReadNextEvents")
 
 
-def fetch_tasks(si: Any, begin: datetime, end: datetime) -> list[Any]:
+def fetch_tasks(si: Any, begin: datetime, end: datetime) -> FetchBatch:
     from pyVmomi import vim
 
     content = si.RetrieveContent()
@@ -265,24 +282,34 @@ def fetch_tasks(si: Any, begin: datetime, end: datetime) -> list[Any]:
     return _drain(collector, "ReadNextTasks")
 
 
-def collect_events(si: Any, namespace: str, begin: datetime, end: datetime) -> list[Event]:
-    """Events plus tasks for the window, mapped. A task history failure (for
-    example a standalone host without a task history collector) is logged
-    and leaves the events in place."""
+def collect_events(si: Any, namespace: str, begin: datetime, end: datetime) -> CaptureBatch:
+    """Events plus tasks for the window, with explicit cap completeness."""
+    from pyVmomi import vim, vmodl
+
     out: list[Event] = []
-    for raw in fetch_events(si, begin, end):
+    event_batch = fetch_events(si, begin, end)
+    for raw in event_batch.items:
         try:
             out.append(map_event(raw, namespace))
         except Exception as exc:  # noqa: BLE001  one odd event must not drop the batch
             log.debug("skipping unmappable event %r: %s", getattr(raw, "key", "?"), exc)
     try:
-        tasks = fetch_tasks(si, begin, end)
-    except Exception as exc:  # noqa: BLE001
+        task_batch = fetch_tasks(si, begin, end)
+    except (vmodl.fault.NotSupported, vim.fault.NoPermission) as exc:
         log.warning("task history unavailable, events only: %s", exc)
-        tasks = []
-    for raw in tasks:
+        return CaptureBatch(
+            events=out, complete=event_batch.complete, task_history_unavailable=True
+        )
+    except Exception as exc:
+        log.warning("task history fetch failed: %s", exc)
+        return CaptureBatch(events=out, complete=False, error="task history fetch failed")
+    for raw in task_batch.items:
         try:
             out.append(map_task(raw, namespace))
         except Exception as exc:  # noqa: BLE001
             log.debug("skipping unmappable task %r: %s", getattr(raw, "key", "?"), exc)
-    return out
+    return CaptureBatch(
+        events=out,
+        complete=event_batch.complete and task_batch.complete,
+        task_history_unavailable=False,
+    )

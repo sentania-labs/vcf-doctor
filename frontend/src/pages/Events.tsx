@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ScrollText, Search } from 'lucide-react'
+import { AlertTriangle, ScrollText, Search } from 'lucide-react'
 import type { Event, EventCategory } from '@/types'
-import { getEvents } from '@/api'
+import { getEventCaptureStatus, getEvents } from '@/api'
 import { useAsync } from '@/hooks/useAsync'
 import { useAppState } from '@/state/AppState'
 import { Badge, Button, Card, EmptyState, ErrorState, Input, PageHeader, Segmented, Skeleton } from '@/components/ui'
@@ -33,6 +33,9 @@ export default function EventsPage() {
   const events = useAsync(
     () => getEvents({ connectionId, since, category: category === 'all' ? null : category, q: query || null, limit }),
     [connectionId, since, category, query, limit, refreshKey], !!connectionId)
+  const capture = useAsync(
+    () => getEventCaptureStatus(connectionId as string),
+    [connectionId, refreshKey], !!connectionId)
 
   if (!connectionId) {
     return (
@@ -62,6 +65,24 @@ export default function EventsPage() {
     <div className="anim-fade-up">
       <PageHeader title="Events" subtitle="What vCenter recorded: events and tasks, newest first"
         actions={<Segmented value={range} onChange={setRange} options={RANGE_PRESETS.map(p => ({ value: p.value, label: `Last ${p.label}` }))} />} />
+
+      {capture.data?.task_history_unavailable ? (
+        <Card className="mb-5 border-warning/40 bg-warning-bg">
+          <div role="status" className="px-4 py-3 flex items-start gap-3 text-sm">
+            <AlertTriangle size={17} className="text-warning mt-0.5 shrink-0" />
+            <div><p className="font-semibold text-fg">Task history unavailable</p><p className="text-muted mt-0.5">This connection does not support task history or denies permission to read it. Events are still collected, but task history is missing. VCF Doctor checks access again on each scan.</p></div>
+          </div>
+        </Card>
+      ) : null}
+
+      {capture.data && capture.data.incomplete_intervals.length > 0 ? (
+        <Card className="mb-5 border-warning/40 bg-warning-bg">
+          <div className="px-4 py-3 flex items-start gap-3 text-sm">
+            <AlertTriangle size={17} className="text-warning mt-0.5 shrink-0" />
+            <div><p className="font-semibold text-fg">Event capture has {capture.data.incomplete_intervals.length} incomplete {capture.data.incomplete_intervals.length === 1 ? 'interval' : 'intervals'}</p><p className="text-muted mt-0.5">A vCenter query failed or reached the safety limit in its smallest query window. VCF Doctor kept the interval for automatic retry on later scans, so this is visible rather than silently lost.</p></div>
+          </div>
+        </Card>
+      ) : null}
 
       <div className="flex flex-wrap items-center gap-3 mb-5">
         <Segmented value={category} onChange={setCategory} options={[

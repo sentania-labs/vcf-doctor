@@ -37,6 +37,9 @@ def retention_policy() -> RetentionPolicy:
 def startup_maintenance() -> None:
     """Once per process start: compress legacy snapshot rows, then apply
     retention to every connection so a long-stopped instance catches up."""
+    from app.events import store as events_store
+
+    events_store.ensure_schema()
     try:
         migrated = store.migrate_legacy_snapshots()
         if migrated:

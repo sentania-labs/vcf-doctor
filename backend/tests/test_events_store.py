@@ -9,7 +9,7 @@ from app.config import settings as cfg
 from app.events import service
 from app.events import store as events_store
 from app.models import ConnectionCreate, Resource
-from app.models.event import Event
+from app.models.event import Event, EventPolicy
 from app.models.snapshot import RetentionPolicy, Snapshot
 from app.snapshots import store
 
@@ -103,9 +103,9 @@ def test_prune_and_delete():
             _ev("other", 60 * 24 * 400, conn="c2"),
         ]
     )
-    assert events_store.prune_events("c1", 365, now=NOW) == 1
-    assert events_store.prune_events("c1", 30, now=NOW) == 1
-    assert events_store.prune_events("c1", 30, now=NOW) == 0
+    assert events_store.prune_events("c1", 24 * 365, now=NOW) == 1
+    assert events_store.prune_events("c1", 24 * 30, now=NOW) == 1
+    assert events_store.prune_events("c1", 24 * 30, now=NOW) == 0
     assert events_store.count_events("c1") == 1
     assert events_store.count_events("c2") == 1  # other connections untouched
     assert events_store.delete_events("c2") == 1
@@ -113,17 +113,12 @@ def test_prune_and_delete():
     assert events_store.latest_event_time("c2") is None
 
 
-def test_retention_days_follows_the_effective_policy(monkeypatch):
-    # No stored policy: the deployment default, not a hardcoded year.
-    monkeypatch.setattr(cfg, "retention_daily_days", 42)
-    assert service.retention_days() == 42
-    db.set_setting("retention_policy", {"recent_days": 14, "hourly_days": 30, "daily_days": 90})
-    assert service.retention_days() == 90
-    # Invalid stored policies fall back to the deployment default as well.
-    db.set_setting("retention_policy", {"daily_days": 0})
-    assert service.retention_days() == 42
-    db.set_setting("retention_policy", "garbage")
-    assert service.retention_days() == 42
+def test_event_retention_is_independent_from_snapshot_policy(monkeypatch):
+    monkeypatch.setattr(cfg, "event_retention_hours", 42)
+    assert service.retention_hours() == 42
+    events_store.set_event_policy(EventPolicy(retention_hours=72, row_cap=250_000))
+    store.set_retention_policy(RetentionPolicy(recent_days=14, hourly_days=30, daily_days=90))
+    assert service.retention_hours() == 72
 
 
 def test_apply_retention_prunes_events_without_a_capture():
@@ -139,7 +134,8 @@ def test_apply_retention_prunes_events_without_a_capture():
             _ev("other", 60 * 24 * 10, conn="c2"),
         ]
     )
-    policy = RetentionPolicy(recent_days=1, hourly_days=2, daily_days=3)
+    events_store.set_event_policy(EventPolicy(retention_hours=48, row_cap=250_000))
+    policy = RetentionPolicy(recent_days=1, hourly_days=2, daily_days=365)
     assert store.apply_retention(conn.id, policy, at=NOW) == 0
     assert [e.id for e in events_store.list_events(connection_id=conn.id)] == [f"{conn.id}:fresh"]
     assert events_store.count_events("c2") == 1  # other connections untouched
@@ -172,31 +168,20 @@ class NoEventsCollector:
     pass
 
 
-def test_capture_window_first_scan_then_overlap(monkeypatch):
-    from app.snapshots import store
-
-    snaps = {}
-
-    def fake_list(conn_id):
-        return [s for s in snaps.values() if s.connection_id == conn_id]
-
-    monkeypatch.setattr(store, "list_snapshots", fake_list)
+def test_capture_window_uses_checkpoint_then_overlap():
     s1 = _snapshot("s1", NOW - timedelta(minutes=15))
-    snaps["s1"] = s1
     since, until = service.capture_window("c1", s1)
-    assert until == s1.created_at and since == until - timedelta(hours=24)
+    assert until == s1.created_at and since == until - timedelta(hours=48)
+    events_store.set_capture_checkpoint("c1", NOW - timedelta(minutes=16))
     s2 = _snapshot("s2", NOW)
-    snaps["s2"] = s2
     since, until = service.capture_window("c1", s2)
-    assert until == NOW and since == s1.created_at - timedelta(seconds=60)
+    assert until == NOW and since == NOW - timedelta(minutes=17)
 
 
 def test_capture_events_enriches_stores_prunes_and_never_raises(monkeypatch):
-    from app.snapshots import store
 
     snap = _snapshot("s1", NOW)
-    monkeypatch.setattr(store, "list_snapshots", lambda cid: [snap])
-    store.set_retention_policy(RetentionPolicy(recent_days=7, hourly_days=14, daily_days=30))
+    events_store.set_event_policy(EventPolicy(retention_hours=48, row_cap=250_000))
     collector = FakeCollector(
         [
             Event(
@@ -227,9 +212,9 @@ def test_capture_events_enriches_stores_prunes_and_never_raises(monkeypatch):
     )
     conn = type("Conn", (), {"id": "c1"})()
     assert service.capture_events(conn, collector, snap) == 2  # c1:3 is past retention
-    assert collector.calls == [(NOW - timedelta(hours=24), NOW)]
+    assert collector.calls == [(NOW - timedelta(hours=48), NOW)]
     rows = {e.id: e for e in events_store.list_events("c1", since=NOW - timedelta(days=365))}
-    assert set(rows) == {"c1:1", "c1:2"}  # c1:3 never stored under the 30 day policy
+    assert set(rows) == {"c1:1", "c1:2"}  # c1:3 never stored under the 48-hour policy
     assert rows["c1:1"].resource_name == "web03" and rows["c1:1"].resource_type == "vm"
     assert rows["c1:2"].resource_name is None  # not in the snapshot: id kept, no name
     # second capture of the same window is a no-op thanks to dedup

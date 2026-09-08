@@ -1,4 +1,4 @@
-import type { Settings, SettingsUpdate, Significance } from '@/types'
+import type { EventMaintenanceStatus, Settings, SettingsUpdate, Significance } from '@/types'
 import { apiGet, apiSend } from './client'
 import { USE_MOCKS, delay, mockState } from './mocks'
 
@@ -12,6 +12,8 @@ export function updateSettings(body: SettingsUpdate): Promise<Settings> {
     const { api_key, ...rest } = body.assistant
     mockState.settings = {
       retention_policy: { ...body.retention_policy },
+      event_policy: { ...body.event_policy },
+      event_maintenance: mockState.settings.event_maintenance,
       changes_min_significance: body.changes_min_significance ?? mockState.settings.changes_min_significance ?? 'low',
       assistant: { ...mockState.settings.assistant, ...rest, api_key_set: api_key ? true : mockState.settings.assistant.api_key_set },
     }
@@ -35,4 +37,9 @@ export async function getChangesMinSignificance(): Promise<Significance> {
   } catch {
     return 'low'
   }
+}
+
+export function runCompactionMigration(): Promise<EventMaintenanceStatus> {
+  if (USE_MOCKS) return delay(mockState.settings.event_maintenance, 120)
+  return apiSend<EventMaintenanceStatus>('POST', '/settings/events/compaction-migration', {})
 }

@@ -79,3 +79,19 @@ Bugs and ideas go in [GitHub issues](https://github.com/sentania-labs/vcf-doctor
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+## Upgrade notes: event compaction
+
+Existing SQLite databases with auto-vacuum disabled receive a one-time startup
+migration to incremental reclamation. This performs one full VACUUM before the
+scheduler starts, under the shared single-writer lock. Startup can take longer
+while the database is rewritten. Free space on the database volume must be at
+least 1.5 times the database file size. A durable migration marker and SQLite's
+mode prevent repeat rewrites; routine scan cleanup remains bounded.
+
+If space is insufficient, startup continues without compaction. Settings > Events
+retention shows `compaction unavailable: needs N MB free`. Free space and choose
+**Run compaction migration now** to retry the same guarded migration. Database
+writes wait for the migration to finish. The migration preserves events and
+settings; subsequent [event retention](docs/RETENTION_EVENTS.md#events-and-tasks)
+cleanup applies the independent limits to existing history too.
