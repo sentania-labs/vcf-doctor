@@ -42,8 +42,11 @@ Diff additions: `bootTime` tracked (host medium, vm low, summary
 Per scan, the vSphere collector also fetches vCenter events and tasks. The
 window starts at the connection's last complete capture checkpoint with a
 60-second overlap and ends at the current snapshot. A failed or incomplete
-query does not advance the checkpoint, so the next scan retries the gap. The
-recovery window is bounded by the configured event retention period.
+query does not advance the checkpoint, so the next scan retries the gap. A
+successful empty query advances it too. The checkpoint window is bounded by
+the event retention cutoff. Without a checkpoint, capture starts at that
+cutoff; older history is not recovered. A task-history
+fetch failure also leaves the checkpoint unchanged without failing the scan.
 Normalized `Event`:
 
 ```
@@ -55,26 +58,33 @@ is in the snapshot), resource_name (str | null), resource_type (str | null)
 ```
 
 Stored in an `events` table and deduplicated on id. Event storage is independent
-from snapshot retention and is controlled by the Settings card:
+from snapshot retention and is controlled by Settings > Events retention.
+`event_policy` contains `retention_hours` and `row_cap`; defaults come from
+[backend configuration](../backend/app/config.py), and accepted ranges are
+defined by [EventPolicy](../backend/app/models/event.py).
 
-```json
-{"retention_hours": 48, "row_cap": 250000}
-```
-
-Both values apply per connection after the next scan. Existing databases gain
-the setting and supporting tables during startup. A result that reaches the
-20,000-item vCenter safety limit is split into smaller time windows. If the
+Both limits apply per connection at startup and after each scan, including
+when event capture fails. Time-based pruning runs first, then the row cap
+keeps the newest remaining rows. Saving settings takes effect at the next
+retention pass. Existing databases gain the defaults and supporting tables
+automatically at startup, so existing history is subject to these limits.
+A result that reaches the 20,000-item vCenter safety limit is split into
+smaller time windows. If the
 minimum window still reaches the limit, its interval is persisted, shown on
 the Events page, and retried on later scans. Overlapping gaps are coalesced;
-gaps covered by the checkpoint window are not queried separately.
+gaps covered by the checkpoint window are not queried separately. Recorded
+gaps expire when their end precedes the retention cutoff.
 
 Pruning is followed by bounded `incremental_vacuum` maintenance. Settings shows
 its last run, reclaimed page count, and last error. A scan never runs a full
-database vacuum. Existing databases receive a guarded one-time startup migration
-to incremental mode, requiring free volume space of at least 1.5 times the file
-size. Settings exposes migration failures and a retry button; see the README
-upgrade notes.
+database vacuum. For existing databases, see the
+[compaction upgrade notes](../README.md#upgrade-notes-event-compaction).
 
+- `GET /api/settings` returns `event_policy` and `event_maintenance`;
+  `PUT /api/settings` accepts partial `event_policy` updates.
+- `POST /api/settings/events/compaction-migration` retries migration and runs
+  bounded maintenance, returning its status. Check `last_error` even when the
+  request succeeds.
 - `GET /api/events?connection_id=&since=&until=&resource_id=&category=&q=&limit=`
   newest first, default last 24 h, limit 500.
 - `GET /api/events/status?connection_id=` returns the last complete checkpoint

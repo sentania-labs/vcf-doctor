@@ -93,7 +93,7 @@ def enrich(events: list[Event], connection_id: str, snapshot: Snapshot) -> list[
 
 
 def capture_events(connection: Any, collector: Any, snapshot: Snapshot) -> int:
-    """Fetch, store and prune. Returns the number of new events stored.
+    """Fetch and store. Returns the number of new events stored.
     Collectors without collect_events() (older fixtures, other kinds) are skipped."""
     collect = getattr(collector, "collect_events", None)
     if collect is None:
