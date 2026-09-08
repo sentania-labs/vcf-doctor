@@ -119,9 +119,7 @@ def capture_events(connection: Any, collector: Any, snapshot: Snapshot) -> int:
             )
             retry_rows.extend(retried)
             if retry_complete:
-                events_store.resolve_incomplete_range(
-                    connection_id, interval.since, interval.until
-                )
+                events_store.resolve_incomplete_range(connection_id, interval.since, interval.until)
         except Exception as exc:  # noqa: BLE001
             events_store.record_incomplete_interval(
                 connection_id, interval.since, interval.until, str(exc)[:500]

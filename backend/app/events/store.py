@@ -81,7 +81,9 @@ def ensure_schema() -> sqlite3.Connection:
         if _schema_conn is not conn:
             with db.transaction() as c:
                 c.executescript(SCHEMA)
-                columns = {row["name"] for row in c.execute("PRAGMA table_info(event_capture_state)")}
+                columns = {
+                    row["name"] for row in c.execute("PRAGMA table_info(event_capture_state)")
+                }
                 if "task_history_unavailable" not in columns:
                     c.execute(
                         "ALTER TABLE event_capture_state ADD COLUMN "
@@ -341,8 +343,7 @@ def prune_incomplete_intervals(connection_id: str, before: datetime) -> int:
             (connection_id, cutoff),
         ).rowcount
         c.execute(
-            "UPDATE event_incomplete_intervals SET since = ? "
-            "WHERE connection_id = ? AND since < ?",
+            "UPDATE event_incomplete_intervals SET since = ? WHERE connection_id = ? AND since < ?",
             (cutoff, connection_id, cutoff),
         )
         return deleted

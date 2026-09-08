@@ -84,7 +84,9 @@ first Overview will be quieter than the second.
   time window (last scan cycle, 24 hours, 7 days, custom).
 - **Events**: vCenter events and tasks collected with each scan.
 - **Inventory** and **Snapshots**: browse what was captured and when.
-- **Settings**: retention tiers, health score weights, change significance,
+- **Settings**: snapshot retention tiers and independent
+  [event limits and cleanup status](RETENTION_EVENTS.md#events-and-tasks),
+  health score weights, change significance,
   the assistant and its API key, encryption status, trusted proxies (set
   this to your ingress so login lockouts are per visitor), and the password.
 

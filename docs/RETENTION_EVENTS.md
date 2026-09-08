@@ -45,8 +45,12 @@ window starts at the connection's last complete capture checkpoint with a
 query does not advance the checkpoint, so the next scan retries the gap. A
 successful empty query advances it too. The checkpoint window is bounded by
 the event retention cutoff. Without a checkpoint, capture starts at that
-cutoff; older history is not recovered. A task-history
-fetch failure also leaves the checkpoint unchanged without failing the scan.
+cutoff; older history is not recovered. A generic task-history fetch failure
+keeps fetched events but leaves the checkpoint unchanged without failing the
+scan. Only `NotSupported` or `NoPermission` faults allow event-only capture to
+complete the window. These faults persist a per-connection
+`task_history_unavailable` flag, shown as a warning on the Events page. Task
+access is checked again on each scan; a successful task query clears the flag.
 Normalized `Event`:
 
 ```
@@ -73,7 +77,9 @@ smaller time windows. If the
 minimum window still reaches the limit, its interval is persisted, shown on
 the Events page, and retried on later scans. Overlapping gaps are coalesced;
 gaps covered by the checkpoint window are not queried separately. Recorded
-gaps expire when their end precedes the retention cutoff.
+gaps expire when their end precedes the retention cutoff. Before retry selection,
+surviving gaps are trimmed to that cutoff so a prolonged outage does not trigger
+queries for expired history.
 
 Pruning is followed by bounded `incremental_vacuum` maintenance. Settings shows
 its last run, reclaimed page count, and last error. A scan never runs a full
@@ -87,8 +93,9 @@ database vacuum. For existing databases, see the
   request succeeds.
 - `GET /api/events?connection_id=&since=&until=&resource_id=&category=&q=&limit=`
   newest first, default last 24 h, limit 500.
-- `GET /api/events/status?connection_id=` returns the last complete checkpoint
-  and any incomplete intervals awaiting retry.
+- `GET /api/events/status?connection_id=` returns
+  [EventCaptureStatus](../backend/app/models/event.py), including the checkpoint,
+  retry intervals, and task-history availability described above.
 - `AssistantContext` gains `events: list[Event] = []` (additive); the prompt
   renders them as an EVENTS block ("what vCenter recorded in the window").
 - Fixture collector (tests only): `fixtures/events_b.json` holds about 25 realistic events
