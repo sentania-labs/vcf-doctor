@@ -148,9 +148,15 @@ def _readiness() -> tuple[dict, int]:
         # configured secret path, and readiness needs no session, so the public
         # body says whether this instance can serve and nothing more.
         log.warning("readiness: the database is not usable: %s", detail)
-    startup_complete, startup_detail = scheduler.startup_status()
+    startup_complete, startup_failures = scheduler.startup_status()
     if database and not startup_complete:
-        log.warning("readiness: deferred startup work is incomplete: %s", startup_detail)
+        if startup_failures:
+            log.warning(
+                "readiness: deferred startup steps are failing: %s",
+                ", ".join(startup_failures),
+            )
+        else:
+            log.warning("readiness: deferred startup work is incomplete")
     ready = database and startup_complete
     body = {
         "status": "ok" if ready else "degraded",
@@ -158,13 +164,14 @@ def _readiness() -> tuple[dict, int]:
         "scheduler": scheduler.running(),
         "database": database,
         "startup_complete": startup_complete,
+        "startup_failures": startup_failures,
     }
     return body, 200 if ready else 503
 
 
 @app.get("/api/health/live")
 @app.get("/api/health")
-def health_live() -> dict:
+async def health_live() -> dict:
     """Public liveness, under the current name and the older one. 200 while the
     process is answering, whatever the database is doing, and it reads nothing
     to say so. This is what the container HEALTHCHECK and a Kubernetes

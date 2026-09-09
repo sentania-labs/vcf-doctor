@@ -123,6 +123,89 @@ def test_leader_revisits_an_interrupted_run_after_a_live_scan_finishes(monkeypat
     assert store.get_run(run.id).status == "error"
 
 
+def test_startup_failures_are_isolated_and_do_not_stop_scheduled_scans(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app import auth, vault
+    from app.events import store as events_store
+    from app.main import app
+
+    failed_retention = _conn(name="retention-fails")
+    retained = _conn(name="retention-succeeds")
+    calls: dict[str, int] = {}
+    retention_calls: dict[str, int] = {}
+
+    def record(name):
+        def run():
+            calls[name] = calls.get(name, 0) + 1
+
+        return run
+
+    def fail_rekey():
+        calls["vault_rekey"] = calls.get("vault_rekey", 0) + 1
+        raise RuntimeError("key volume is read-only")
+
+    def backfill():
+        calls["change_log_backfill"] = calls.get("change_log_backfill", 0) + 1
+        return {}
+
+    def reconcile():
+        calls["scan_reconciliation"] = calls.get("scan_reconciliation", 0) + 1
+        raise RuntimeError("scan reconciliation failed")
+
+    def apply_retention(connection_id, _policy):
+        retention_calls[connection_id] = retention_calls.get(connection_id, 0) + 1
+        if connection_id == failed_retention.id:
+            raise RuntimeError("retention failed")
+
+    monkeypatch.setattr(vault, "rekey_at_startup", fail_rekey)
+    monkeypatch.setattr(vault, "migrate_plaintext", record("vault_plaintext"))
+    monkeypatch.setattr(events_store, "seed_defaults", record("event_defaults"))
+    monkeypatch.setattr(store, "backfill_log_since", backfill)
+    monkeypatch.setattr(store, "reconcile_interrupted_runs", reconcile)
+    monkeypatch.setattr(auth, "bootstrap_from_env", record("auth_bootstrap"))
+    monkeypatch.setattr(
+        scheduler, "disable_stale_fixture_schedules", record("fixture_schedules")
+    )
+    monkeypatch.setattr(store, "apply_retention", apply_retention)
+    monkeypatch.setattr(scheduler, "_scheduler", _FakeScheduler())
+    scheduler._begin_startup()
+
+    scheduler._maintenance_job()
+    scheduler._maintenance_job()
+
+    assert scheduler.startup_status() == (
+        False,
+        ("retention", "scan_reconciliation", "vault_rekey"),
+    )
+    assert calls["vault_rekey"] == 2
+    assert calls["scan_reconciliation"] == 4
+    for name in (
+        "vault_plaintext",
+        "event_defaults",
+        "change_log_backfill",
+        "auth_bootstrap",
+        "fixture_schedules",
+    ):
+        assert calls[name] == 1
+    assert retention_calls == {failed_retention.id: 2, retained.id: 1}
+    assert scheduler._leader is True
+    assert set(scheduler._scheduled_state) == {failed_retention.id, retained.id}
+
+    with TestClient(app) as client:
+        ready = client.get("/api/health/ready")
+        assert ready.status_code == 503
+        assert ready.json()["database"] is True
+        assert ready.json()["startup_failures"] == [
+            "retention",
+            "scan_reconciliation",
+            "vault_rekey",
+        ]
+        assert "key volume is read-only" not in ready.text
+        assert ready.json()["scheduler"] is True
+        assert client.get("/api/health/live").status_code == 200
+
+
 class _FakeScheduler:
     """Enough of APScheduler for the leadership logic. The suite never starts a
     real one (_background_jobs_enabled() is false under pytest)."""

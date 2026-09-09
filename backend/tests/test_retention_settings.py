@@ -14,6 +14,7 @@ from app.snapshots import store
 @pytest.fixture()
 def client(tmp_path):
     db.reset_for_tests()
+    scheduler._begin_startup()
     scheduler.startup_maintenance()
     with TestClient(app) as c:
         yield c

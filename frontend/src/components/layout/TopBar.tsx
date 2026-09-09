@@ -19,6 +19,7 @@ export function TopBar() {
   let dot: 'ok' | 'error' | 'running' | 'none' = 'none'
   let statusLabel = 'Not scanned yet'
   if (backend === 'down') { dot = 'error'; statusLabel = 'Console unavailable' }
+  else if (backend === 'maintenance') { dot = 'error'; statusLabel = 'Maintenance failing' }
   else if (backend === 'starting') { dot = 'running'; statusLabel = 'Console starting' }
   else if (backend === 'checking') { dot = 'running'; statusLabel = 'Checking console' }
   else if (relevant.some(s => s.status === 'running')) { dot = 'running'; statusLabel = 'Scanning' }

@@ -17,11 +17,13 @@ export interface ReadinessResponse {
   scheduler: boolean
   database?: boolean
   startup_complete?: boolean
+  startup_failures?: string[]
 }
 
 export function getReadiness(): Promise<ReadinessResponse> {
   if (USE_MOCKS) return delay({
     status: 'ok', version: 'dev', scheduler: true, database: true, startup_complete: true,
+    startup_failures: [],
   }, 80)
   return apiGet<ReadinessResponse>('/health/ready', [503])
 }

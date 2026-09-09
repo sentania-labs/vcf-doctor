@@ -17,6 +17,18 @@ test('readiness distinguishes startup, database failure, and an unknown response
   )
 })
 
+test('a failed maintenance step is not reported as startup or database failure', () => {
+  assert.deepEqual(
+    classifyReadiness({
+      status: 'degraded',
+      database: true,
+      startup_complete: false,
+      startup_failures: ['vault_rekey'],
+    }),
+    { backend: 'maintenance', backendError: null, databaseHealthy: true },
+  )
+})
+
 test('readiness only reports the console up from a complete healthy response', () => {
   assert.deepEqual(
     classifyReadiness({ status: 'ok', database: true, startup_complete: true }),

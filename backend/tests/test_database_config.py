@@ -29,10 +29,17 @@ def test_no_password_file_means_no_password(tmp_path, monkeypatch):
     assert config.database_password() is None
 
 
-def test_a_password_in_the_url_is_refused(monkeypatch):
+@pytest.mark.parametrize(
+    "connection",
+    [
+        "postgresql://vcf_doctor:hunter2@pg:5432/vcf_doctor",
+        "host=pg dbname=vcf_doctor user=vcf_doctor password=hunter2",
+    ],
+)
+def test_a_password_in_the_url_is_refused(monkeypatch, connection):
     """No supported path carries a database password in an environment
     variable, so a URL that holds one fails loudly rather than working."""
-    monkeypatch.setattr(cfg, "database_url", "postgresql://vcf_doctor:hunter2@pg:5432/vcf_doctor")
+    monkeypatch.setattr(cfg, "database_url", connection)
     with pytest.raises(config.PasswordInUrl) as refused:
         config.database_url_without_password()
     assert "VCF_DOCTOR_DB_PASSWORD_FILE" in str(refused.value)
@@ -151,7 +158,16 @@ def test_cold_start_serves_liveness_then_recovers_readiness(monkeypatch):
             time.sleep(0.05)
         assert status == 200
         assert ready["status"] == "ok" and ready["database"] is True
-        assert set(ready) == {"status", "version", "scheduler", "database"}
+        assert ready["startup_complete"] is True
+        assert ready["startup_failures"] == []
+        assert set(ready) == {
+            "status",
+            "version",
+            "scheduler",
+            "database",
+            "startup_complete",
+            "startup_failures",
+        }
     finally:
         server.should_exit = True
         thread.join(timeout=5)
@@ -311,7 +327,7 @@ def test_readiness_is_red_while_deferred_startup_is_pending(monkeypatch, caplog)
 
     db.reset_for_tests()
     monkeypatch.setattr(
-        scheduler, "startup_status", lambda: (False, "encryption rotation retry pending")
+        scheduler, "startup_status", lambda: (False, ())
     )
     with TestClient(app) as client:
         with caplog.at_level(logging.WARNING, logger="vcf_doctor"):
@@ -320,14 +336,16 @@ def test_readiness_is_red_while_deferred_startup_is_pending(monkeypatch, caplog)
         assert body.json()["status"] == "degraded"
         assert body.json()["database"] is True
         assert body.json()["startup_complete"] is False
+        assert body.json()["startup_failures"] == []
         assert set(body.json()) == {
             "status",
             "version",
             "scheduler",
             "database",
             "startup_complete",
+            "startup_failures",
         }
-        assert "encryption rotation retry pending" in caplog.text
+        assert "deferred startup work is incomplete" in caplog.text
 
 
 def test_trusted_proxies_trust_nobody_when_the_database_is_unreadable(monkeypatch):

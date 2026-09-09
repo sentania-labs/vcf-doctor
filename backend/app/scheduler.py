@@ -33,8 +33,21 @@ _leader = False
 # What the leader has jobs for: connection id -> (interval_minutes, enabled).
 # Compared against the stored schedules by reconcile_jobs().
 _scheduled_state: dict[str, tuple[int, bool]] = {}
-_startup_complete = True
-_startup_detail: str | None = None
+_STARTUP_STEPS = frozenset(
+    {
+        "auth_bootstrap",
+        "change_log_backfill",
+        "event_defaults",
+        "fixture_schedules",
+        "retention",
+        "scan_reconciliation",
+        "vault_plaintext",
+        "vault_rekey",
+    }
+)
+_startup_pending: frozenset[str] = frozenset()
+_startup_failures: tuple[str, ...] = ()
+_retention_completed: set[str] = set()
 RECONCILE_SECONDS = 60
 
 
@@ -78,19 +91,73 @@ def startup_maintenance() -> None:
     from app import auth, vault
     from app.events import store as events_store
 
-    vault.rekey_at_startup()
-    vault.migrate_plaintext()
-    for cid, start in store.backfill_log_since().items():
-        log.info("change log coverage for %s starts %s", cid, start.isoformat())
-    interrupted = store.reconcile_interrupted_runs()
-    if interrupted:
-        log.warning("marked %d interrupted scan run(s) as error", interrupted)
-    auth.bootstrap_from_env()
-    events_store.seed_defaults()
-    disable_stale_fixture_schedules()
-    policy = retention_policy()
-    for conn in store.list_connections():
-        store.apply_retention(conn.id, policy)
+    global _startup_pending, _startup_failures
+
+    def backfill_change_log() -> None:
+        for cid, start in store.backfill_log_since().items():
+            log.info("change log coverage for %s starts %s", cid, start.isoformat())
+
+    def reconcile_scans() -> None:
+        interrupted = store.reconcile_interrupted_runs()
+        if interrupted:
+            log.warning("marked %d interrupted scan run(s) as error", interrupted)
+
+    steps = (
+        ("vault_rekey", vault.rekey_at_startup),
+        ("vault_plaintext", vault.migrate_plaintext),
+        ("event_defaults", events_store.seed_defaults),
+        ("change_log_backfill", backfill_change_log),
+        ("scan_reconciliation", reconcile_scans),
+        ("auth_bootstrap", auth.bootstrap_from_env),
+        ("fixture_schedules", disable_stale_fixture_schedules),
+    )
+    pending = set(_startup_pending)
+    failures: set[str] = set()
+    for identifier, action in steps:
+        if identifier not in pending:
+            continue
+        try:
+            action()
+        except Exception:
+            failures.add(identifier)
+            log.exception("deferred startup step %s failed; retrying next interval", identifier)
+        else:
+            pending.remove(identifier)
+
+    if "retention" in pending:
+        try:
+            connections = store.list_connections()
+            policy = retention_policy()
+        except Exception:
+            failures.add("retention")
+            log.exception("deferred startup step retention failed; retrying next interval")
+        else:
+            for conn in connections:
+                if conn.id in _retention_completed:
+                    continue
+                try:
+                    store.apply_retention(conn.id, policy)
+                except Exception:
+                    failures.add("retention")
+                    log.exception(
+                        "deferred startup step retention failed for connection %s; "
+                        "retrying next interval",
+                        conn.id,
+                    )
+                else:
+                    _retention_completed.add(conn.id)
+            if all(conn.id in _retention_completed for conn in connections):
+                pending.remove("retention")
+
+    _startup_pending = frozenset(pending)
+    _startup_failures = tuple(sorted(failures))
+
+
+def _begin_startup() -> None:
+    global _startup_pending, _startup_failures
+    _startup_pending = _STARTUP_STEPS
+    _startup_failures = ()
+    _retention_completed.clear()
 
 
 def compute_findings(resources: list[Resource], previous: list[Resource] | None) -> list[Finding]:
@@ -331,9 +398,13 @@ def take_leadership() -> None:
         _leader = True
         _scheduled_state.clear()
         log.info("holding the scheduler lock; scheduled scans run in this worker")
-    interrupted = store.reconcile_interrupted_runs()
-    if interrupted:
-        log.warning("marked %d interrupted scan run(s) as error", interrupted)
+    try:
+        interrupted = store.reconcile_interrupted_runs()
+    except Exception:
+        log.exception("scan run reconciliation failed; retrying next interval")
+    else:
+        if interrupted:
+            log.warning("marked %d interrupted scan run(s) as error", interrupted)
     reconcile_jobs()
 
 
@@ -345,17 +416,15 @@ def _leadership_job() -> None:
 
 
 def _maintenance_job() -> None:
-    global _startup_complete, _startup_detail
-    if not _startup_complete:
+    global _startup_failures
+    if _startup_pending:
         try:
             startup_maintenance()
-        except Exception as exc:
-            _startup_detail = f"{type(exc).__name__}: {exc}"[:500]
-            log.exception("deferred startup work failed; retrying next interval")
-            return
-        _startup_complete = True
-        _startup_detail = None
-        log.info("deferred startup work completed")
+        except Exception:
+            _startup_failures = tuple(sorted(set(_startup_failures) | {"maintenance_pass"}))
+            log.exception("deferred startup maintenance pass failed; retrying next interval")
+        if not _startup_pending:
+            log.info("deferred startup work completed")
     if scheduler_enabled():
         _leadership_job()
 
@@ -363,14 +432,13 @@ def _maintenance_job() -> None:
 def start() -> None:
     """Start the background scheduler. Every worker runs one; only the worker
     holding the advisory lock owns scan jobs."""
-    global _scheduler, _startup_complete, _startup_detail
+    global _scheduler
     if _scheduler is not None or not _background_jobs_enabled():
         return
     from apscheduler.schedulers.background import BackgroundScheduler
     from apscheduler.triggers.interval import IntervalTrigger
 
-    _startup_complete = False
-    _startup_detail = "not attempted yet"
+    _begin_startup()
     _scheduler = BackgroundScheduler(timezone="UTC")
     _scheduler.add_job(
         _maintenance_job,
@@ -389,19 +457,20 @@ def start() -> None:
 
 
 def shutdown() -> None:
-    global _scheduler, _leader, _startup_complete, _startup_detail
+    global _scheduler, _leader, _startup_pending, _startup_failures
     if _scheduler is not None:
         _scheduler.shutdown(wait=False)
         _scheduler = None
     _scheduled_state.clear()
     _leader = False
-    _startup_complete = True
-    _startup_detail = None
+    _startup_pending = frozenset()
+    _startup_failures = ()
+    _retention_completed.clear()
     db.release_scheduler_lock()
 
 
-def startup_status() -> tuple[bool, str | None]:
-    return _startup_complete, _startup_detail
+def startup_status() -> tuple[bool, tuple[str, ...]]:
+    return not _startup_pending, _startup_failures
 
 
 def running() -> bool:

@@ -13,8 +13,8 @@ Kubernetes secret at the same path in both shapes.
 
 import os
 from pathlib import Path
-from urllib.parse import urlsplit, urlunsplit
 
+from psycopg.conninfo import conninfo_to_dict
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -107,11 +107,10 @@ def database_url_without_password(url: str | None = None) -> str:
     no supported deployment path may do.
     """
     raw = settings.database_url if url is None else url
-    parts = urlsplit(raw)
-    if parts.password:
+    if "password" in conninfo_to_dict(raw):
         raise PasswordInUrl(
             "the database password must not be part of VCF_DOCTOR_DATABASE_URL or "
             f"DATABASE_URL; put it in the file named by VCF_DOCTOR_DB_PASSWORD_FILE "
             f"(currently {settings.db_password_file or 'unset'})"
         )
-    return urlunsplit(parts)
+    return raw

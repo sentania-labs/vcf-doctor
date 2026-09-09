@@ -55,18 +55,11 @@ def test_concurrent_first_run_setup_has_one_winner(tmp_path, monkeypatch):
     from app import auth
 
     first_checks = threading.Barrier(2)
-    second_checks = threading.Barrier(2)
-    local = threading.local()
     configured = auth.configured
 
     def synchronized_configured():
         result = configured()
-        count = getattr(local, "configured_checks", 0) + 1
-        local.configured_checks = count
-        if count == 1:
-            first_checks.wait(timeout=2)
-        elif count == 2:
-            second_checks.wait(timeout=2)
+        first_checks.wait(timeout=2)
         return result
 
     with _client(tmp_path, monkeypatch) as first, TestClient(main.app) as second:

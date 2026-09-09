@@ -18,7 +18,7 @@ only whether the database is reachable.
 | Image | `ghcr.io/sentania-labs/vcf-doctor:<tag>` where tag is `vX.Y.Z` (release), `sha-<7>` or `latest` |
 | Port | `8000` (HTTP) |
 | Liveness | `GET /api/health/live` (and `GET /api/health`, the same body under the older name), 200 whenever the process is answering. Reads nothing, so it answers in milliseconds during a database outage. The container's `HEALTHCHECK` uses this. |
-| Readiness | `GET /api/health/ready`, 200 when the database is reachable, migrated, and this worker's deferred startup work has completed, 503 otherwise. Reports `database` and `scheduler`, both of which can only be learned from the database. |
+| Readiness | `GET /api/health/ready`, 200 when the database is reachable, migrated, and this worker's deferred startup work has completed, 503 otherwise. Reports `database`, `scheduler`, `startup_complete`, and stable step identifiers in `startup_failures`. Exception details stay in the server log. |
 | Build identity | `GET /api/version` returns the [build identity fields](../backend/app/_version.py); `GET /api/health` reports the same version |
 | Database | PostgreSQL 14 or newer, reached over `VCF_DOCTOR_DATABASE_URL`. Apply schema migrations before the console with `python3 -m app.migrate upgrade`. |
 | Database password | A file, never an environment variable. `VCF_DOCTOR_DB_PASSWORD_FILE`, default `/run/secrets/vcf-doctor-db-password`. |

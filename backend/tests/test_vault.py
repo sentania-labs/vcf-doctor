@@ -21,6 +21,7 @@ SECRET = "sk-ant-test-not-a-real-key-0000"
 
 
 def _deferred_startup() -> None:
+    scheduler._begin_startup()
     scheduler.startup_maintenance()
 
 
