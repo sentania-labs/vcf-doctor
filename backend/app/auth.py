@@ -138,8 +138,9 @@ def requires_auth(path: str) -> bool:
 # ---- login backoff --------------------------------------------------------
 #
 # Keyed per client address (see app/proxies.py for what "client" means behind
-# an ingress). Five free failures per address, then an exponential wait
-# capped at a minute. On top of that a process-wide ceiling: more than
+# an ingress) and shared by every endpoint that checks a password: /auth/login,
+# /auth/change and the encryption rekey. Five free failures per address, then
+# an exponential wait capped at a minute. On top of that a process-wide ceiling: more than
 # GLOBAL_LIMIT failures across every address inside GLOBAL_WINDOW seconds
 # pauses logins for everyone, so a guesser rotating addresses still gets no
 # more throughput than that. Everything is in memory; the deployment is a
@@ -240,7 +241,8 @@ def finish_attempt(ip: str, stamp: float, success: bool) -> None:
 
 def record_login(ip: str, success: bool) -> None:
     """One-shot: count a known outcome. begin/finish_attempt is what the
-    login endpoint uses; this stays for callers that already know the result."""
+    login and password-change endpoints use; this stays for callers that
+    already know the result."""
     now = time.time()
     with _fail_lock:
         if success:

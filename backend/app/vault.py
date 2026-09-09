@@ -9,7 +9,7 @@ recognisable and migrated on startup.
 Key source, in order:
   1. VCF_DOCTOR_SECRET_KEY in the environment (in production a Kubernetes
      SealedSecret, so it survives redeploys). A 44 character Fernet key is
-     used as is; any other string is stretched with SHA-256 so a passphrase
+     used as is; any other string is stretched with scrypt so a passphrase
      works too.
   2. A key file next to the SQLite database (<db name>.key, mode 0600),
      generated on first start so a fresh install runs with no setup.
@@ -17,18 +17,28 @@ Key source, in order:
 Losing the key means the stored passwords cannot be read. The app keeps
 running: those connections are flagged as needing credentials and the
 operator re-enters the password, which is then stored under the current key.
-Nothing else is affected. Rotation is the same operation on purpose: set the
-new key, restart, re-enter.
+Nothing else is affected.
+
+Rotation does not have to cost a re-entry. Given the previous key, `rekey`
+re-encrypts every stored secret under the current one inside a single
+transaction. It runs from VCF_DOCTOR_SECRET_KEY_PREVIOUS at startup, or from
+the Settings encryption card: a pasted key, or one click on the generated key
+file a deployment left behind when it moved to an env key. That last one is
+never automatic, so an env key set by mistake stays recoverable by unsetting
+it. A previous key that opens nothing changes nothing.
 """
 
 from __future__ import annotations
 
 import base64
 import hashlib
+import json
 import logging
 import os
 import stat
 import threading
+from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
@@ -39,11 +49,16 @@ from app.config import settings as cfg
 log = logging.getLogger("vcf_doctor.vault")
 
 ENV_KEY = "VCF_DOCTOR_SECRET_KEY"
+# Set alongside a new ENV_KEY for one restart: every secret still encrypted
+# under it is moved to the new key at startup, so a rotation costs no re-entry.
+ENV_PREVIOUS_KEY = "VCF_DOCTOR_SECRET_KEY_PREVIOUS"
 PREFIX = "enc1:"
 # Settings row set once the first migration has run. Before it exists every
 # stored secret is legacy plaintext, whatever it looks like, so a plaintext
 # password that happens to start with the prefix is still migrated correctly.
 MIGRATED_KEY = "vault_migrated"
+# Settings row holding the outcome of the last rekey, for the Settings card.
+REKEY_KEY = "vault_rekey_last"
 _KDF_SALT = b"vcf-doctor-vault-v1"
 _KDF_N = 2**15
 KeySource = Literal["env", "file"]
@@ -254,6 +269,175 @@ def migrate_plaintext() -> int:
     if rewritten:
         log.info("encrypted %d plaintext secret row(s)", rewritten)
     return rewritten
+
+
+# ---- rotation -------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class RekeyOutcome:
+    """What a rotation did. Persisted so the Settings encryption card can say
+    what happened at the last startup, not only what is broken now."""
+
+    at: str
+    source: str
+    rewritten: int
+    unreadable: int
+    error: str | None = None
+
+
+def _previous_fernet(raw: str) -> Fernet:
+    if not raw.strip():
+        raise KeyUnavailable("no previous encryption key was supplied")
+    return Fernet(_normalise(raw))
+
+
+def _open_with(fernets: list[Fernet], stored: str) -> str | None:
+    """Plaintext of a stored token under the first key that authenticates it,
+    or None when none of them does."""
+    token = stored[len(PREFIX) :].encode()
+    for fernet in fernets:
+        try:
+            return fernet.decrypt(token).decode()
+        except InvalidToken:
+            continue
+    return None
+
+
+def rekey(previous_keys: list[str], source: str) -> RekeyOutcome:
+    """Re-encrypt every stored secret the current key cannot open, using the
+    first supplied previous key that authenticates it.
+
+    One transaction: either every row moves to the current key or none does, so
+    an interrupted rotation never leaves half the connections needing a
+    re-entered password. Rows the current key already opens are left alone,
+    legacy plaintext is left to migrate_plaintext, and a previous key that
+    opens nothing writes nothing.
+    """
+    from app import db
+
+    _resolve()  # KeyUnavailable when there is no current key to move secrets to
+    previous = [_previous_fernet(raw) for raw in previous_keys]
+    rewritten = 0
+    unreadable = 0
+
+    def moved(stored: str) -> str | None:
+        """The value re-encrypted under the current key, or None to leave it."""
+        nonlocal unreadable
+        if not is_encrypted(stored):
+            return None  # legacy plaintext; migrate_plaintext owns it
+        if _genuine_token(stored):
+            return None  # the current key already opens it
+        plain = _open_with(previous, stored)
+        if plain is None:
+            unreadable += 1
+            return None
+        return encrypt(plain)
+
+    with db.transaction() as c:
+        for row in c.execute("SELECT id, password FROM connections").fetchall():
+            value = moved(row["password"])
+            if value is not None:
+                c.execute(
+                    "UPDATE connections SET password = ? WHERE id = ?", (value, row["id"])
+                )
+                rewritten += 1
+        row = c.execute(
+            "SELECT value FROM settings WHERE key = ?", ("assistant_api_key",)
+        ).fetchone()
+        if row is not None:
+            try:
+                stored = json.loads(row["value"])
+            except ValueError:
+                stored = None
+            if isinstance(stored, str) and stored:
+                value = moved(stored)
+                if value is not None:
+                    c.execute(
+                        "UPDATE settings SET value = ? WHERE key = ?",
+                        (json.dumps(value), "assistant_api_key"),
+                    )
+                    rewritten += 1
+        error = None
+        if unreadable:
+            noun = "secret is" if unreadable == 1 else "secrets are"
+            error = (
+                f"{unreadable} stored {noun} encrypted with a key that was not supplied, "
+                "so they were left untouched. Try the previous key they were stored "
+                "under, or re-enter those credentials."
+            )
+        outcome = RekeyOutcome(
+            at=datetime.now(UTC).isoformat(timespec="seconds"),
+            source=source,
+            rewritten=rewritten,
+            unreadable=unreadable,
+            error=error,
+        )
+        # Recorded in the same transaction as the rows it describes, so the
+        # card never reports a rotation that was rolled back.
+        if rewritten or unreadable:
+            c.execute(
+                "INSERT INTO settings(key, value) VALUES(?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (REKEY_KEY, json.dumps(asdict(outcome))),
+            )
+    if rewritten:
+        log.info(
+            "re-encrypted %d stored secret(s) under the current key (previous key from %s)",
+            rewritten,
+            source,
+        )
+    if error:
+        log.warning("rotation from %s: %s", source, error)
+    return outcome
+
+
+def last_rekey() -> RekeyOutcome | None:
+    """The recorded outcome of the last rotation, or None if none has run."""
+    from app import db
+
+    stored = db.get_setting(REKEY_KEY)
+    if not isinstance(stored, dict):
+        return None
+    try:
+        return RekeyOutcome(**stored)
+    except TypeError:  # a row written by a different build
+        return None
+
+
+def previous_key_file() -> Path | None:
+    """The generated key file left next to the database after a deployment has
+    moved to an env key. Offered as a one-click rotation in Settings so moving
+    to a sealed secret costs no re-entry, but never applied on its own: an env
+    key set by mistake must stay recoverable by unsetting it again.
+    """
+    if key_source() != "env":
+        return None
+    path = key_file_path()
+    return path if path.exists() else None
+
+
+def read_previous_key_file() -> str:
+    """The leftover key file's contents, for a rotation the operator asked for.
+    Raises KeyUnavailable when there is nothing usable to read."""
+    path = previous_key_file()
+    if path is None:
+        raise KeyUnavailable(
+            "there is no generated key file next to the database to rotate from"
+        )
+    return _read_key_file(path).decode()
+
+
+def rekey_at_startup() -> RekeyOutcome | None:
+    """Rotate without re-entry when the deployment handed us the previous key in
+    VCF_DOCTOR_SECRET_KEY_PREVIOUS. Returns None when it is not set. Runs before
+    migrate_plaintext so a token under the old key is never mistaken for
+    plaintext and encrypted twice.
+    """
+    raw = os.environ.get(ENV_PREVIOUS_KEY, "").strip()
+    if not raw:
+        return None
+    return rekey([raw], ENV_PREVIOUS_KEY)
 
 
 def reset_for_tests() -> None:

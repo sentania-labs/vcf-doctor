@@ -87,10 +87,22 @@ def logout(response: Response) -> dict:
 
 
 @router.post("/change")
-def change(body: ChangeBody, request: Request, response: Response) -> dict:
+def change(body: ChangeBody, request: Request, response: Response):
+    """Changing the password re-checks the current one, so it runs through the
+    same per-client backoff as /login. A stolen session cannot use it to guess
+    the current password any faster than the login page allows."""
     if not auth.is_authenticated(request):
         raise HTTPException(401, "authentication required")
-    if not auth.verify_password(body.current_password):
+    ip = proxies.client_ip(request)
+    wait, stamp = auth.begin_attempt(ip)
+    if wait:
+        return _too_many(wait)
+    ok = auth.verify_password(body.current_password)
+    auth.finish_attempt(ip, stamp, ok)
+    if not ok:
+        wait = auth.login_blocked(ip)
+        if wait:
+            return _too_many(wait)
         raise HTTPException(401, "current password is incorrect")
     auth.set_password(body.new_password)
     _set_cookie(response, request)

@@ -9,8 +9,11 @@ A single shared operator password gates the UI and API (session cookie, 7
 days, PBKDF2 hash, signing secret rotated on password change). Failed
 sign-ins are counted per client address: five, then an exponential wait
 capped at a minute, reported back as `Retry-After` and counted down on the
-login page. A process-wide ceiling (30 failures a minute across every
-address) backstops guessing from many addresses. The client address is the
+login page. Every other password check shares that one counter, so a
+Settings password change and a pasted previous encryption key back off the
+same way and a wrong guess in one place pauses the others. A process-wide
+ceiling (30 failures a minute across every address) backstops guessing from
+many addresses. The client address is the
 TCP peer unless that peer is a trusted proxy (Settings, or
 `VCF_DOCTOR_TRUSTED_PROXIES`), in which case the rightmost untrusted
 `X-Forwarded-For` hop is used. Nothing is trusted by default, so behind an
@@ -36,8 +39,27 @@ the next startup. Settings shows which key source is active, never the key.
 
 Losing the key means re-entering the vCenter passwords and the API key,
 nothing worse: affected connections are flagged "Needs password" on the
-Connections page until you do. Rotate the same way: set the new key,
-restart, re-enter.
+Connections page until you do.
+
+Rotating does not cost a re-entry when the previous key is still available.
+Set the new `VCF_DOCTOR_SECRET_KEY` and, for that one restart, the old value
+in `VCF_DOCTOR_SECRET_KEY_PREVIOUS`: at startup every stored secret still
+encrypted under the old key is rewritten under the new one in a single
+transaction, and Settings > Encryption at rest reports what moved. Drop
+`VCF_DOCTOR_SECRET_KEY_PREVIOUS` on the next deploy.
+
+The same card rotates on demand under **Rotate the encryption key**. Paste
+the previous key (a Fernet key or the passphrase) and the secrets it opens
+are rewritten under the current one; the value is used once and never
+stored. When the deployment has just moved from the generated key file to
+`VCF_DOCTOR_SECRET_KEY`, the file is still on the volume and the card offers
+a one-click rotation from it with no key material in the browser. That move
+is never automatic on purpose: an environment key set by mistake stays
+recoverable by unsetting it, which a silent re-encryption would prevent.
+Delete the key file once the console reads its credentials again.
+
+A rotation writes nothing unless the supplied key opens the secret, so a
+wrong key leaves the database exactly as it was and says so.
 
 ## Browser headers
 

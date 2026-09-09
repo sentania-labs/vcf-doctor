@@ -33,7 +33,12 @@ version of this file is in git history.
   Inventory, Snapshots, Assistant, Connections, Settings.
 - Shared operator password with first-run setup, per-client login lockout
   and a trusted proxies setting (#4, #47); vCenter passwords and the
-  Anthropic key encrypted at rest (#46).
+  Anthropic key encrypted at rest (#46). The Settings password change shares
+  the login lockout (#37).
+- Encryption key rotation in place, no credentials re-entered (#48):
+  `VCF_DOCTOR_SECRET_KEY_PREVIOUS` for one restart, or the Rotate control on
+  the Settings encryption card (pasted previous key, or one click from the
+  generated key file after a move to a sealed secret).
 - Security gates in CI (lint, tests, dependency and secret scan, repo scan,
   image scan, smoke test, CodeQL); the image is signed with provenance and
   SBOM, and CI publishes the exact digest it tested with one-by-one release
@@ -43,7 +48,7 @@ version of this file is in git history.
 - Live lab operation against real vCenters is confirmed. Issue #58 records
   1,194,962 event rows and a 393 MB events table collected over 4.6 days from
   that deployment (evidence checked 2026-09-08).
-- 534 backend tests pass (`make test`, 2026-09-08).
+- 573 backend tests pass (`make test`, 2026-09-09).
 
 ## Broken
 

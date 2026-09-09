@@ -289,3 +289,273 @@ def test_passphrase_key_is_stretched_not_hashed_once(monkeypatch):
     with pytest.raises(InvalidToken):
         naive.decrypt(token[len(vault.PREFIX) :].encode())
     assert vault.decrypt(token) == "x"
+
+
+# ---- #48: rotation without re-entering credentials --------------------------
+
+
+@pytest.fixture(autouse=True)
+def _forgive_rekey_attempts():
+    """The rekey endpoint shares the login backoff, so wrong-key tests here
+    must not leak a lockout into the rest of the suite."""
+    from app import auth
+
+    auth.reset_login_state()
+    yield
+    auth.reset_login_state()
+
+
+def _set_key(monkeypatch, key: str) -> None:
+    monkeypatch.setenv(vault.ENV_KEY, key)
+    vault.reset_for_tests()
+
+
+def test_rekey_moves_every_secret_to_the_new_key(monkeypatch):
+    old = Fernet.generate_key().decode()
+    _set_key(monkeypatch, old)
+    a = _conn(password="first")
+    b = _conn(password="second")
+    assistant_settings.update_settings({"api_key": SECRET})
+
+    _set_key(monkeypatch, Fernet.generate_key().decode())
+    assert store.get_connection(a.id).credentials_unreadable is True
+
+    outcome = vault.rekey([old], "a test")
+    assert (outcome.rewritten, outcome.unreadable, outcome.error) == (3, 0, None)
+    assert store.get_connection(a.id).password == "first"
+    assert store.get_connection(b.id).password == "second"
+    assert store.get_connection(a.id).credentials_unreadable is False
+    assert assistant_settings.resolve_api_key() == SECRET
+    # Everything is stored under the current key, so the old one is now useless.
+    assert _raw_password(a.id).startswith(vault.PREFIX)
+    assert vault.rekey([old], "a test").rewritten == 0
+
+
+def test_rekey_with_the_wrong_key_changes_nothing(monkeypatch):
+    old = Fernet.generate_key().decode()
+    _set_key(monkeypatch, old)
+    conn = _conn(password="first")
+    before = _raw_password(conn.id)
+
+    _set_key(monkeypatch, Fernet.generate_key().decode())
+    outcome = vault.rekey([Fernet.generate_key().decode()], "a test")
+    assert outcome.rewritten == 0 and outcome.unreadable == 1
+    assert outcome.error and "not supplied" in outcome.error
+    assert _raw_password(conn.id) == before
+    # The right key still works afterwards.
+    assert vault.rekey([old], "a test").rewritten == 1
+    assert store.get_connection(conn.id).password == "first"
+
+
+def test_rekey_accepts_a_passphrase_and_leaves_readable_rows_alone(monkeypatch):
+    _set_key(monkeypatch, "correct horse battery staple")
+    stale = _conn(password="stale")
+    _set_key(monkeypatch, Fernet.generate_key().decode())
+    fresh = _conn(password="fresh")
+    fresh_raw = _raw_password(fresh.id)
+
+    outcome = vault.rekey(["correct horse battery staple"], "a test")
+    assert outcome.rewritten == 1 and outcome.unreadable == 0
+    assert store.get_connection(stale.id).password == "stale"
+    assert _raw_password(fresh.id) == fresh_raw  # untouched, already readable
+
+
+def test_rekey_leaves_legacy_plaintext_to_the_plaintext_migration(monkeypatch):
+    old = Fernet.generate_key().decode()
+    _set_key(monkeypatch, old)
+    conn = _conn(password="p@ss")
+    with db.transaction() as c:
+        c.execute("UPDATE connections SET password = ? WHERE id = ?", ("legacy", conn.id))
+    _set_key(monkeypatch, Fernet.generate_key().decode())
+    assert vault.rekey([old], "a test").rewritten == 0
+    assert _raw_password(conn.id) == "legacy"
+    assert vault.migrate_plaintext() == 1
+    assert store.get_connection(conn.id).password == "legacy"
+
+
+def test_startup_rotates_from_the_previous_env_key(monkeypatch):
+    from app.main import app
+
+    old = Fernet.generate_key().decode()
+    _set_key(monkeypatch, old)
+    conn = _conn(password="first")
+    assistant_settings.update_settings({"api_key": SECRET})
+    with TestClient(app):
+        pass  # first boot writes the plaintext migration marker
+
+    _set_key(monkeypatch, Fernet.generate_key().decode())
+    monkeypatch.setenv(vault.ENV_PREVIOUS_KEY, old)
+    with TestClient(app) as client:
+        assert store.get_connection(conn.id).password == "first"
+        assert assistant_settings.resolve_api_key() == SECRET
+        body = client.get("/api/settings/encryption").json()
+        assert body["unreadable_connections"] == []
+        assert body["key_previous_env_var"] == vault.ENV_PREVIOUS_KEY
+        assert body["last_rekey"]["rewritten"] == 2
+        assert body["last_rekey"]["error"] is None
+        assert vault.ENV_PREVIOUS_KEY in body["last_rekey"]["source"]
+        for path in ("/api/settings/encryption", "/api/connections"):
+            assert old not in client.get(path).text
+
+
+def test_key_file_rotation_is_offered_but_never_automatic(monkeypatch):
+    """Moving from the generated key file to a sealed secret costs no re-entry,
+    but only when the operator asks: an env key set by mistake must stay
+    recoverable by unsetting it, which a silent re-encryption would prevent."""
+    from app.main import app
+
+    conn = _conn(password="first")
+    with TestClient(app):
+        pass
+    assert vault.key_source() == "file"
+    file_key = vault.key_file_path().read_text().strip()
+
+    _set_key(monkeypatch, Fernet.generate_key().decode())
+    assert vault.key_file_path().exists()  # left in place, never deleted for us
+    with TestClient(app) as client:
+        # Startup on its own changes nothing: the password still needs re-entry.
+        body = client.get("/api/settings/encryption").json()
+        assert body["key_source"] == "env" and body["unreadable_connections"] == [conn.id]
+        assert body["last_rekey"] is None
+        assert body["previous_key_file"] == str(vault.key_file_path())
+        assert file_key not in client.get("/api/settings/encryption").text
+
+        r = client.post("/api/settings/encryption/rekey", json={"use_key_file": True})
+        assert r.status_code == 200, r.text
+        assert r.json()["rewritten"] == 1 and file_key not in r.text
+        assert store.get_connection(conn.id).password == "first"
+        assert r.json()["status"]["unreadable_connections"] == []
+        assert "key file" in r.json()["status"]["last_rekey"]["source"]
+        # Both at once is refused rather than guessed at.
+        assert client.post(
+            "/api/settings/encryption/rekey", json={"use_key_file": True, "previous_key": "x"}
+        ).status_code == 400
+
+
+def test_key_file_rotation_needs_a_key_file(monkeypatch):
+    from app.main import app
+
+    _set_key(monkeypatch, Fernet.generate_key().decode())
+    _conn(password="first")
+    with TestClient(app) as client:
+        assert client.get("/api/settings/encryption").json()["previous_key_file"] is None
+        r = client.post("/api/settings/encryption/rekey", json={"use_key_file": True})
+        assert r.status_code == 503 and "no generated key file" in r.json()["detail"]
+
+
+def test_startup_reports_a_previous_key_that_opens_nothing(monkeypatch):
+    from app.main import app
+
+    old = Fernet.generate_key().decode()
+    _set_key(monkeypatch, old)
+    conn = _conn(password="first")
+    with TestClient(app):
+        pass
+
+    _set_key(monkeypatch, Fernet.generate_key().decode())
+    monkeypatch.setenv(vault.ENV_PREVIOUS_KEY, Fernet.generate_key().decode())
+    with TestClient(app) as client:
+        body = client.get("/api/settings/encryption").json()
+        assert body["unreadable_connections"] == [conn.id]
+        assert body["last_rekey"]["rewritten"] == 0
+        assert "not supplied" in body["last_rekey"]["error"]
+
+
+def test_startup_without_a_previous_key_records_nothing(monkeypatch):
+    from app.main import app
+
+    _set_key(monkeypatch, Fernet.generate_key().decode())
+    _conn(password="first")
+    with TestClient(app) as client:
+        assert client.get("/api/settings/encryption").json()["last_rekey"] is None
+
+
+def test_rekey_endpoint_rotates_and_never_echoes_the_key(monkeypatch):
+    from app.main import app
+
+    old = Fernet.generate_key().decode()
+    _set_key(monkeypatch, old)
+    conn = _conn(password="first")
+    with TestClient(app):
+        pass
+
+    _set_key(monkeypatch, Fernet.generate_key().decode())
+    with TestClient(app) as client:
+        assert client.get("/api/settings/encryption").json()["unreadable_connections"] == [conn.id]
+        r = client.post("/api/settings/encryption/rekey", json={"previous_key": old})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["ok"] is True and body["rewritten"] == 1
+        assert body["status"]["unreadable_connections"] == []
+        assert old not in r.text
+        assert store.get_connection(conn.id).password == "first"
+        # Running it again is a harmless no-op with a clear message.
+        again = client.post("/api/settings/encryption/rekey", json={"previous_key": old}).json()
+        assert again["ok"] is True and again["rewritten"] == 0
+        assert "Nothing to do" in again["message"]
+        blank = client.post("/api/settings/encryption/rekey", json={"previous_key": " "})
+        assert blank.status_code == 400
+
+
+def test_rekey_endpoint_reports_a_wrong_key_and_shares_the_login_backoff(monkeypatch):
+    from app import auth
+    from app.main import app
+
+    old = Fernet.generate_key().decode()
+    _set_key(monkeypatch, old)
+    conn = _conn(password="first")
+    with TestClient(app):
+        pass
+
+    _set_key(monkeypatch, Fernet.generate_key().decode())
+    with TestClient(app) as client:
+        for _ in range(4):
+            body = client.post(
+                "/api/settings/encryption/rekey",
+                json={"previous_key": Fernet.generate_key().decode()},
+            ).json()
+            assert body["ok"] is False and body["rewritten"] == 0
+            assert "not supplied" in body["message"]
+        r = client.post(
+            "/api/settings/encryption/rekey", json={"previous_key": Fernet.generate_key().decode()}
+        )
+        assert r.status_code == 429 and r.headers["Retry-After"] == str(r.json()["retry_after"])
+        auth.reset_login_state()
+        # Nothing was written by any of those attempts.
+        assert store.get_connection(conn.id).credentials_unreadable is True
+        assert client.post(
+            "/api/settings/encryption/rekey", json={"previous_key": old}
+        ).json()["rewritten"] == 1
+
+
+def test_rekey_moves_what_it_can_and_names_what_it_could_not(monkeypatch):
+    """Two secrets under two different old keys: supplying one moves that one,
+    reports the other, and does not count as a wrong-key attempt."""
+    from app import auth
+    from app.main import app
+
+    first = Fernet.generate_key().decode()
+    _set_key(monkeypatch, first)
+    a = _conn(password="under-first")
+    with TestClient(app):
+        pass  # first boot writes the plaintext migration marker
+    second = Fernet.generate_key().decode()
+    _set_key(monkeypatch, second)
+    b = _conn(password="under-second")
+
+    _set_key(monkeypatch, Fernet.generate_key().decode())
+    with TestClient(app) as client:
+        body = client.post(
+            "/api/settings/encryption/rekey", json={"previous_key": first}
+        ).json()
+        assert body["rewritten"] == 1 and body["unreadable"] == 1
+        assert "Re-encrypted 1 stored secret" in body["message"]
+        assert "1 stored secret is encrypted with a key that was not supplied" in body["message"]
+        assert body["status"]["unreadable_connections"] == [b.id]
+        assert store.get_connection(a.id).password == "under-first"
+        # A key that opened something is not a wrong guess, so nothing is counted.
+        assert auth.login_blocked("testclient") == 0
+        # The rest moves once its own key is supplied.
+        rest = client.post("/api/settings/encryption/rekey", json={"previous_key": second}).json()
+        assert rest["ok"] is True and rest["rewritten"] == 1
+        assert store.get_connection(b.id).password == "under-second"

@@ -111,3 +111,72 @@ def test_docs_are_not_public(tmp_path, monkeypatch):
     with _client(tmp_path, monkeypatch) as c:
         for p in ("/docs", "/redoc", "/openapi.json"):
             assert "openapi" not in c.get(p).text.lower()
+
+
+def test_password_change_shares_the_login_backoff(tmp_path, monkeypatch):
+    """#37: the current-password check is a password check, so it is limited
+    the same way. A stolen session cannot guess faster than the login page."""
+    from app import auth
+
+    auth.reset_login_state()
+    with _client(tmp_path, monkeypatch) as c:
+        c.post("/api/auth/setup", json={"password": "correct horse"})
+        body = {"current_password": "wrong wrong", "new_password": "battery staple"}
+        for _ in range(4):
+            assert c.post("/api/auth/change", json=body).status_code == 401
+        # The fifth failure answers 429 so the Access card can start counting down.
+        r = c.post("/api/auth/change", json=body)
+        assert r.status_code == 429 and r.headers["Retry-After"] == str(r.json()["retry_after"])
+        assert r.json()["retry_after"] >= 1
+        # The same backoff now refuses signing in, and the right password too.
+        assert c.post("/api/auth/login", json={"password": "correct horse"}).status_code == 429
+        r = c.post(
+            "/api/auth/change",
+            json={"current_password": "correct horse", "new_password": "battery staple"},
+        )
+        assert r.status_code == 429
+        # Nothing was changed while blocked.
+        auth.reset_login_state()
+        assert c.post("/api/auth/login", json={"password": "correct horse"}).status_code == 200
+    auth.reset_login_state()
+
+
+def test_successful_password_change_forgives_earlier_failures(tmp_path, monkeypatch):
+    from app import auth
+
+    auth.reset_login_state()
+    with _client(tmp_path, monkeypatch) as c:
+        c.post("/api/auth/setup", json={"password": "correct horse"})
+        for _ in range(4):
+            c.post(
+                "/api/auth/change",
+                json={"current_password": "wrong wrong", "new_password": "battery staple"},
+            )
+        r = c.post(
+            "/api/auth/change",
+            json={"current_password": "correct horse", "new_password": "battery staple"},
+        )
+        assert r.status_code == 200
+        assert auth.login_blocked("testclient") == 0
+        assert c.post("/api/auth/login", json={"password": "battery staple"}).status_code == 200
+    auth.reset_login_state()
+
+
+def test_password_change_still_needs_a_session(tmp_path, monkeypatch):
+    """The backoff is on top of the session gate, not instead of it, and an
+    unauthenticated attempt never consumes the caller's login attempts."""
+    from app import auth
+
+    auth.reset_login_state()
+    with _client(tmp_path, monkeypatch) as c:
+        c.post("/api/auth/setup", json={"password": "correct horse"})
+        c.post("/api/auth/logout")
+        for _ in range(8):
+            r = c.post(
+                "/api/auth/change",
+                json={"current_password": "correct horse", "new_password": "battery staple"},
+            )
+            assert r.status_code == 401
+        assert auth.login_blocked("testclient") == 0
+        assert c.post("/api/auth/login", json={"password": "correct horse"}).status_code == 200
+    auth.reset_login_state()
