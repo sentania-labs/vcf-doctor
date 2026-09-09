@@ -146,29 +146,34 @@ name-suffixed generated Secret.
 
 ### Confirm it ran
 
-Whatever the shape, open Settings > Encryption at rest after the restart. The
-card names the time of the last rotation, and that time has to be the restart
-you just performed. A record from an earlier cycle stays on the card
-indefinitely, so "a rotation is reported" proves nothing on its own. Read the
-timestamp.
+Whatever the shape, open Settings > Encryption at rest after the restart and
+read the time on the last rotation line. That time must be the restart you
+just performed. Nothing else clears the rotation, and a record from an earlier
+cycle stays on the card indefinitely, so "a rotation is reported" proves
+nothing on its own.
 
-Either of these two clears the rotation:
+A startup handed the previous key always records an outcome, including when it
+found nothing left to move, in which case the line says it re-encrypted
+nothing. Both wordings are proof that this restart ran with the previous key
+in hand.
 
-- The card reports a rotation dated at the restart you just performed.
-- Nothing is flagged anywhere on the page: no connection showing "Needs
-  password" and no Assistant key asking to be re-entered. Nothing was left
-  under the old key, which is why there was nothing to record.
+No line, or a time from an earlier cycle, means the app never saw the previous
+key on this restart. Leave `VCF_DOCTOR_SECRET_KEY_PREVIOUS` in place and find
+out why; in the Argo shape it is usually the missing rollout described above,
+because replacing the sealed Secret does not by itself restart the pod.
+Removing the previous key entry now is what does the damage: at the next real
+restart the new key is the only one left and every stored secret is still
+under the old one.
 
-An older timestamp, or none, while a credential is still flagged means this
-rotation did not run. Leave `VCF_DOCTOR_SECRET_KEY_PREVIOUS` in place and find
-out why the restart did not pick it up; in the Argo shape that is usually the
-missing rollout described above. Dropping the previous key at that point
-leaves every stored secret encrypted under a key you no longer have.
+Whether credentials are flagged on the page (a connection showing "Needs
+password", or an Assistant key asking to be re-entered) is worth reading, but
+it never clears the rotation on its own. A pod that never restarted still
+holds the old key, opens every secret with it, and flags nothing.
 
-Only once the rotation is cleared, drop `VCF_DOCTOR_SECRET_KEY_PREVIOUS` (and
-the sealed `secret-key-previous` entry, where one is used) on the next pass
-and restart again. Leaving it set is not dangerous, it only keeps the old key
-present longer than it needs to be.
+Only once the reported time matches this restart, drop
+`VCF_DOCTOR_SECRET_KEY_PREVIOUS` (and the sealed `secret-key-previous` entry,
+where one is used) on the next pass and restart again. Leaving it set is not
+dangerous, it only keeps the old key present longer than it needs to be.
 
 ## Verifying a pulled image
 

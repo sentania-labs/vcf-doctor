@@ -480,6 +480,34 @@ def test_startup_without_a_previous_key_records_nothing(monkeypatch):
         assert client.get("/api/settings/encryption").json()["last_rekey"] is None
 
 
+def test_startup_records_an_outcome_even_when_nothing_needed_moving(monkeypatch):
+    """A rotation that found nothing to move is still recorded, so the card's
+    timestamp proves this restart saw the previous key. Without it an older
+    record stands in for a rotation that never ran, and the operator drops the
+    previous key while every secret is still encrypted under it."""
+    from datetime import UTC, datetime
+
+    from app.main import app
+
+    key = Fernet.generate_key().decode()
+    _set_key(monkeypatch, key)
+    _conn(password="first")
+    with TestClient(app):
+        pass
+    assert vault.last_rekey() is None
+
+    before = datetime.now(UTC).isoformat(timespec="seconds")
+    monkeypatch.setenv(vault.ENV_PREVIOUS_KEY, key)
+    vault.reset_for_tests()
+    with TestClient(app) as client:
+        last = client.get("/api/settings/encryption").json()["last_rekey"]
+        assert last is not None
+        assert (last["rewritten"], last["unreadable"], last["error"]) == (0, 0, None)
+        assert vault.ENV_PREVIOUS_KEY in last["source"]
+        assert last["at"] >= before
+        assert key not in client.get("/api/settings/encryption").text
+
+
 def test_rekey_endpoint_never_accepts_key_material(monkeypatch):
     """Rotating from a supplied key is a deployment action (see the startup test
     above), never something the interface takes. A key sent in the request body

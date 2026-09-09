@@ -315,7 +315,7 @@ def _open_with(fernet: Fernet, stored: str) -> str | None:
         return None
 
 
-def rekey(previous_key: str, source: str) -> RekeyOutcome:
+def rekey(previous_key: str, source: str, *, always_record: bool = False) -> RekeyOutcome:
     """Re-encrypt every stored secret the current key cannot open, using the
     supplied previous key.
 
@@ -324,6 +324,11 @@ def rekey(previous_key: str, source: str) -> RekeyOutcome:
     Rows neither key opens remain untouched and are reported as unreadable.
     Rows the current key already opens are left alone, and legacy plaintext
     is left to migrate_plaintext.
+
+    always_record persists the outcome even when nothing moved, so the Settings
+    card can tell a rotation that ran and found nothing from one that never
+    ran at all. Startup uses it; callers that are visible in the interface
+    while they run do not need it.
     """
     from app import db
 
@@ -387,7 +392,7 @@ def rekey(previous_key: str, source: str) -> RekeyOutcome:
         )
         # Recorded in the same transaction as the rows it describes, so the
         # card never reports a rotation that was rolled back.
-        if rewritten or unreadable:
+        if always_record or rewritten or unreadable:
             c.execute(
                 "INSERT INTO settings(key, value) VALUES(?, ?) "
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -445,11 +450,14 @@ def rekey_at_startup() -> RekeyOutcome | None:
     VCF_DOCTOR_SECRET_KEY_PREVIOUS. Returns None when it is not set. Runs before
     migrate_plaintext so a token under the old key is never mistaken for
     plaintext and encrypted twice.
+
+    The outcome is recorded whether or not anything moved: its timestamp is how
+    an operator confirms this restart saw the previous key before dropping it.
     """
     raw = os.environ.get(ENV_PREVIOUS_KEY, "").strip()
     if not raw:
         return None
-    return rekey(raw, ENV_PREVIOUS_KEY)
+    return rekey(raw, ENV_PREVIOUS_KEY, always_record=True)
 
 
 def reset_for_tests() -> None:
