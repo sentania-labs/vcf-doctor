@@ -175,10 +175,6 @@ def compute_health(
                     / max(denominators.get(resource_type, 0), group["findings"])
                     for resource_type, group in entry["_groups"].items()
                 )
-                entry["evaluated"] = sum(
-                    max(denominators.get(resource_type, 0), group["findings"])
-                    for resource_type, group in entry["_groups"].items()
-                )
             entry["deduction"] = round(min(cap, deduction), 2)
             with_findings += 1
         elif n == 0:

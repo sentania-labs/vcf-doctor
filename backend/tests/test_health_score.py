@@ -133,7 +133,7 @@ def test_resource_removed_deduction_uses_its_resource_type_population():
     small_removed = next(c for c in small["checks"] if c["check_id"] == "RESOURCE_REMOVED")
     large_removed = next(c for c in large["checks"] if c["check_id"] == "RESOURCE_REMOVED")
     assert small_removed["deduction"] == large_removed["deduction"] == 7.5
-    assert (small_removed["evaluated"], large_removed["evaluated"]) == (2, 2)
+    assert (small_removed["evaluated"], large_removed["evaluated"]) == (2, 102)
 
 
 def test_objects_without_the_inspected_property_are_not_counted():
