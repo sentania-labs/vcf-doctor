@@ -41,9 +41,7 @@ export default function EncryptionCard({ reloadKey, onRotated }: { reloadKey?: u
             ) : null}
             {last ? (
               <p className={`text-xs rounded-md px-3 py-2 ${last.error && problems ? 'text-critical bg-critical-bg' : 'text-faint bg-surface-2'}`} role={last.error && problems ? 'alert' : undefined}>
-                {last.error
-                  ? `Rotation attempted ${new Date(last.at).toLocaleString()} with the previous key from ${last.source}. ${last.error}`
-                  : `Last rotation ${new Date(last.at).toLocaleString()} with the previous key from ${last.source}: re-encrypted ${last.rewritten} secret${last.rewritten === 1 ? '' : 's'} under the current key.`}
+                {`${last.error ? 'Rotation attempted' : 'Last rotation'} ${new Date(last.at).toLocaleString()} with the previous key from ${last.source}. ${last.message}`}
               </p>
             ) : null}
             {problems ? (

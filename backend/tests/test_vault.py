@@ -508,6 +508,35 @@ def test_startup_records_an_outcome_even_when_nothing_needed_moving(monkeypatch)
         assert key not in client.get("/api/settings/encryption").text
 
 
+def test_partial_rotation_reports_both_what_moved_and_what_was_left(monkeypatch):
+    """One secret under the supplied previous key, one under an older key. The
+    reported sentence must carry both counts: a rotation that moved something
+    is not a total failure, and the operator needs to know what did move."""
+    from app.main import app
+
+    first = Fernet.generate_key().decode()
+    _set_key(monkeypatch, first)
+    stranded = _conn(password="under-first")
+    with TestClient(app):
+        pass  # first boot writes the plaintext migration marker
+    second = Fernet.generate_key().decode()
+    _set_key(monkeypatch, second)
+    moved = _conn(password="under-second")
+
+    _set_key(monkeypatch, Fernet.generate_key().decode())
+    monkeypatch.setenv(vault.ENV_PREVIOUS_KEY, second)
+    vault.reset_for_tests()
+    with TestClient(app) as client:
+        last = client.get("/api/settings/encryption").json()["last_rekey"]
+        assert (last["rewritten"], last["unreadable"]) == (1, 1)
+        assert "Re-encrypted 1 stored secret under the current key." in last["message"]
+        assert "1 stored secret is encrypted with a key that was not supplied" in last["message"]
+        assert store.get_connection(moved.id).password == "under-second"
+        assert store.get_connection(stranded.id).credentials_unreadable is True
+        for key in (first, second):
+            assert key not in client.get("/api/settings/encryption").text
+
+
 def test_rekey_endpoint_never_accepts_key_material(monkeypatch):
     """Rotating from a supplied key is a deployment action (see the startup test
     above), never something the interface takes. A key sent in the request body

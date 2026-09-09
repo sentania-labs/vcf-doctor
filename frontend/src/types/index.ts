@@ -149,6 +149,7 @@ export interface EnvironmentChanges {
 // Secrets at rest (Settings > Encryption). Never carries the key itself.
 export interface RekeyOutcome {
   at: string; source: string; rewritten: number; unreadable: number; error?: string | null
+  message: string  // composed by the backend; a partial rotation names both counts
 }
 
 export interface EncryptionStatus {

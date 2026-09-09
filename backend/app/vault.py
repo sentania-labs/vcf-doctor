@@ -299,6 +299,21 @@ class RekeyOutcome:
     unreadable: int
     error: str | None = None
 
+    @property
+    def message(self) -> str:
+        """The one sentence describing this rotation, for the Settings card and
+        the rotate response. A partial rotation names both what it moved and
+        what it could not open, so it never reads as a total failure."""
+        if self.rewritten:
+            moved = (
+                f"Re-encrypted {self.rewritten} stored secret"
+                f"{'' if self.rewritten == 1 else 's'} under the current key."
+            )
+            return f"{moved} {self.error}" if self.error else moved
+        if self.error:
+            return self.error
+        return "Nothing to do: every stored secret already opens with the current key."
+
 
 def _previous_fernet(raw: str) -> Fernet:
     if not raw.strip():

@@ -23,6 +23,8 @@ class RekeyOutcome(BaseModel):
     rewritten: int
     unreadable: int
     error: str | None = None
+    # Composed once, by vault.RekeyOutcome, so the card never has to rebuild it.
+    message: str
 
 
 class EncryptionStatus(BaseModel):
@@ -73,7 +75,7 @@ def _status() -> EncryptionStatus:
         unreadable_connections=connections,
         assistant_key_unreadable=unreadable,
         assistant_env_fallback=unreadable and assistant_settings.resolve_api_key() is not None,
-        last_rekey=RekeyOutcome(**asdict(last)) if last else None,
+        last_rekey=RekeyOutcome(**asdict(last), message=last.message) if last else None,
     )
 
 
@@ -90,19 +92,9 @@ def rekey():
     untouched. Rotating from an arbitrary key is a deployment action:
     VCF_DOCTOR_SECRET_KEY_PREVIOUS at startup."""
     outcome = vault.rekey(vault.read_previous_key_file(), "the generated key file")
-    if outcome.rewritten:
-        moved = (
-            f"Re-encrypted {outcome.rewritten} stored secret"
-            f"{'' if outcome.rewritten == 1 else 's'} under the current key."
-        )
-        message = f"{moved} {outcome.error}" if outcome.error else moved
-    elif outcome.error:
-        message = outcome.error
-    else:
-        message = "Nothing to do: every stored secret already opens with the current key."
     return RekeyResult(
         ok=outcome.error is None,
-        message=message,
+        message=outcome.message,
         rewritten=outcome.rewritten,
         unreadable=outcome.unreadable,
         status=_status(),
