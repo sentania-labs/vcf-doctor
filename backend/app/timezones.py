@@ -38,16 +38,19 @@ def server_timezone() -> str:
         text = Path("/etc/timezone").read_text(encoding="utf-8").strip()
         if text and is_valid(text):
             return text
-    except OSError:
-        pass
+    except OSError as exc:
+        # A slim container often ships no /etc/timezone at all. Say so and try
+        # the next source rather than failing: the fallback chain ends at UTC.
+        log.debug("cannot read /etc/timezone (%s), trying /etc/localtime", exc)
     try:
         target = os.path.realpath("/etc/localtime")
         if _ZONEINFO_DIR in target:
             name = target.split(_ZONEINFO_DIR, 1)[1]
             if is_valid(name):
                 return name
-    except OSError:
-        pass
+    except OSError as exc:
+        # Same again for the symlink: no zone files means the server is UTC.
+        log.debug("cannot resolve /etc/localtime (%s), using UTC", exc)
     return "UTC"
 
 

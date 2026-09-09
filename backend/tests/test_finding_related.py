@@ -673,3 +673,56 @@ def test_newer_recovered_change_survives_overview_cap_across_connections(client,
     assert feed[0]["resource_id"] == recovered.resources[0].id
     assert datetime.fromisoformat(feed[0]["observed_at"]) == recovered.created_at
     assert all(c["resource_id"].startswith(f"host:{b}:") for c in feed[1:])
+
+
+def test_a_failed_row_write_does_not_leave_the_coverage_marker_set(client):
+    """The marker must commit with the rows it describes. Setting it first and
+    failing afterwards would leave the connection claiming an interval it never
+    stored, and nothing would ever correct it: the marker is written once, so
+    pre-log recovery would skip the interval holding the cause."""
+    cid = _connection(client, 2)
+    snaps = store.list_snapshots(cid)  # newest first
+    with db.transaction() as c:
+        c.execute("DELETE FROM changes WHERE connection_id = ?", (cid,))
+        c.execute("DELETE FROM settings WHERE key = ?", (f"{store.LOG_SINCE_KEY}:{cid}",))
+    assert store.log_since(cid) is None
+
+    change = Change(
+        change_type="modified",
+        resource_id=f"host:{cid}:esx03",
+        resource_type="host",
+        resource_name="esx03",
+        significance="high",
+        summary="connectionState connected -> disconnected",
+    )
+    # A row write that fails after the marker would otherwise have been set.
+    original = store.new_id
+    store.new_id = lambda: (_ for _ in ()).throw(RuntimeError("row write failed"))
+    try:
+        with pytest.raises(RuntimeError):
+            store.save_changes(cid, snaps[1].id, snaps[0].id, snaps[0].created_at, [change])
+    finally:
+        store.new_id = original
+
+    assert store.count_changes(cid) == 0
+    assert store.log_since(cid) is None  # not left claiming an interval it never stored
+
+    # The next successful scan writes both together.
+    store.save_changes(cid, snaps[1].id, snaps[0].id, snaps[0].created_at, [change])
+    assert store.count_changes(cid) == 1
+    assert store.log_since(cid) == snaps[1].created_at
+
+
+def test_an_empty_diff_still_marks_coverage_atomically(client):
+    """The intentional empty-diff case still stamps the marker, in its own
+    transaction, so a quiet estate is not mistaken for a mid-life upgrade."""
+    cid = _connection(client, 2)
+    snaps = store.list_snapshots(cid)
+    with db.transaction() as c:
+        c.execute("DELETE FROM changes WHERE connection_id = ?", (cid,))
+        c.execute("DELETE FROM settings WHERE key = ?", (f"{store.LOG_SINCE_KEY}:{cid}",))
+
+    assert store.save_changes(cid, snaps[1].id, snaps[0].id, snaps[0].created_at, []) == 0
+
+    assert store.count_changes(cid) == 0
+    assert store.log_since(cid) == snaps[1].created_at

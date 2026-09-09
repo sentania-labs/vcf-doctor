@@ -704,13 +704,27 @@ def save_changes(
 ) -> int:
     """Persist one scan's diff(previous, current). Every significance is
     stored; readers filter. An empty diff still marks the log as covering
-    this interval (see log_since)."""
+    this interval (see log_since).
+
+    The coverage marker is written in the same transaction as the rows. Setting
+    it first and failing afterwards would leave the connection claiming an
+    interval it never stored, and a later scan would not correct it because the
+    marker is only written once, so pre-log recovery would skip the interval
+    holding the change that caused a finding.
+    """
+    mark: tuple[str, str] | None = None
     if log_since(connection_id) is None:
         previous = snapshot_summary(from_snapshot_id)
-        _set_log_since(connection_id, previous.created_at if previous is not None else observed_at)
+        at = previous.created_at if previous is not None else observed_at
+        mark = (f"{LOG_SINCE_KEY}:{connection_id}", json.dumps(at.isoformat()))
     if not changes:
+        if mark is not None:
+            with db.transaction() as c:
+                c.execute(_SETTING_UPSERT, mark)
         return 0
     with db.transaction() as c:
+        if mark is not None:
+            c.execute(_SETTING_UPSERT, mark)
         c.executemany(
             "INSERT INTO changes(id, connection_id, from_snapshot_id, to_snapshot_id, "
             "observed_at, resource_id, resource_type, resource_name, change_type, "
@@ -802,6 +816,14 @@ def log_since(connection_id: str) -> datetime | None:
     """First covered interval for this connection, including empty diffs."""
     raw = db.get_setting(f"{LOG_SINCE_KEY}:{connection_id}")
     return datetime.fromisoformat(raw) if raw else None
+
+
+# The marker is a settings row, written through save_changes' own transaction so
+# it commits with the rows it describes; db.set_setting would commit on its own.
+_SETTING_UPSERT = (
+    "INSERT INTO settings(key, value) VALUES(?, ?) "
+    "ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+)
 
 
 def _set_log_since(connection_id: str, at: datetime) -> None:
