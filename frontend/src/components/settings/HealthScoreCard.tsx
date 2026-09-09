@@ -23,7 +23,7 @@ type RawWeights = Record<HealthSeverity, string>
 
 const toRaw = (w: HealthWeights): RawWeights => ({ critical: String(w.critical), warning: String(w.warning), info: String(w.info) })
 // Empty or non-numeric text parses to NaN, which problem() below already rejects as "not a whole number".
-const toWeight = (v: string): number => (v.trim() === '' ? NaN : Math.floor(Number(v)))
+const toWeight = (v: string): number => (v.trim() === '' ? NaN : Number(v))
 
 // Health score weights. Saves on its own (separate endpoint from the main Settings form)
 // so the score on the Overview moves as soon as a weight changes.
