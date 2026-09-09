@@ -46,7 +46,7 @@ version of this file is in git history.
 - Live lab operation against real vCenters is confirmed. Issue #58 records
   1,194,962 event rows and a 393 MB events table collected over 4.6 days from
   that deployment (evidence checked 2026-09-08).
-- 573 backend tests pass (`make test`, 2026-09-09).
+- 575 backend tests and 5 frontend tests pass (`make test`, 2026-09-09).
 
 ## Broken
 
