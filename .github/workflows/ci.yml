@@ -46,7 +46,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - name: Validate release tag
+      - name: Validate annotated release tag
         if: startsWith(github.ref, 'refs/tags/')
         env:
           VERSION: ${{ github.ref_name }}
@@ -260,7 +260,7 @@ jobs:
     needs: image
     runs-on: ubuntu-latest
     permissions:
-      contents: write # tag + release on main
+      contents: write # release from pushed tag
       packages: write # push to GHCR
       id-token: write # keyless cosign (Fulcio/Rekor) needs the OIDC token
       actions: read # download the tested image artifact from this run
@@ -306,7 +306,7 @@ jobs:
           VERSION: ${{ needs.image.outputs.version }}
         run: |
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-            TAGS="$VERSION sha-${GITHUB_SHA::7} latest"
+            TAGS="$VERSION"
           else
             TAGS="sha-${GITHUB_SHA::7}"
           fi
@@ -322,7 +322,7 @@ jobs:
           VERSION: ${{ needs.image.outputs.version }}
         run: |
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-            TAGS="$VERSION sha-${GITHUB_SHA::7} latest"
+            TAGS="$VERSION"
           else
             TAGS="sha-${GITHUB_SHA::7}"
           fi
@@ -358,4 +358,27 @@ jobs:
           V: ${{ needs.image.outputs.version }}
         run: |
           gh release view "$V" >/dev/null 2>&1 || gh release create "$V" --generate-notes --title "$V" \
-            --notes "Image: $IMAGE:$V (also sha-${GITHUB_SHA::7}, latest). Digest: $DIGEST (the digest scanned and smoke-tested in this run; cosign keyless signed, SBOM + provenance attached)"
+            --notes "Image: $IMAGE:$V. Digest: $DIGEST (the digest scanned and smoke-tested in this run; cosign keyless signed, SBOM + provenance attached)"
+
+  promote-latest:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: publish
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ci-promote-latest
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install skopeo
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq skopeo
+      - name: Login to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Promote and verify highest published version
+        run: bash .github/scripts/promote-latest.sh

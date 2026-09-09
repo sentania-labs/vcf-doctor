@@ -27,8 +27,8 @@ def release_repository(tmp_path):
 
     _git(tmp_path, "commit", "--allow-empty", "-m", "Release commit")
     release_sha = _git(tmp_path, "rev-parse", "HEAD")
-    _git(tmp_path, "tag", "v1.2.3")
-    _git(tmp_path, "tag", "-a", "v1.2.4", "-m", "Annotated release")
+    _git(tmp_path, "tag", "-a", "v1.2.3", "-m", "Release")
+    _git(tmp_path, "tag", "v1.2.4")
 
     _git(tmp_path, "commit", "--allow-empty", "-m", "Later main commit")
     main_sha = _git(tmp_path, "rev-parse", "HEAD")
@@ -36,7 +36,7 @@ def release_repository(tmp_path):
     _git(tmp_path, "checkout", "-b", "stray")
     _git(tmp_path, "commit", "--allow-empty", "-m", "Unmerged commit")
     stray_sha = _git(tmp_path, "rev-parse", "HEAD")
-    _git(tmp_path, "tag", "v1.2.5")
+    _git(tmp_path, "tag", "-a", "v1.2.5", "-m", "Stray release")
     _git(tmp_path, "checkout", "main")
     _git(tmp_path, "remote", "add", "origin", str(tmp_path))
 
@@ -58,11 +58,10 @@ def _check(repository: Path, version: str, build_sha: str):
     )
 
 
-@pytest.mark.parametrize("version", ["v1.2.3", "v1.2.4"])
-def test_release_tag_on_main_is_allowed(release_repository, version):
+def test_annotated_release_tag_on_main_is_allowed(release_repository):
     repository, release_sha, _, _ = release_repository
 
-    result = _check(repository, version, release_sha)
+    result = _check(repository, "v1.2.3", release_sha)
 
     assert result.returncode == 0, result.stderr
     assert "is on main" in result.stdout
@@ -104,3 +103,12 @@ def test_missing_release_tag_is_refused(release_repository):
 
     assert result.returncode == 2
     assert "does not exist on origin" in result.stderr
+
+
+def test_lightweight_release_tag_is_refused(release_repository):
+    repository, release_sha, _, _ = release_repository
+
+    result = _check(repository, "v1.2.4", release_sha)
+
+    assert result.returncode == 2
+    assert "must be annotated" in result.stderr

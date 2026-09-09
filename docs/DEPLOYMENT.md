@@ -23,13 +23,19 @@ container smoke test. An ordinary push to `main` publishes only the
 `sha-<7>` image tag and reports `main-<7>` as its running version. It does not
 move `latest`, mint a version tag or create a GitHub release.
 
-A pushed `vX.Y.Z` tag is the release trigger. CI refuses a malformed tag, a tag
-that belongs to another commit, or a tagged commit that is not on `main`. The
+A pushed `vX.Y.Z` tag is the release trigger. CI refuses a lightweight or
+malformed tag, a tag that belongs to another commit, or a tagged commit that
+is not on `main`. The
 same validation path builds the image with the tag as its running version. Once
-the tested digest is proven unchanged, CI publishes `vX.Y.Z`, `sha-<7>` and
-`latest`, verifies that all three resolve to that digest, signs it and creates
-the GitHub release. `make image` uses `dev`, the current checkout SHA, and the
-current UTC time. A backend run directly from a checkout reports `dev`, its
+the tested digest is proven unchanged, CI publishes `vX.Y.Z`, verifies its digest,
+signs it and creates the GitHub release. Only main builds own `sha-<7>` tags.
+A separate serialized promotion selects the highest published version from
+the registry, copies its digest to `latest`, and verifies that alias while
+holding the promotion lock. Older release retries cannot roll it backwards;
+queued promotions can be replaced because each reconciles all published versions.
+Only alias promotion shares a concurrency group; builds and releases stay per-ref.
+
+`make image` uses `dev`, the current checkout SHA, and the current UTC time. A backend run directly from a checkout reports `dev`, its
 checkout SHA, and an unknown build time because there was no image build.
 
 ## Releasing

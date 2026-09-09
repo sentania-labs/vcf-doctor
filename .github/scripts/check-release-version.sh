@@ -14,13 +14,13 @@ if ! TAGS="$(git ls-remote --tags origin "refs/tags/$VERSION" "refs/tags/$VERSIO
   echo "could not read release tag $VERSION from origin" >&2
   exit 2
 fi
-COMMIT="$(printf '%s\n' "$TAGS" | awk '
-  /\^\{\}$/ { peeled = $1; next }
-  NF { direct = $1 }
-  END { print peeled ? peeled : direct }
-')"
-if [ -z "$COMMIT" ]; then
+if [ -z "$TAGS" ]; then
   echo "release tag $VERSION does not exist on origin" >&2
+  exit 2
+fi
+COMMIT="$(printf '%s\n' "$TAGS" | awk '/\^\{\}$/ { print $1 }')"
+if [ -z "$COMMIT" ]; then
+  echo "release tag $VERSION must be annotated; create it with git tag -a" >&2
   exit 2
 fi
 if [ "$COMMIT" != "$GITHUB_SHA" ]; then
