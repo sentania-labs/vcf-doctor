@@ -47,7 +47,7 @@ version of this file is in git history.
   bounded compaction, and capture checkpoints that retry gaps (#27).
 - Event capture tolerates managed object types the installed pyVmomi does
   not define, such as `ContentLibrary` on vCenter 9.1 (#65).
-- 577 backend tests pass (`make test`, 2026-09-09).
+- 584 backend tests pass (`make test`, 2026-09-09).
 
 ## Broken
 
