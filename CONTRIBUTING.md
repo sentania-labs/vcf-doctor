@@ -26,8 +26,9 @@ through the API. That hook is for tests and local development only.
 ## The bar for a pull request
 
 1. **Tests for what you changed.** Backend changes come with pytest
-   coverage; frontend changes must pass `npx tsc -b --noEmit` and be seen
-   working in a browser. Say what you observed in the PR body.
+   coverage; frontend changes must pass `npx tsc -b --noEmit`, keep the
+   `npm test` suite green, and be seen working in a browser. Say what you
+   observed in the PR body.
 2. **Reviewed before it opens.** Someone other than the author (a peer, a
    reviewer agent, or a genuinely separate self-review pass) reads the diff
    and tries to break it before the PR exists. The author's own "looks

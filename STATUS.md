@@ -1,6 +1,6 @@
 # STATUS
 
-Current state of the product against `main`. Updated 2026-09-08. Every claim
+Current state of the product against `main`. Updated 2026-09-09. Every claim
 here was checked against the code on that date; the earlier hackathon-era
 version of this file is in git history.
 

@@ -11,10 +11,9 @@ sign-ins are counted per client address: five, then an exponential wait
 capped at a minute, reported back as `Retry-After` and counted down on the
 login page. The Settings password change re-checks the current password, so
 it shares that one counter and a wrong guess in one place pauses the other.
-A process-wide
-ceiling (30 failures a minute across every address) backstops guessing from
-many addresses. The client address is the
-TCP peer unless that peer is a trusted proxy (Settings, or
+A process-wide ceiling (30 failures a minute across every address)
+backstops guessing from many addresses. The client address is the TCP peer
+unless that peer is a trusted proxy (Settings, or
 `VCF_DOCTOR_TRUSTED_PROXIES`), in which case the rightmost untrusted
 `X-Forwarded-For` hop is used. Nothing is trusted by default, so behind an
 ingress every visitor shares the ingress's address and one lockout; trust
@@ -63,13 +62,12 @@ again.
 
 Those two are the only rotation procedures. The interface never accepts,
 shows or transmits an encryption key: the only rotation it can start uses a
-key already on the volume. A rotation rewrites only secrets the previous key
-opens; secrets under other keys stay untouched and are reported as
-unreadable. All
-recoverable secrets and the outcome commit in one transaction, so an
-interrupted rotation cannot leave only some of its rewrites behind. A key
-that opens nothing leaves stored credentials unchanged and records a failed
-outcome.
+key already on the volume. A rotation rewrites only secrets the previous
+key opens; secrets under other keys stay untouched and are reported as
+unreadable. All recoverable secrets and the outcome commit in one
+transaction, so an interrupted rotation cannot leave only some of its
+rewrites behind. A key that opens nothing leaves stored credentials
+unchanged and records a failed outcome.
 
 ## Browser headers
 
@@ -91,7 +89,7 @@ command:
 
 | Gate | Target | Blocks a PR / publish on |
 |---|---|---|
-| Lint and tests | `make lint`, `make test` | ruff or TypeScript errors; any failing backend test |
+| Lint and tests | `make lint`, `make test` | ruff or TypeScript errors; any failing backend or frontend test |
 | Dependency audit | `make scan-deps` | any known CVE in the backend environment (pip-audit); HIGH+ in frontend runtime dependencies (npm audit) |
 | Secret scan | `make scan-secrets` | any secret anywhere in git history (gitleaks) |
 | Repo scan | `make scan-fs` | HIGH/CRITICAL fixable CVE in `uv.lock` / `package-lock.json`; Dockerfile misconfiguration (trivy) |
