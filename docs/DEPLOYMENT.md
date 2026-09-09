@@ -85,9 +85,10 @@ environment variables, so rotation belongs to no particular deployment tool
 and the procedure is the same in every shape below: supply the previous key
 beside the new one in the environment, restart, and the app re-encrypts every
 stored secret under the new key on startup in a single transaction and
-reports the outcome on the Settings encryption card. Remove the previous key
-on the next pass. Nothing is re-entered by hand, and no key is ever typed
-into the interface.
+reports the outcome on the Settings encryption card. Check that card after
+the restart before going any further, then remove the previous key on the
+next pass. Nothing is re-entered by hand, and no key is ever typed into the
+interface.
 
 **docker run**
 
@@ -125,8 +126,7 @@ services:
 
 The deployment's `env` block is the Kubernetes one above, unchanged. What
 Argo renders is the Secret behind it, so the previous key arrives as a second
-sealed value feeding that same variable, and the sync that replaces the
-Secret is what restarts the pod.
+sealed value feeding that same variable.
 
 ```yaml
 spec:
@@ -135,11 +135,29 @@ spec:
     secret-key-previous: AgB...<old key, sealed>
 ```
 
-On the next pass drop `VCF_DOCTOR_SECRET_KEY_PREVIOUS` (and the sealed
-`secret-key-previous` entry, where one is used) and restart again. Leaving it
-set is not dangerous, it only keeps the old key present longer than it needs
-to be. Settings > Encryption at rest keeps reporting the last rotation either
-way.
+Unlike the other three shapes, this one does not restart anything on its own.
+Where the `env` entries already exist, replacing the sealed values leaves the
+Deployment spec byte-identical, so Argo syncs green with no rollout, and
+`secretKeyRef` values are read once at container start: the running pod keeps
+the old key and never sees the previous one. Make the restart explicit
+(`kubectl rollout restart deploy/vcf-doctor`) or have the sync mutate the pod
+template itself, with a checksum annotation over the Secret or a
+name-suffixed generated Secret.
+
+### Confirm it ran
+
+Whatever the shape, open Settings > Encryption at rest after the restart and
+check that it reports a rotation. That line is the only signal separating a
+rotation that ran from one that silently did not, and dropping the previous
+key without it leaves every stored secret encrypted under a key you no longer
+have. If no rotation is reported, either it did not run or there was nothing
+left to move; a connection still showing "Needs password", or an Assistant
+key still asking to be re-entered, means it did not run.
+
+Once the outcome is on the card, drop `VCF_DOCTOR_SECRET_KEY_PREVIOUS` (and
+the sealed `secret-key-previous` entry, where one is used) on the next pass
+and restart again. Leaving it set is not dangerous, it only keeps the old key
+present longer than it needs to be.
 
 ## Verifying a pulled image
 
