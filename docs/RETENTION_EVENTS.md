@@ -91,9 +91,15 @@ pyVmomi version, rewinds and reads the window again. Known names in
 [KNOWN_MISSING_TYPES](../backend/app/collectors/vsphere/events.py) are
 registered before the first fetch. Rows for such an entity keep the
 lower-cased type as `resource_type` (for example `contentlibrary`) and are not
-joined to a snapshot resource. Hitting the vCenter item limit in the smallest
-query window, or a failed task query, is logged as a warning as well as being
-recorded as an incomplete interval.
+joined to a snapshot resource. An unknown event class produces the same
+initial pyVmomi error but cannot use a managed object placeholder. That capture
+remains pending for retry, and its warning keeps the real event class name on
+the first and later scans instead of reporting pyVmomi's internal `type` key.
+The unsuccessful placeholder remains in pyVmomi's process-wide registry until
+restart; the collector does not modify pyVmomi's private maps to remove it.
+Hitting the vCenter item limit in the smallest query window, or a failed task
+query, is logged as a warning as well as being recorded as an incomplete
+interval.
 
 Pruning is followed by bounded `incremental_vacuum` maintenance. Settings shows
 its last run, reclaimed page count, and last error. A scan never runs a full

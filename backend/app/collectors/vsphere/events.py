@@ -48,8 +48,9 @@ MAX_ITEMS = 20_000  # safety cap per window per kind
 # ContentLibrary entities and pyVmomi 9.1.0.0 has no such type, so one
 # reference failed the whole page and with it the whole capture for that
 # connection (issue #65). These are registered as placeholder types before
-# the first fetch; any other unknown type met at read time is registered on
-# the fly by _drain, which logs which read expected it.
+# the first fetch; any other candidate type met at read time is tried as a
+# placeholder by _drain, which preserves the reported name if the candidate
+# proves to be a data object type instead.
 KNOWN_MISSING_TYPES: tuple[str, ...] = ("ContentLibrary",)
 MAX_PLACEHOLDER_TYPES = 8  # distinct registrations per drain before giving up
 _TYPE_NAME = re.compile(r"^[A-Z][A-Za-z0-9_]*$")
@@ -252,7 +253,7 @@ def pyvmomi_version() -> str:
 
 
 def unknown_type_name(exc: BaseException) -> str | None:
-    """The managed object type a pyVmomi KeyError names, or None.
+    """The candidate type a pyVmomi KeyError names, or None.
 
     While deserializing a response pyVmomi raises KeyError(name) from
     GuessWsdlType, or KeyError("<namespace> <name>") from GetWsdlType, when
