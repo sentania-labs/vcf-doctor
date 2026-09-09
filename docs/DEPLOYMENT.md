@@ -29,10 +29,11 @@ is not on `main`. The
 same validation path builds the image with the tag as its running version. Once
 the tested digest is proven unchanged, CI publishes `vX.Y.Z`, verifies its digest,
 signs it and creates the GitHub release. Only main builds own `sha-<7>` tags.
-A separate serialized promotion selects the highest published version from
-the registry, copies its digest to `latest`, and verifies that alias while
-holding the promotion lock. Older release retries cannot roll it backwards;
-queued promotions can be replaced because each reconciles all published versions.
+A separate serialized promotion selects the highest completed GitHub release,
+copies the verified and signed digest recorded in its release notes to `latest`,
+and verifies that alias while holding the promotion lock. Registry tags without
+a completed release are ineligible, as are draft and prerelease records. Older release retries cannot roll it backwards;
+queued promotions can be replaced because each reconciles all completed releases.
 Only alias promotion shares a concurrency group; builds and releases stay per-ref.
 
 `make image` uses `dev`, the current checkout SHA, and the current UTC time. A backend run directly from a checkout reports `dev`, its

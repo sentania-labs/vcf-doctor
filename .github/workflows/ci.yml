@@ -380,5 +380,7 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Promote and verify highest published version
+      - name: Promote and verify highest completed release
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: bash .github/scripts/promote-latest.sh

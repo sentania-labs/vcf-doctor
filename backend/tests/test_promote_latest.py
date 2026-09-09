@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import subprocess
@@ -24,9 +25,7 @@ state = json.loads(path.read_text())
 args = sys.argv[1:]
 if os.environ.get("FAIL") == args[0]:
     sys.exit(1)
-if args[0] == "list-tags":
-    print(json.dumps({"Tags": list(state)}))
-elif args[0] == "inspect":
+if args[0] == "inspect":
     sys.stdout.write(state[args[-1].rsplit(":", 1)[1]])
 elif args[0] == "copy":
     digest = args[-2].split("@sha256:")[1]
@@ -39,14 +38,52 @@ else:
 """
     )
     executable.chmod(0o755)
+    github = tmp_path / "gh"
+    github.write_text(
+        """#!/usr/bin/env python3
+import os
+import sys
+from pathlib import Path
+
+assert sys.argv[1:] == ["api", "--paginate", "repos/example/product/releases?per_page=100"]
+if os.environ.get("FAIL") == "releases":
+    sys.exit(1)
+sys.stdout.write(Path(os.environ["RELEASES"]).read_text())
+"""
+    )
+    github.chmod(0o755)
+    releases = tmp_path / "releases.json"
+    releases.write_text("[]")
     state = tmp_path / "registry.json"
     state.write_text("{}")
     return state, {
         **os.environ,
         "PATH": f"{tmp_path}:{os.environ['PATH']}",
         "REGISTRY": str(state),
+        "RELEASES": str(releases),
+        "GITHUB_REPOSITORY": "example/product",
         "IMAGE": "registry.example/product",
     }
+
+
+def _complete(registry, version, manifest, **fields):
+    _, env = registry
+    path = Path(env["RELEASES"])
+    releases = json.loads(path.read_text())
+    digest = "sha256:" + hashlib.sha256(manifest.encode()).hexdigest()
+    releases.append(
+        {
+            "tag_name": version,
+            "draft": False,
+            "prerelease": False,
+            "body": (
+                f"Digest: {digest} (the digest scanned and smoke-tested in this run; "
+                "cosign keyless signed, SBOM + provenance attached)"
+            ),
+            **fields,
+        }
+    )
+    path.write_text(json.dumps(releases))
 
 
 def _promote(registry, **environment):
@@ -73,6 +110,7 @@ def test_out_of_order_publication_and_retries_keep_highest_version(registry, ver
         published["v99.0.0-rc1"] = "prerelease"
         published["sha-abcdef0"] = "main build"
         state.write_text(json.dumps(published))
+        _complete(registry, version, published[version])
         expected = max(
             versions[:versions.index(version) + 1],
             key=lambda v: tuple(map(int, v[1:].split("."))),
@@ -89,6 +127,8 @@ def test_out_of_order_publication_and_retries_keep_highest_version(registry, ver
 def test_replaced_pending_promotion_reconciles_all_published_versions(registry):
     state, _ = registry
     state.write_text(json.dumps({"v1.3.0": "newest", "v1.2.9": "older"}))
+    _complete(registry, "v1.3.0", "newest")
+    _complete(registry, "v1.2.9", "older")
 
     result = _promote(registry)
 
@@ -96,11 +136,12 @@ def test_replaced_pending_promotion_reconciles_all_published_versions(registry):
     assert json.loads(state.read_text())["latest"] == "newest"
 
 
-@pytest.mark.parametrize("failure", ["list-tags", "inspect", "copy"])
-def test_registry_failure_does_not_move_latest(registry, failure):
+@pytest.mark.parametrize("failure", ["releases", "copy"])
+def test_release_lookup_or_copy_failure_does_not_move_latest(registry, failure):
     state, _ = registry
     published = {"v1.3.0": "newest", "latest": "previous"}
     state.write_text(json.dumps(published))
+    _complete(registry, "v1.3.0", "newest")
 
     result = _promote(registry, FAIL=failure)
 
@@ -111,6 +152,7 @@ def test_registry_failure_does_not_move_latest(registry, failure):
 def test_digest_mismatch_fails_promotion(registry):
     state, _ = registry
     state.write_text(json.dumps({"v1.3.0": "newest"}))
+    _complete(registry, "v1.3.0", "newest")
 
     result = _promote(registry, CORRUPT="1")
 
@@ -126,3 +168,61 @@ def test_no_published_release_fails_without_moving_latest(registry):
 
     assert result.returncode != 0
     assert json.loads(state.read_text()) == {"latest": "previous"}
+
+
+@pytest.mark.parametrize("incomplete", ["absent", "draft", "prerelease", "no_digest"])
+def test_incomplete_higher_release_cannot_be_promoted(registry, incomplete):
+    state, _ = registry
+    state.write_text(json.dumps({"v1.2.9": "signed", "v1.3.0": "unsigned"}))
+    _complete(registry, "v1.2.9", "signed")
+    if incomplete != "absent":
+        fields = {"body": "No completed artifact"} if incomplete == "no_digest" else {
+            incomplete: True
+        }
+        _complete(registry, "v1.3.0", "unsigned", **fields)
+
+    for _ in range(2):
+        result = _promote(registry)
+        assert result.returncode == 0, result.stderr
+        assert json.loads(state.read_text())["latest"] == "signed"
+
+    _complete(registry, "v1.3.0", "unsigned")
+    result = _promote(registry)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(state.read_text())["latest"] == "unsigned"
+
+
+def test_retry_uses_recorded_digest_when_version_tag_is_overwritten(registry):
+    state, _ = registry
+    state.write_text(json.dumps({"v1.3.0": "unsigned retry", "retained": "signed original"}))
+    _complete(registry, "v1.3.0", "signed original")
+
+    result = _promote(registry)
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(state.read_text())["latest"] == "signed original"
+
+
+def test_paginated_release_records_preserve_version_order(registry):
+    state, env = registry
+    state.write_text(json.dumps({"v1.3.0": "newest", "v1.2.9": "older"}))
+    _complete(registry, "v1.2.9", "older")
+    _complete(registry, "v1.3.0", "newest")
+    path = Path(env["RELEASES"])
+    records = json.loads(path.read_text())
+    path.write_text("\n".join(json.dumps([record]) for record in records))
+
+    result = _promote(registry)
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(state.read_text())["latest"] == "newest"
+
+
+def test_registry_verification_failure_fails_promotion(registry):
+    state, _ = registry
+    state.write_text(json.dumps({"v1.3.0": "signed"}))
+    _complete(registry, "v1.3.0", "signed")
+
+    result = _promote(registry, FAIL="inspect")
+
+    assert result.returncode != 0
