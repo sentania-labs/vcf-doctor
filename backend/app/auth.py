@@ -139,8 +139,8 @@ def requires_auth(path: str) -> bool:
 # ---- login backoff --------------------------------------------------------
 #
 # Keyed per client address (see app/proxies.py for what "client" means behind
-# an ingress) and shared by every endpoint that checks a password: /auth/login,
-# /auth/change and the encryption rekey. Five free failures per address, then
+# an ingress) and shared by every endpoint that checks a password: /auth/login
+# and /auth/change. Five free failures per address, then
 # an exponential wait capped at a minute. On top of that a process-wide ceiling: more than
 # GLOBAL_LIMIT failures across every address inside GLOBAL_WINDOW seconds
 # pauses logins for everyone, so a guesser rotating addresses still gets no

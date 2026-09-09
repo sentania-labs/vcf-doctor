@@ -22,10 +22,11 @@ Nothing else is affected.
 Rotation does not have to cost a re-entry. Given the previous key, `rekey`
 re-encrypts every stored secret under the current one inside a single
 transaction. It runs from VCF_DOCTOR_SECRET_KEY_PREVIOUS at startup, or from
-the Settings encryption card: a pasted key, or one click on the generated key
-file a deployment left behind when it moved to an env key. That last one is
-never automatic, so an env key set by mistake stays recoverable by unsetting
-it. See docs/SECURITY.md for the operator procedure and recovery contract.
+one click on the generated key file a deployment left behind when it moved to
+an env key. That second one is never automatic, so an env key set by mistake
+stays recoverable by unsetting it. The key itself is never entered through the
+interface. See docs/SECURITY.md for the operator procedure and recovery
+contract.
 """
 
 from __future__ import annotations

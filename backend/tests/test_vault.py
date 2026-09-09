@@ -294,17 +294,6 @@ def test_passphrase_key_is_stretched_not_hashed_once(monkeypatch):
 # ---- #48: rotation without re-entering credentials --------------------------
 
 
-@pytest.fixture(autouse=True)
-def _forgive_rekey_attempts():
-    """The rekey endpoint shares the login backoff, so wrong-key tests here
-    must not leak a lockout into the rest of the suite."""
-    from app import auth
-
-    auth.reset_login_state()
-    yield
-    auth.reset_login_state()
-
-
 def _set_key(monkeypatch, key: str) -> None:
     monkeypatch.setenv(vault.ENV_KEY, key)
     vault.reset_for_tests()
@@ -420,16 +409,16 @@ def test_key_file_rotation_is_offered_but_never_automatic(monkeypatch):
         assert body["previous_key_file"] == str(vault.key_file_path())
         assert file_key not in client.get("/api/settings/encryption").text
 
-        r = client.post("/api/settings/encryption/rekey", json={"use_key_file": True})
+        r = client.post("/api/settings/encryption/rekey")
         assert r.status_code == 200, r.text
         assert r.json()["rewritten"] == 1 and file_key not in r.text
         assert store.get_connection(conn.id).password == "first"
         assert r.json()["status"]["unreadable_connections"] == []
         assert "key file" in r.json()["status"]["last_rekey"]["source"]
-        # Both at once is refused rather than guessed at.
-        assert client.post(
-            "/api/settings/encryption/rekey", json={"use_key_file": True, "previous_key": "x"}
-        ).status_code == 400
+        # Nothing left to move: a repeat is a harmless no-op.
+        again = client.post("/api/settings/encryption/rekey").json()
+        assert again["ok"] is True and again["rewritten"] == 0
+        assert "Nothing to do" in again["message"]
 
 
 def test_key_file_rotation_needs_a_key_file(monkeypatch):
@@ -439,7 +428,7 @@ def test_key_file_rotation_needs_a_key_file(monkeypatch):
     _conn(password="first")
     with TestClient(app) as client:
         assert client.get("/api/settings/encryption").json()["previous_key_file"] is None
-        r = client.post("/api/settings/encryption/rekey", json={"use_key_file": True})
+        r = client.post("/api/settings/encryption/rekey")
         assert r.status_code == 503 and "no generated key file" in r.json()["detail"]
 
 
@@ -470,7 +459,11 @@ def test_startup_without_a_previous_key_records_nothing(monkeypatch):
         assert client.get("/api/settings/encryption").json()["last_rekey"] is None
 
 
-def test_rekey_endpoint_rotates_and_never_echoes_the_key(monkeypatch):
+def test_rekey_endpoint_never_accepts_key_material(monkeypatch):
+    """Rotating from a supplied key is a deployment action (see the startup test
+    above), never something the interface takes. A key sent in the request body
+    rotates nothing: the endpoint only ever uses the generated key file, and a
+    deployment that never had one has nothing to rotate from."""
     from app.main import app
 
     old = Fernet.generate_key().decode()
@@ -478,108 +471,20 @@ def test_rekey_endpoint_rotates_and_never_echoes_the_key(monkeypatch):
     conn = _conn(password="first")
     with TestClient(app):
         pass
+    assert not vault.key_file_path().exists()  # the env key was set from the start
 
     _set_key(monkeypatch, Fernet.generate_key().decode())
     with TestClient(app) as client:
         assert client.get("/api/settings/encryption").json()["unreadable_connections"] == [conn.id]
         r = client.post("/api/settings/encryption/rekey", json={"previous_key": old})
-        assert r.status_code == 200, r.text
-        body = r.json()
-        assert body["ok"] is True and body["rewritten"] == 1
-        assert body["status"]["unreadable_connections"] == []
-        assert old not in r.text
-        assert store.get_connection(conn.id).password == "first"
-        # Running it again is a harmless no-op with a clear message.
-        again = client.post("/api/settings/encryption/rekey", json={"previous_key": old}).json()
-        assert again["ok"] is True and again["rewritten"] == 0
-        assert "Nothing to do" in again["message"]
-        blank = client.post("/api/settings/encryption/rekey", json={"previous_key": " "})
-        assert blank.status_code == 400
-
-
-def test_rekey_endpoint_reports_a_wrong_key_and_shares_the_login_backoff(monkeypatch):
-    from app import auth
-    from app.main import app
-
-    old = Fernet.generate_key().decode()
-    _set_key(monkeypatch, old)
-    conn = _conn(password="first")
-    with TestClient(app):
-        pass
-
-    _set_key(monkeypatch, Fernet.generate_key().decode())
-    with TestClient(app) as client:
-        for _ in range(4):
-            body = client.post(
-                "/api/settings/encryption/rekey",
-                json={"previous_key": Fernet.generate_key().decode()},
-            ).json()
-            assert body["ok"] is False and body["rewritten"] == 0
-            assert "not supplied" in body["message"]
-        r = client.post(
-            "/api/settings/encryption/rekey", json={"previous_key": Fernet.generate_key().decode()}
-        )
-        assert r.status_code == 429 and r.headers["Retry-After"] == str(r.json()["retry_after"])
-        auth.reset_login_state()
-        # Nothing was written by any of those attempts.
+        assert r.status_code == 503 and "no generated key file" in r.json()["detail"]
         assert store.get_connection(conn.id).credentials_unreadable is True
-        assert client.post(
-            "/api/settings/encryption/rekey", json={"previous_key": old}
-        ).json()["rewritten"] == 1
-
-
-def test_rekey_with_nothing_to_open_leaves_the_login_backoff_alone(monkeypatch):
-    """A healthy database gives a pasted key nothing to prove itself against,
-    so the request neither counts as a failure nor forgives earlier ones."""
-    from app import auth
-    from app.main import app
-
-    _set_key(monkeypatch, Fernet.generate_key().decode())
-    conn = _conn(password="first")
-    with TestClient(app) as client:
-        for _ in range(auth._BACKOFF_AFTER - 1):
-            auth.record_login("testclient", False)
-        assert auth.tracked_addresses() == 1 and auth.login_blocked("testclient") == 0
-        r = client.post(
-            "/api/settings/encryption/rekey", json={"previous_key": Fernet.generate_key().decode()}
-        )
-        assert r.status_code == 200 and "Nothing to do" in r.json()["message"]
-        assert store.get_connection(conn.id).password == "first"
-        # Neither forgiven nor counted: still one short of the backoff, and the
-        # next failure is the one that trips it.
-        assert auth.tracked_addresses() == 1 and auth.login_blocked("testclient") == 0
-        auth.record_login("testclient", False)
-        assert auth.login_blocked("testclient") > 0
-
-
-def test_rekey_without_a_usable_key_leaves_the_login_backoff_alone():
-    """A corrupt key file makes every secret unreadable, so the nothing-to-do
-    gate does not apply, yet the pasted key was never checked: 503, and the
-    caller's earlier failures are neither forgiven nor added to."""
-    from app import auth
-    from app.main import app
-
-    conn = _conn(password="first")
-    vault.reset_for_tests()
-    vault.key_file_path().write_text("not a key\n")
-    with TestClient(app) as client:
-        for _ in range(auth._BACKOFF_AFTER - 1):
-            auth.record_login("testclient", False)
-        assert auth.tracked_addresses() == 1 and auth.login_blocked("testclient") == 0
-        r = client.post(
-            "/api/settings/encryption/rekey", json={"previous_key": Fernet.generate_key().decode()}
-        )
-        assert r.status_code == 503 and "key file" in r.json()["detail"]
-        assert store.get_connection(conn.id).credentials_unreadable is True
-        assert auth.tracked_addresses() == 1 and auth.login_blocked("testclient") == 0
-        auth.record_login("testclient", False)
-        assert auth.login_blocked("testclient") > 0
 
 
 def test_rekey_moves_what_it_can_and_names_what_it_could_not(monkeypatch):
     """Two secrets under two different old keys: supplying one moves that one,
-    reports the other, and does not count as a wrong-key attempt."""
-    from app import auth
+    reports the other, and commits the rewrite and the recorded outcome
+    together."""
     from app.main import app
 
     first = Fernet.generate_key().decode()
@@ -592,18 +497,15 @@ def test_rekey_moves_what_it_can_and_names_what_it_could_not(monkeypatch):
     b = _conn(password="under-second")
 
     _set_key(monkeypatch, Fernet.generate_key().decode())
-    with TestClient(app) as client:
-        body = client.post(
-            "/api/settings/encryption/rekey", json={"previous_key": first}
-        ).json()
-        assert body["rewritten"] == 1 and body["unreadable"] == 1
-        assert "Re-encrypted 1 stored secret" in body["message"]
-        assert "1 stored secret is encrypted with a key that was not supplied" in body["message"]
-        assert body["status"]["unreadable_connections"] == [b.id]
-        assert store.get_connection(a.id).password == "under-first"
-        # A key that opened something is not a wrong guess, so nothing is counted.
-        assert auth.login_blocked("testclient") == 0
-        # The rest moves once its own key is supplied.
-        rest = client.post("/api/settings/encryption/rekey", json={"previous_key": second}).json()
-        assert rest["ok"] is True and rest["rewritten"] == 1
-        assert store.get_connection(b.id).password == "under-second"
+    outcome = vault.rekey(first, "a test")
+    assert (outcome.rewritten, outcome.unreadable) == (1, 1)
+    assert "1 stored secret is encrypted with a key that was not supplied" in outcome.error
+    assert store.get_connection(a.id).password == "under-first"
+    assert store.get_connection(b.id).credentials_unreadable is True
+    # The rewrite and the outcome describing it landed in the same transaction.
+    recorded = vault.last_rekey()
+    assert (recorded.rewritten, recorded.unreadable) == (1, 1)
+    # The rest moves once its own key is supplied.
+    rest = vault.rekey(second, "a test")
+    assert rest.rewritten == 1 and rest.error is None
+    assert store.get_connection(b.id).password == "under-second"

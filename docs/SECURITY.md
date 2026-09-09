@@ -9,9 +9,9 @@ A single shared operator password gates the UI and API (session cookie, 7
 days, PBKDF2 hash, signing secret rotated on password change). Failed
 sign-ins are counted per client address: five, then an exponential wait
 capped at a minute, reported back as `Retry-After` and counted down on the
-login page. Every other password check shares that one counter, so a
-Settings password change and a pasted previous encryption key back off the
-same way and a wrong guess in one place pauses the others. A process-wide
+login page. The Settings password change re-checks the current password, so
+it shares that one counter and a wrong guess in one place pauses the other.
+A process-wide
 ceiling (30 failures a minute across every address) backstops guessing from
 many addresses. The client address is the
 TCP peer unless that peer is a trusted proxy (Settings, or
@@ -48,22 +48,24 @@ encrypted under the old key is rewritten under the new one in a single
 transaction, and Settings > Encryption at rest reports what moved. Drop
 `VCF_DOCTOR_SECRET_KEY_PREVIOUS` on the next deploy.
 
-The same card rotates on demand under **Rotate the encryption key**. Paste
-the previous key (a Fernet key or the passphrase) and the secrets it opens
-are rewritten under the current one; the value is used once and never
-stored. When the deployment has just moved from the generated key file to
-`VCF_DOCTOR_SECRET_KEY`, the file is still on the volume and the card offers
-a one-click rotation from it with no key material in the browser. That move
-is never automatic on purpose: an environment key set by mistake stays
-recoverable by unsetting it, which a silent re-encryption would prevent.
-Delete the key file once the console reads its credentials again.
+When the deployment has just moved from the generated key file to
+`VCF_DOCTOR_SECRET_KEY`, the file is still on the volume, so the previous key
+is already on the machine. Settings > Encryption at rest offers a one-click
+rotation from it under **Rotate the encryption key**, with no key material in
+the browser. That move is never automatic on purpose: an environment key set
+by mistake stays recoverable by unsetting it, which a silent re-encryption
+would prevent. Delete the key file once the console reads its credentials
+again.
 
-A rotation rewrites only secrets the supplied key opens; secrets under other
-keys stay untouched and are reported as unreadable. All recoverable secrets
-and the outcome commit in one transaction. A wrong key leaves stored
-credentials unchanged, but records a failed outcome. Pasted wrong guesses
-count against the shared login backoff described above. If every secret is
-already readable, a pasted key is not checked and the backoff stays unchanged.
+Those two are the only rotation procedures. The interface never accepts an
+encryption key: rotation is a deployment action, so nothing in the browser
+can supply, guess or trigger key material, and the rekey endpoint is not a
+password check. A rotation rewrites only secrets the previous key opens;
+secrets under other keys stay untouched and are reported as unreadable. All
+recoverable secrets and the outcome commit in one transaction, so an
+interrupted rotation cannot leave only some of its rewrites behind. A key
+that opens nothing leaves stored credentials unchanged and records a failed
+outcome.
 
 ## Browser headers
 

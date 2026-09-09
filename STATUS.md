@@ -35,7 +35,9 @@ version of this file is in git history.
   and a trusted proxies setting (#4, #47); vCenter passwords and the
   Anthropic key encrypted at rest (#46). The Settings password change shares
   the login lockout (#37).
-- Encryption key rotation in place with the previous key (#48); see
+- Encryption key rotation in place with the previous key at startup, plus a
+  one-click migration off the generated key file; no key is ever entered in
+  the interface (#48). See
   [rotation and recovery](docs/SECURITY.md#secrets-at-rest).
 - Security gates in CI (lint, tests, dependency and secret scan, repo scan,
   image scan, smoke test, CodeQL); the image is signed with provenance and
@@ -46,7 +48,7 @@ version of this file is in git history.
 - Live lab operation against real vCenters is confirmed. Issue #58 records
   1,194,962 event rows and a 393 MB events table collected over 4.6 days from
   that deployment (evidence checked 2026-09-08).
-- 575 backend tests and 5 frontend tests pass (`make test`, 2026-09-09).
+- 572 backend tests and 5 frontend tests pass (`make test`, 2026-09-09).
 
 ## Broken
 

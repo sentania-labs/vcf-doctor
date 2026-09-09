@@ -57,7 +57,7 @@ them.
 |---|---|---|
 | `VCF_DOCTOR_DB_PATH` | `/data/vcf-doctor.db` | SQLite location |
 | `VCF_DOCTOR_SECRET_KEY` | unset | Key for encrypting vCenter passwords and the Anthropic key at rest. Unset: a key file is generated next to the database. See [Security](SECURITY.md). |
-| `VCF_DOCTOR_SECRET_KEY_PREVIOUS` | unset | Previous encryption key for startup rotation. See [rotation and recovery](SECURITY.md#secrets-at-rest) for the procedure and Settings alternative. |
+| `VCF_DOCTOR_SECRET_KEY_PREVIOUS` | unset | Previous encryption key for startup rotation. See [rotation and recovery](SECURITY.md#secrets-at-rest) for the procedure. |
 | `ANTHROPIC_API_KEY` | unset | Enables the Claude assistant. A key entered in Settings takes precedence. |
 | `VCF_DOCTOR_AUTH` | `on` | `off` disables the login page (use only behind ingress authentication) |
 | `VCF_DOCTOR_ADMIN_PASSWORD` | unset | Seeds the operator password on first boot; otherwise the UI asks on first visit |
@@ -103,9 +103,8 @@ laptop use. It is not a deployment artifact.
 - **Lost encryption key, volume intact**: history is intact; re-enter each
   vCenter password (flagged "Needs password" on Connections) and the
   Anthropic key. See [Security](SECURITY.md).
-- **Rotated encryption key, previous key still available**: follow
-  [rotation and recovery](SECURITY.md#secrets-at-rest), including the shared
-  backoff for pasted wrong guesses.
+- **Rotated encryption key, previous key still available**: no re-entry is
+  needed; follow [rotation and recovery](SECURITY.md#secrets-at-rest).
 - **Bad release**: re-pin the previous digest or tag and file an issue. The
   database schema is migrated forward on startup; going back a release is
   not guaranteed to be safe once a newer release has written to the volume,
