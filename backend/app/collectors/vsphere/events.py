@@ -354,7 +354,11 @@ def _drain(collector: Any, reader: str) -> FetchBatch:
     pyVmomi already defines all re-raise the original error. A KeyError that
     names no type after a registration means the latest placeholder was wrong
     (the name was a data object type, not a managed one), so the latest error,
-    the one naming the real type, is what surfaces.
+    the one naming the real type, is what surfaces. On a later drain no
+    registration happens, so the cause is a placeholder recorded earlier: with
+    one such name it is named as the cause, and with several the error says a
+    previously registered unknown class failed the read and lists those names as
+    candidates rather than blaming them all.
     """
     registered: list[str] = []
     last_error: KeyError | None = None
@@ -370,9 +374,14 @@ def _drain(collector: Any, reader: str) -> FetchBatch:
                             _wrong_placeholders.add(registered[-1])
                         raise last_error from exc
                     with _placeholder_lock:
-                        wrong_names = ", ".join(sorted(_wrong_placeholders))
+                        wrong_names = sorted(_wrong_placeholders)
+                    if len(wrong_names) == 1:
+                        raise KeyError(wrong_names[0]) from exc
                     if wrong_names:
-                        raise KeyError(wrong_names) from exc
+                        raise KeyError(
+                            "read failed on a previously registered unknown class; "
+                            f"possible causes: {', '.join(wrong_names)}"
+                        ) from exc
                 if (
                     name is None
                     or name in registered

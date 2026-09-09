@@ -313,12 +313,17 @@ def _unknown_event_class_page(class_name: str) -> bytes:
 </obj>""".encode()
 
 
-def test_drain_reports_the_real_name_for_an_unknown_event_class():
+def test_drain_reports_the_real_name_for_an_unknown_event_class(monkeypatch):
     """An unknown data object type raises the same KeyError(name) as an
     unknown managed type. The placeholder does not help there, and pyVmomi's
     re-read then fails with KeyError('type'); the error that surfaces must
-    still name the event class, and 'type' must never become a placeholder."""
+    still name the event class, and 'type' must never become a placeholder.
+
+    The wrong-placeholder set starts empty here so the later drain exercises
+    the single known cause, which is named outright."""
     from pyVmomi import SoapAdapter, vim
+
+    monkeypatch.setattr(collector_events, "_wrong_placeholders", set())
 
     name = f"VcfProbeNewEvent{uuid4().hex}"
     page = _unknown_event_class_page(name)
@@ -372,6 +377,61 @@ def test_drain_reports_the_latest_registration_when_its_placeholder_is_wrong(mon
     with pytest.raises(KeyError) as excinfo:
         _drain(MixedUnknownTypes(), "ReadNextEvents")
     assert excinfo.value.args == ("VcfProbeEventClass",)
+
+
+def test_drain_names_several_wrong_placeholders_as_candidates(monkeypatch):
+    """A later drain registers nothing, so the cause is a placeholder recorded
+    earlier. With more than one recorded, the error must not claim they all
+    caused this failure: it says a previously registered unknown class failed
+    the read and offers the known names as candidates."""
+    monkeypatch.setattr(
+        collector_events, "_wrong_placeholders", {"VcfProbeAlphaEvent", "VcfProbeBetaEvent"}
+    )
+
+    class LaterScan:
+        rewinds = 0
+
+        def RewindCollector(self):
+            self.rewinds += 1
+
+        def ReadNextEvents(self, size):
+            raise KeyError("type")
+
+        def DestroyCollector(self):
+            pass
+
+    later = LaterScan()
+    with pytest.raises(KeyError) as excinfo:
+        _drain(later, "ReadNextEvents")
+    message = excinfo.value.args[0]
+    assert "previously registered unknown class" in message
+    assert "possible causes" in message
+    assert "VcfProbeAlphaEvent" in message
+    assert "VcfProbeBetaEvent" in message
+    # It must not read as a bare list of names, which claims all of them.
+    assert message != "VcfProbeAlphaEvent, VcfProbeBetaEvent"
+    assert "'type'" not in message
+    assert later.rewinds == 1
+
+
+def test_drain_names_the_only_wrong_placeholder_as_the_cause(monkeypatch):
+    """With exactly one known wrong placeholder the attribution is certain, so
+    the name is still reported on its own."""
+    monkeypatch.setattr(collector_events, "_wrong_placeholders", {"VcfProbeSoloEvent"})
+
+    class LaterScan:
+        def RewindCollector(self):
+            pass
+
+        def ReadNextEvents(self, size):
+            raise KeyError("type")
+
+        def DestroyCollector(self):
+            pass
+
+    with pytest.raises(KeyError) as excinfo:
+        _drain(LaterScan(), "ReadNextEvents")
+    assert excinfo.value.args == ("VcfProbeSoloEvent",)
 
 
 def test_capture_logs_the_minimum_window_cap(monkeypatch, caplog, tmp_path):
