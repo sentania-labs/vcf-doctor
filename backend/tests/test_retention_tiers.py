@@ -78,7 +78,7 @@ def test_twenty_days_of_five_minute_snapshots(tmp_path):
 
 def test_daily_tier_and_expiry(tmp_path):
     """Hourly cadence over 20 days with a 1/3/10 policy: 24 recent, 48 hourly,
-    one per day mark in the 3..10 day band, nothing at 10 days or older."""
+    one per local day in the 3..10 day band, nothing at 10 days or older."""
     db.reset_for_tests(str(tmp_path / "t.db"))
     conn = _conn()
     _bulk_insert(conn.id, [AT - timedelta(hours=k) for k in range(20 * 24)])
@@ -91,8 +91,8 @@ def test_daily_tier_and_expiry(tmp_path):
     assert len([a for a in ages if timedelta(days=1) <= a < timedelta(days=3)]) == 48
     daily = [a for a in ages if a >= timedelta(days=3)]
     assert max(daily) < timedelta(days=10)
-    # Day marks 3..9 each keep their exact-midnight snapshot; the last band
-    # (9.5 .. 10 days) rounds to the 10-day mark and keeps its nearest, 239 h.
+    # Days 3 through 9 keep midnight. The oldest day begins at the expired
+    # 10-day boundary, so its nearest eligible snapshot is 239 hours old.
     assert [a.total_seconds() / 3600 for a in daily] == [72, 96, 120, 144, 168, 192, 216, 239]
 
 
@@ -159,19 +159,12 @@ def _kept(connection_id: str) -> list[datetime]:
 
 
 def test_day_marks_follow_the_policy_timezone(tmp_path):
-    """The daily tier keeps the snapshot nearest local midnight, not 00:00 UTC.
-
-    US operators saw the kept daily snapshot filed under the previous day on the
-    Snapshots page, which groups by local calendar day (issue #28). Chicago is
-    UTC-6 in January, so each day's survivor sits at 06:00 UTC. The newest
-    snapshot belongs to the next day's mark, the same boundary the hourly tier
-    has, so it is excluded from the comparison.
-    """
+    """The daily tier groups snapshots by local day, not UTC day."""
     db.reset_for_tests(str(tmp_path / "t.db"))
     conn = _conn()
-    # Three days of hourly snapshots inside the daily band of a 1/1/30 policy.
-    stamps = [AT - timedelta(days=4) + timedelta(hours=k) for k in range(72)]
-    _bulk_insert(conn.id, stamps)
+    chicago_zone = ZoneInfo("America/Chicago")
+    chicago_start = datetime(2026, 1, 16, tzinfo=chicago_zone).astimezone(UTC)
+    _bulk_insert(conn.id, [chicago_start + timedelta(hours=k) for k in range(72)])
 
     store.apply_retention(
         conn.id,
@@ -180,40 +173,39 @@ def test_day_marks_follow_the_policy_timezone(tmp_path):
     )
 
     chicago = _kept(conn.id)
-    assert [t.hour for t in chicago[:-1]] == [6, 6, 6]
-    assert all(t.astimezone(ZoneInfo("America/Chicago")).hour == 0 for t in chicago[:-1])
+    assert [t.hour for t in chicago] == [6, 6, 6]
+    assert all(t.astimezone(chicago_zone).hour == 0 for t in chicago)
 
-    # The same estate under UTC keeps midnight UTC instead: the old behaviour.
     db.reset_for_tests(str(tmp_path / "u.db"))
     conn = _conn()
-    _bulk_insert(conn.id, stamps)
+    utc_start = datetime(2026, 1, 16, tzinfo=UTC)
+    _bulk_insert(conn.id, [utc_start + timedelta(hours=k) for k in range(72)])
     store.apply_retention(
         conn.id,
         RetentionPolicy(recent_days=1, hourly_days=1, daily_days=30, timezone=UTC_ZONE),
         at=AT,
     )
-    assert [t.hour for t in _kept(conn.id)[:-1]] == [0, 0, 0]
+    assert [t.hour for t in _kept(conn.id)] == [0, 0, 0]
 
 
-def test_retention_survivor_carries_its_configured_calendar_day(tmp_path):
+def test_daily_retention_never_selects_across_local_midnight(tmp_path):
     db.reset_for_tests(str(tmp_path / "t.db"))
     conn = _conn()
     policy = RetentionPolicy(
-        recent_days=1, hourly_days=1, daily_days=30, timezone="Asia/Tokyo"
+        recent_days=1, hourly_days=1, daily_days=30, timezone="America/Chicago"
     )
     store.set_retention_policy(policy)
+    timezone = ZoneInfo(policy.timezone)
     candidates = [
-        datetime(2026, 1, 17, 14, 40, tzinfo=UTC),
-        datetime(2026, 1, 17, 15, 5, tzinfo=UTC),
+        datetime(2026, 1, 17, 23, 55, tzinfo=timezone).astimezone(UTC),
+        datetime(2026, 1, 18, 0, 10, tzinfo=timezone).astimezone(UTC),
     ]
     ids = _bulk_insert(conn.id, candidates)
 
-    assert store.apply_retention(conn.id, policy, at=AT) == 1
+    assert store.apply_retention(conn.id, policy, at=AT) == 0
 
-    survivor = store.list_snapshots(conn.id)[0]
-    assert survivor.id == ids[1]
-    assert survivor.created_at.date().isoformat() == "2026-01-17"
-    assert survivor.retention_day == "2026-01-18"
+    survivors = {snapshot.id: snapshot.retention_day for snapshot in store.list_snapshots(conn.id)}
+    assert survivors == {ids[0]: "2026-01-17", ids[1]: "2026-01-18"}
 
 
 def test_day_marks_survive_a_dst_change(tmp_path):
@@ -222,9 +214,10 @@ def test_day_marks_survive_a_dst_change(tmp_path):
     conn = _conn()
     at = datetime(2026, 4, 1, 0, 0, tzinfo=UTC)
     tz = ZoneInfo("America/Chicago")
-    # 2026-03-08 is the US spring-forward day; cover the days around it hourly.
-    start = datetime(2026, 3, 6, 0, 0, tzinfo=UTC)
-    _bulk_insert(conn.id, [start + timedelta(hours=k) for k in range(24 * 5)])
+    start = datetime(2026, 3, 6, tzinfo=tz).astimezone(UTC)
+    end = datetime(2026, 3, 11, tzinfo=tz).astimezone(UTC)
+    elapsed_hours = int((end - start) / timedelta(hours=1))
+    _bulk_insert(conn.id, [start + timedelta(hours=k) for k in range(elapsed_hours)])
 
     store.apply_retention(
         conn.id,
@@ -232,22 +225,7 @@ def test_day_marks_survive_a_dst_change(tmp_path):
         at=at,
     )
 
-    # Every survivor but the newest (which belongs to the following day's mark)
-    # sits exactly on a local midnight, one per local calendar day.
     kept = _kept(conn.id)
-    local = [t.astimezone(tz) for t in kept[:-1]]
+    local = [t.astimezone(tz) for t in kept]
     assert all((t.hour, t.minute) == (0, 0) for t in local), local
-    assert len({t.date() for t in local}) == len(local) >= 4
-
-
-def test_day_mark_midpoint_uses_the_real_day_length_under_dst():
-    """New York's fall-back day is 25 hours long, so its midpoint is 12:30 after
-    local midnight: a snapshot at 12:20 rounds down and one at 12:40 rounds up."""
-    tz = ZoneInfo("America/New_York")
-    midnight = datetime(2026, 11, 1, tzinfo=tz)
-    next_midnight = datetime(2026, 11, 2, tzinfo=tz)
-    assert next_midnight.astimezone(UTC) - midnight.astimezone(UTC) == timedelta(hours=25)
-    before = (midnight.astimezone(UTC) + timedelta(hours=12, minutes=20)).astimezone(UTC)
-    after = (midnight.astimezone(UTC) + timedelta(hours=12, minutes=40)).astimezone(UTC)
-    assert store._nearest_day_mark(before, tz) == midnight
-    assert store._nearest_day_mark(after, tz) == next_midnight
+    assert len({t.date() for t in local}) == len(local) == 5

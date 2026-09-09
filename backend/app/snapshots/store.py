@@ -598,19 +598,10 @@ def _nearest_mark(t: datetime, period: timedelta) -> datetime:
     return mark + period if rem * 2 >= period else mark
 
 
-def _nearest_day_mark(t: datetime, tz: tzinfo) -> datetime:
-    """The local midnight closest to t; a half-way tie rounds up.
-
-    Midnights use the retention timezone, independent of browser display dates.
-    Days are not all 24 hours long under DST, hence date arithmetic rather than
-    an epoch offset, and the day length is measured in elapsed UTC time
-    (subtracting two datetimes in the same zone compares wall clocks).
-    """
+def _day_mark(t: datetime, tz: tzinfo) -> datetime:
+    """The starting midnight of t's local calendar day."""
     local = t.astimezone(tz)
-    start = datetime.combine(local.date(), time.min, tzinfo=tz)
-    nxt = datetime.combine(local.date() + DAY, time.min, tzinfo=tz)
-    day_length = nxt.astimezone(UTC) - start.astimezone(UTC)
-    return nxt if (t - start) * 2 >= day_length else start
+    return datetime.combine(local.date(), time.min, tzinfo=tz)
 
 
 def select_retention_victims(
@@ -620,8 +611,8 @@ def select_retention_victims(
 
     age < recent_days: keep all. recent <= age < hourly: group by nearest hour
     mark, keep the snapshot closest to the mark (ties: oldest, then id).
-    hourly <= age < daily: same with day marks, which are midnights in the
-    policy's timezone. age >= daily: prune.
+    hourly <= age < daily: group by local calendar day and keep the snapshot
+    nearest that day's starting midnight. age >= daily: prune.
     """
     recent = timedelta(days=policy.recent_days)
     hourly = timedelta(days=policy.hourly_days)
@@ -637,7 +628,7 @@ def select_retention_victims(
             victims.append(sid)
             continue
         period = HOUR if age < hourly else DAY
-        mark = _nearest_mark(created, HOUR) if period is HOUR else _nearest_day_mark(created, tz)
+        mark = _nearest_mark(created, HOUR) if period is HOUR else _day_mark(created, tz)
         candidate = (abs(created - mark), created, sid)
         current = best.get((period, mark))
         if current is None:

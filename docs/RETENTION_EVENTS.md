@@ -9,8 +9,8 @@ Applied per connection after every scan and at startup (idempotent):
 
 - age < recent_days: keep every scheduled snapshot;
 - recent_days <= age < hourly_days: keep the one nearest each hour mark, prune the rest;
-- hourly_days <= age < daily_days: keep the one nearest each day mark, which is
-  midnight in the policy's `timezone`;
+- hourly_days <= age < daily_days: for each local calendar day, keep the
+  snapshot from that day nearest its starting midnight in the policy's `timezone`;
 - age >= daily_days: prune.
 
 `timezone` is an IANA zone name, editable in Settings > Retention. New installs
@@ -18,11 +18,11 @@ use the `TZ` environment value when set and UTC otherwise. The policy always
 stores an explicit zone. Deployment overrides are listed in
 [Environment variables](DEPLOYMENT.md#environment-variables). Day marks and
 the Snapshots page day groups use this same zone, which the page names beside
-the groups. Two operators therefore see the same day boundaries. The survivor
-is nearest midnight and can be on either side of it. Hour marks stay on the UTC
-hour. Unknown zones are rejected by the Settings API. An invalid stored policy
-falls back to deployment defaults; an invalid environment timezone falls back
-to UTC.
+the groups. Two operators therefore see the same day boundaries. Daily
+retention never selects a snapshot across a local day boundary. Hour marks stay
+on the UTC hour. Unknown zones are rejected by the Settings API. An invalid
+stored policy falls back to deployment defaults; an invalid environment
+timezone falls back to UTC.
 
 Manual snapshots (`scheduled = 0`) are never pruned; scheduled snapshots
 follow the tiers whether or not they carry a label. `SnapshotSummary.tier` is
