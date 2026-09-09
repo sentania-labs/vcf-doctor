@@ -66,7 +66,8 @@ def _health_inputs(
     """Latest resources, their cached findings, and the objects each check
     evaluated (summed across connections), from one snapshot read per
     connection. Checks that compare against the previous snapshot count the
-    previous snapshot's objects, and zero when there is none."""
+    previous snapshot's objects. Count shapes and empty-population semantics
+    follow diagnostics.registry.coverage; type groups are summed separately."""
     from app.diagnostics.registry import coverage, get_checks
 
     resources: list[Resource] = []

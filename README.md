@@ -24,7 +24,10 @@ healthy and never runs anything. The console is read-only by design.
   DRS and HA off, full datastores, stale VM snapshots, removed networks and
   hosts, and more. Same input, same finding, every time.
 - **Health score.** One severity-weighted number per estate, weights editable
-  in Settings.
+  in Settings. The Overview and Settings explain the current scoring formula,
+  including removal scoring by resource type. The evaluated count still covers
+  all applicable objects. See the [diagnostic contracts](docs/PROPERTIES.md#new-diagnostic-checks)
+  for host version comparison eligibility.
 - **Time machine.** Pick any two snapshots and see the semantic difference,
   not a raw JSON diff. Environment Changes rolls the same data up across every
   connection for a time window.

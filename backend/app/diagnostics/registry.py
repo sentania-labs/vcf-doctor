@@ -26,10 +26,13 @@ CoverageCount = int | dict[str, int]
 def coverage(
     resources: list[Resource], previous: list[Resource] | None = None
 ) -> dict[str, CoverageCount]:
-    """check id -> number of objects that check judged on this snapshot. Zero
-    means the check did not evaluate anything (the health score treats it as
-    not evaluated). A check whose applicable() raises is reported as zero so
-    one bad check cannot poison the score."""
+    """Check id -> applicable count, grouped by type for RESOURCE_REMOVED.
+
+    Grouped counts retain all applicable types, including those without
+    findings. Zero or an empty mapping means not evaluated. A check whose
+    applicability calculation raises is reported as zero so one bad check
+    cannot poison the score.
+    """
     out: dict[str, CoverageCount] = {}
     for check in get_checks():
         try:

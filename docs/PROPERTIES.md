@@ -68,7 +68,9 @@ VM_SNAPSHOT_STALE (warning: oldest snapshot older than 7 days, or more than
 toolsNotRunning/toolsNotInstalled, skip templates), HOST_NTP_NOT_CONFIGURED
 (warning: empty ntpServers), CLUSTER_HA_DISABLED (warning), CLUSTER_DRS_DISABLED
 (info), HOST_VERSION_MISMATCH (warning: hosts in one cluster on different
-version/build).
+version/build; requires at least two member hosts with a reported version).
+Clusters below that threshold are not evaluated, rather than passed. A build
+without a version does not qualify a host for comparison.
 
 # Settings
 
