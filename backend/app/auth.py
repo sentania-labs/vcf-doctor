@@ -19,6 +19,7 @@ import time
 from collections import OrderedDict, deque
 
 from fastapi import HTTPException, Request
+from fastapi.responses import JSONResponse
 
 from app import db
 from app.config import settings
@@ -202,6 +203,15 @@ def _count_failure(ip: str, now: float) -> None:
     _sweep(now)
     while len(_per_ip) > MAX_TRACKED:
         _per_ip.popitem(last=False)
+
+
+def too_many_response(wait: int) -> JSONResponse:
+    """The 429 every password check returns when the limiter refuses a client."""
+    return JSONResponse(
+        {"detail": f"too many failed attempts; try again in {wait}s", "retry_after": wait},
+        status_code=429,
+        headers={"Retry-After": str(wait)},
+    )
 
 
 def login_blocked(ip: str) -> int:

@@ -320,7 +320,7 @@ def test_rekey_moves_every_secret_to_the_new_key(monkeypatch):
     _set_key(monkeypatch, Fernet.generate_key().decode())
     assert store.get_connection(a.id).credentials_unreadable is True
 
-    outcome = vault.rekey([old], "a test")
+    outcome = vault.rekey(old, "a test")
     assert (outcome.rewritten, outcome.unreadable, outcome.error) == (3, 0, None)
     assert store.get_connection(a.id).password == "first"
     assert store.get_connection(b.id).password == "second"
@@ -328,7 +328,7 @@ def test_rekey_moves_every_secret_to_the_new_key(monkeypatch):
     assert assistant_settings.resolve_api_key() == SECRET
     # Everything is stored under the current key, so the old one is now useless.
     assert _raw_password(a.id).startswith(vault.PREFIX)
-    assert vault.rekey([old], "a test").rewritten == 0
+    assert vault.rekey(old, "a test").rewritten == 0
 
 
 def test_rekey_with_the_wrong_key_changes_nothing(monkeypatch):
@@ -338,12 +338,12 @@ def test_rekey_with_the_wrong_key_changes_nothing(monkeypatch):
     before = _raw_password(conn.id)
 
     _set_key(monkeypatch, Fernet.generate_key().decode())
-    outcome = vault.rekey([Fernet.generate_key().decode()], "a test")
+    outcome = vault.rekey(Fernet.generate_key().decode(), "a test")
     assert outcome.rewritten == 0 and outcome.unreadable == 1
     assert outcome.error and "not supplied" in outcome.error
     assert _raw_password(conn.id) == before
     # The right key still works afterwards.
-    assert vault.rekey([old], "a test").rewritten == 1
+    assert vault.rekey(old, "a test").rewritten == 1
     assert store.get_connection(conn.id).password == "first"
 
 
@@ -354,7 +354,7 @@ def test_rekey_accepts_a_passphrase_and_leaves_readable_rows_alone(monkeypatch):
     fresh = _conn(password="fresh")
     fresh_raw = _raw_password(fresh.id)
 
-    outcome = vault.rekey(["correct horse battery staple"], "a test")
+    outcome = vault.rekey("correct horse battery staple", "a test")
     assert outcome.rewritten == 1 and outcome.unreadable == 0
     assert store.get_connection(stale.id).password == "stale"
     assert _raw_password(fresh.id) == fresh_raw  # untouched, already readable
@@ -367,7 +367,7 @@ def test_rekey_leaves_legacy_plaintext_to_the_plaintext_migration(monkeypatch):
     with db.transaction() as c:
         c.execute("UPDATE connections SET password = ? WHERE id = ?", ("legacy", conn.id))
     _set_key(monkeypatch, Fernet.generate_key().decode())
-    assert vault.rekey([old], "a test").rewritten == 0
+    assert vault.rekey(old, "a test").rewritten == 0
     assert _raw_password(conn.id) == "legacy"
     assert vault.migrate_plaintext() == 1
     assert store.get_connection(conn.id).password == "legacy"
@@ -526,6 +526,30 @@ def test_rekey_endpoint_reports_a_wrong_key_and_shares_the_login_backoff(monkeyp
         assert client.post(
             "/api/settings/encryption/rekey", json={"previous_key": old}
         ).json()["rewritten"] == 1
+
+
+def test_rekey_with_nothing_to_open_leaves_the_login_backoff_alone(monkeypatch):
+    """A healthy database gives a pasted key nothing to prove itself against,
+    so the request neither counts as a failure nor forgives earlier ones."""
+    from app import auth
+    from app.main import app
+
+    _set_key(monkeypatch, Fernet.generate_key().decode())
+    conn = _conn(password="first")
+    with TestClient(app) as client:
+        for _ in range(auth._BACKOFF_AFTER - 1):
+            auth.record_login("testclient", False)
+        assert auth.tracked_addresses() == 1 and auth.login_blocked("testclient") == 0
+        r = client.post(
+            "/api/settings/encryption/rekey", json={"previous_key": Fernet.generate_key().decode()}
+        )
+        assert r.status_code == 200 and "Nothing to do" in r.json()["message"]
+        assert store.get_connection(conn.id).password == "first"
+        # Neither forgiven nor counted: still one short of the backoff, and the
+        # next failure is the one that trips it.
+        assert auth.tracked_addresses() == 1 and auth.login_blocked("testclient") == 0
+        auth.record_login("testclient", False)
+        assert auth.login_blocked("testclient") > 0
 
 
 def test_rekey_moves_what_it_can_and_names_what_it_could_not(monkeypatch):

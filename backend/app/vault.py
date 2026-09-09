@@ -292,21 +292,18 @@ def _previous_fernet(raw: str) -> Fernet:
     return Fernet(_normalise(raw))
 
 
-def _open_with(fernets: list[Fernet], stored: str) -> str | None:
-    """Plaintext of a stored token under the first key that authenticates it,
-    or None when none of them does."""
-    token = stored[len(PREFIX) :].encode()
-    for fernet in fernets:
-        try:
-            return fernet.decrypt(token).decode()
-        except InvalidToken:
-            continue
-    return None
+def _open_with(fernet: Fernet, stored: str) -> str | None:
+    """Plaintext of a stored token under the given key, or None when the key
+    does not authenticate it."""
+    try:
+        return fernet.decrypt(stored[len(PREFIX) :].encode()).decode()
+    except InvalidToken:
+        return None
 
 
-def rekey(previous_keys: list[str], source: str) -> RekeyOutcome:
+def rekey(previous_key: str, source: str) -> RekeyOutcome:
     """Re-encrypt every stored secret the current key cannot open, using the
-    first supplied previous key that authenticates it.
+    supplied previous key.
 
     One transaction: either every row moves to the current key or none does, so
     an interrupted rotation never leaves half the connections needing a
@@ -317,7 +314,7 @@ def rekey(previous_keys: list[str], source: str) -> RekeyOutcome:
     from app import db
 
     _resolve()  # KeyUnavailable when there is no current key to move secrets to
-    previous = [_previous_fernet(raw) for raw in previous_keys]
+    previous = _previous_fernet(previous_key)
     rewritten = 0
     unreadable = 0
 
@@ -437,7 +434,7 @@ def rekey_at_startup() -> RekeyOutcome | None:
     raw = os.environ.get(ENV_PREVIOUS_KEY, "").strip()
     if not raw:
         return None
-    return rekey([raw], ENV_PREVIOUS_KEY)
+    return rekey(raw, ENV_PREVIOUS_KEY)
 
 
 def reset_for_tests() -> None:

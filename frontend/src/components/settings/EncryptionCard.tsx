@@ -11,9 +11,7 @@ import { Badge, Button, Card, CardHeader, Field, Input, Skeleton } from '@/compo
 export default function EncryptionCard({ reloadKey }: { reloadKey?: unknown }) {
   const st = useAsync(() => getEncryptionStatus(), [reloadKey])
   const { connections } = useAppState()
-  // A rotation returns fresh status, so the card updates without a page reload.
-  const [rotated, setRotated] = useState<EncryptionStatus | null>(null)
-  const d = rotated ?? st.data
+  const d = st.data
   const items = (d?.unreadable_connections ?? []).map(id => ({ id, name: connections.find(c => c.id === id)?.name ?? id }))
   const problems = items.length + (d?.assistant_key_unreadable ? 1 : 0)
   const last = d?.last_rekey ?? null
@@ -57,7 +55,7 @@ export default function EncryptionCard({ reloadKey }: { reloadKey?: unknown }) {
                 </ul>
               </div>
             ) : null}
-            <RotateForm status={d} onRotated={setRotated} />
+            <RotateForm status={d} onRotated={st.reload} />
           </>
         )}
       </div>
@@ -67,7 +65,7 @@ export default function EncryptionCard({ reloadKey }: { reloadKey?: unknown }) {
 
 // Rotation without re-entering credentials: paste the key the secrets were last
 // encrypted under and every one it opens is rewritten under the current key.
-function RotateForm({ status, onRotated }: { status: EncryptionStatus; onRotated: (s: EncryptionStatus) => void }) {
+function RotateForm({ status, onRotated }: { status: EncryptionStatus; onRotated: () => void }) {
   const [previous, setPrevious] = useState('')
   const [busy, setBusy] = useState<'paste' | 'file' | null>(null)
   const [ok, setOk] = useState<string | null>(null)
@@ -77,7 +75,7 @@ function RotateForm({ status, onRotated }: { status: EncryptionStatus; onRotated
     setOk(null); setErr(null); setBusy(which)
     try {
       const r = await rekeyEncryption(previous, which === 'file')
-      onRotated(r.status)
+      onRotated()
       if (r.ok) { setOk(r.message); setPrevious('') } else setErr(r.message)
     } catch (e2) {
       setErr(e2 instanceof Error ? e2.message : String(e2))
