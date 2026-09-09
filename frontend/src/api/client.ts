@@ -16,7 +16,7 @@ async function request(path: string, init?: RequestInit): Promise<Response> {
   try {
     return await fetch(`${BASE}${path}`, init)
   } catch (e) {
-    if (e instanceof TypeError && path !== '/health') window.dispatchEvent(new CustomEvent(BACKEND_UNREACHABLE_EVENT))
+    if (e instanceof TypeError && !path.startsWith('/health')) window.dispatchEvent(new CustomEvent(BACKEND_UNREACHABLE_EVENT))
     throw e
   }
 }

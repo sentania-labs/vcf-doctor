@@ -62,32 +62,77 @@ def test_an_unreachable_database_is_reported_not_raised(monkeypatch):
         db.close()
 
 
-def test_health_answers_while_the_database_is_down(monkeypatch):
-    """A PostgreSQL failover must not crash-loop the container. The console
-    keeps answering the health probe and says the database is unavailable.
+def _unreachable(monkeypatch) -> None:
+    monkeypatch.setattr(cfg, "database_url", "postgresql://nobody@127.0.0.1:1/nothing")
+    monkeypatch.setattr(cfg, "db_password_file", "")
+    monkeypatch.setattr(cfg, "db_pool_timeout", 0.5)
+    monkeypatch.setattr(db, "PROBE_TIMEOUT", 0.5)
+    db.close()
 
-    Anything that needs the database still fails while it is down, sign-in
-    included. What must not happen is the probe timing out or the process
-    dying, either of which takes down a pod that is only waiting for its
-    database to come back.
-    """
+
+def test_liveness_stays_green_while_the_database_is_down(monkeypatch):
+    """Liveness is "is this process alive". Restarting a console whose database
+    is down fixes nothing and a restart loop makes the outage worse, so this
+    answer must not depend on the database at all."""
     from fastapi.testclient import TestClient
 
     from app.main import app
 
     db.reset_for_tests()
     with TestClient(app) as client:
-        assert client.get("/api/health").json()["database"] is True
-        monkeypatch.setattr(cfg, "database_url", "postgresql://nobody@127.0.0.1:1/nothing")
-        monkeypatch.setattr(cfg, "db_password_file", "")
-        monkeypatch.setattr(cfg, "db_pool_timeout", 0.5)
-        monkeypatch.setattr(db, "PROBE_TIMEOUT", 0.5)
-        db.close()
-        body = client.get("/api/health")
-        assert body.status_code == 200
-        assert body.json()["database"] is False
-        assert body.json()["status"] == "ok"
+        assert client.get("/api/health/live").status_code == 200
+        _unreachable(monkeypatch)
+        live = client.get("/api/health/live")
+        assert live.status_code == 200
+        assert live.json()["status"] == "ok"
     db.close()  # the next pool is built from the restored URL
+
+
+def test_readiness_goes_red_while_the_database_is_down(monkeypatch):
+    """Readiness is "can this instance serve". Sign-in and every page behind it
+    need the database, so an instance that cannot reach it must be taken out of
+    rotation rather than sent visitors it will fail."""
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    db.reset_for_tests()
+    with TestClient(app) as client:
+        ready = client.get("/api/health/ready")
+        assert ready.status_code == 200
+        assert ready.json()["database"] is True
+
+        _unreachable(monkeypatch)
+        for path in ("/api/health/ready", "/api/health"):
+            body = client.get(path)
+            assert body.status_code == 503, path
+            assert body.json()["status"] == "degraded"
+            assert body.json()["database"] is False
+            assert body.json()["detail"]
+    db.close()
+
+
+def test_readiness_is_red_while_a_migration_is_pending(tmp_path, monkeypatch):
+    """A reachable server missing its tables is not somewhere to send traffic."""
+    from fastapi.testclient import TestClient
+
+    from app import migrate
+    from app.main import app
+
+    db.reset_for_tests()
+    with TestClient(app) as client:
+        assert client.get("/api/health/ready").status_code == 200
+        for path in migrate.revisions():
+            (tmp_path / path.name).write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+        (tmp_path / "0002_example.sql").write_text(
+            "CREATE TABLE example_later (id TEXT PRIMARY KEY);", encoding="utf-8"
+        )
+        monkeypatch.setattr(migrate, "MIGRATIONS_DIR", tmp_path)
+        body = client.get("/api/health/ready")
+        assert body.status_code == 503
+        assert "0002_example" in body.json()["detail"]
+        # Liveness is unaffected: the process is fine, its schema is not.
+        assert client.get("/api/health/live").status_code == 200
 
 
 def test_trusted_proxies_trust_nobody_when_the_database_is_unreadable(monkeypatch):

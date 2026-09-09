@@ -11,15 +11,19 @@
 # its Secret at the same path, so the application code path is identical. The
 # password lives with the database it opens, so `docker compose down -v` drops
 # both together and the next `up` generates a new pair.
+#
+# One copy per reader, each owned by that reader and readable by nobody else:
+# the console runs as uid 10001 (see the Dockerfile) and the postgres image
+# runs as uid 999, so a single shared file would have to be world readable.
 name: vcf-doctor
 
 x-database-url: &database-url postgresql://vcf_doctor@postgres:5432/vcf_doctor
 
 services:
   # Writes the database password on the first run and leaves it alone after
-  # that. Runs as root because a fresh named volume belongs to root; nothing
-  # else in this file does. Mode 0644 because postgres and the console run as
-  # different users and both have to read it; the volume never leaves the host.
+  # that. Runs as root because a fresh named volume belongs to root, and
+  # because only root can hand each copy to a different uid; nothing else in
+  # this file runs as root.
   db-password:
     image: postgres:16
     user: root
@@ -28,10 +32,16 @@ services:
     command:
       - /bin/sh
       - -c
-      - >-
+      - |
+        set -e
         test -s /secrets/db-password ||
-        { head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' > /secrets/db-password &&
-          chmod 0644 /secrets/db-password; }
+          head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' > /secrets/db-password
+        cp /secrets/db-password /secrets/postgres-password
+        chown 10001:10001 /secrets/db-password
+        chmod 0400 /secrets/db-password
+        chown 999:999 /secrets/postgres-password
+        chmod 0400 /secrets/postgres-password
+        ls -l /secrets
     restart: "no"
 
   postgres:
@@ -39,7 +49,7 @@ services:
     environment:
       POSTGRES_USER: vcf_doctor
       POSTGRES_DB: vcf_doctor
-      POSTGRES_PASSWORD_FILE: /run/secrets/db-password
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres-password
     volumes:
       - vcf-doctor-db:/var/lib/postgresql/data
       - vcf-doctor-secrets:/run/secrets:ro

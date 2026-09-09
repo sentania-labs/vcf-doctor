@@ -195,12 +195,18 @@ jobs:
           DATABASE_URL: postgresql://vcf_doctor@smoke-db:5432/vcf_doctor
         run: |
           docker network create smoke-net
+          # One copy of the password per reader, each owned by that reader and
+          # readable by nobody else: postgres runs as uid 999 and the console as
+          # uid 10001, so a single shared file would have to be world readable.
           mkdir -p "$RUNNER_TEMP/secrets"
           head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' > "$RUNNER_TEMP/secrets/db-password"
-          chmod 0644 "$RUNNER_TEMP/secrets/db-password"
+          cp "$RUNNER_TEMP/secrets/db-password" "$RUNNER_TEMP/secrets/postgres-password"
+          sudo chown 10001:10001 "$RUNNER_TEMP/secrets/db-password"
+          sudo chown 999:999 "$RUNNER_TEMP/secrets/postgres-password"
+          sudo chmod 0400 "$RUNNER_TEMP/secrets"/*-password
           docker run -d --name smoke-db --network smoke-net \
             -e POSTGRES_USER=vcf_doctor -e POSTGRES_DB=vcf_doctor \
-            -e POSTGRES_PASSWORD_FILE=/run/secrets/db-password \
+            -e POSTGRES_PASSWORD_FILE=/run/secrets/postgres-password \
             -v "$RUNNER_TEMP/secrets:/run/secrets:ro" \
             -v smoke-db-data:/var/lib/postgresql/data \
             postgres:16
@@ -228,15 +234,19 @@ jobs:
             vcf-doctor:ci \
             uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-proxy-headers --workers 2
           for i in $(seq 1 60); do
-            curl -fsS localhost:8000/api/health && break
-            if [ "$i" = 60 ]; then echo "container never became healthy"; docker logs smoke; exit 1; fi
+            curl -fsS localhost:8000/api/health/ready && break
+            if [ "$i" = 60 ]; then echo "container never became ready"; docker logs smoke; exit 1; fi
             sleep 1
           done
-          curl -fsS localhost:8000/api/health | grep -q '"status":"ok"'
+          curl -fsS localhost:8000/api/health/ready | grep -q '"status":"ok"'
+          curl -fsS localhost:8000/api/health/live | grep -q '"status":"ok"'
           # The database is reachable and migrated, and one worker holds the
           # scheduler lock, which every worker reports.
           curl -fsS localhost:8000/api/health | grep -q '"database":true'
           curl -fsS localhost:8000/api/health | grep -q '"scheduler":true'
+          # The console reads its password from a file only it can read.
+          test "$(docker exec smoke stat -c '%a %u' /run/secrets/db-password)" = "400 10001"
+          test "$(docker exec smoke sh -c 'cat /run/secrets/postgres-password 2>/dev/null' | wc -c)" = 0
           # One uvicorn master with two worker processes under it. Uvicorn spawns
           # workers through multiprocessing, so a worker's command line is the
           # spawn helper rather than "uvicorn"; if that ever changes this check
@@ -286,6 +296,20 @@ jobs:
           curl -fsS -b cj2 localhost:8000/api/connections | grep -q '"Smoke"'
           curl -fsS -b cj2 localhost:8000/api/overview | python3 -c 'import json,sys; o=json.load(sys.stdin); assert o["resource_total"] == 51, o["resource_total"]'
           test "$(docker top smoke -o pid,args | grep -c -- '--multiprocessing-fork')" = 2
+          # Liveness and readiness disagree while the database is down, which is
+          # the whole point: nothing restarts the container, and nothing routes
+          # traffic to it either.
+          docker stop smoke-db
+          test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8000/api/health/live)" = 200
+          test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8000/api/health/ready)" = 503
+          curl -s localhost:8000/api/health/ready | grep -q '"database":false'
+          test "$(docker inspect --format '{{.State.Health.Status}}' smoke)" = healthy
+          docker start smoke-db
+          for i in $(seq 1 60); do
+            [ "$(curl -s -o /dev/null -w '%{http_code}' localhost:8000/api/health/ready)" = 200 ] && break
+            if [ "$i" = 60 ]; then echo "never became ready again"; docker logs smoke; exit 1; fi
+            sleep 1
+          done
 
       - name: Container logs
         if: always()

@@ -3,7 +3,7 @@
 Deliberately simple: one password, hashed with PBKDF2 and stored in the
 settings table; sessions are HMAC-signed timestamps in an HttpOnly cookie.
 The signing secret is generated once and kept in the settings table, so it
-survives restarts on the /data volume. VCF_DOCTOR_AUTH=off disables all of
+survives restarts and is the same in every worker. VCF_DOCTOR_AUTH=off disables all of
 it for deployments that front the app with ingress authentication.
 """
 
@@ -144,8 +144,9 @@ def requires_auth(path: str) -> bool:
 # an exponential wait capped at a minute. On top of that a process-wide ceiling: more than
 # GLOBAL_LIMIT failures across every address inside GLOBAL_WINDOW seconds
 # pauses logins for everyone, so a guesser rotating addresses still gets no
-# more throughput than that. Everything is in memory; the deployment is a
-# single replica and a restart simply forgives everyone.
+# more throughput than that. Everything is in memory, so both counters are per
+# worker process: N workers means a guesser gets N times these allowances
+# before the backoff bites. A restart simply forgives everyone.
 
 _fail_lock = threading.Lock()
 setup_lock = threading.Lock()

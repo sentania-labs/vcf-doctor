@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Database } from 'lucide-react'
-import { getHealth } from '@/api'
+import { getReadiness } from '@/api'
 import { Badge, Card, CardHeader } from '@/components/ui'
 
 // Where the database is and what it is called is a deployment binding, not a
@@ -13,8 +13,10 @@ export default function DatabaseCard() {
   const [state, setState] = useState<Reachability>('checking')
   useEffect(() => {
     let cancelled = false
-    getHealth()
-      .then(h => { if (!cancelled) setState(h.database === false ? 'unavailable' : 'healthy') })
+    // Readiness is 503 while the database is unreachable, so the rejection and
+    // the database:false body are the same answer: not usable.
+    getReadiness()
+      .then(r => { if (!cancelled) setState(r.database === false ? 'unavailable' : 'healthy') })
       .catch(() => { if (!cancelled) setState('unavailable') })
     return () => { cancelled = true }
   }, [])

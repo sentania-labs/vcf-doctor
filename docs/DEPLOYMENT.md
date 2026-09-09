@@ -17,7 +17,8 @@ only whether the database is reachable.
 |---|---|
 | Image | `ghcr.io/sentania-labs/vcf-doctor:<tag>` where tag is `vX.Y.Z` (release), `sha-<7>` or `latest` |
 | Port | `8000` (HTTP) |
-| Health | `GET /api/health` (the container also declares a `HEALTHCHECK` on it). Give Kubernetes probes `timeoutSeconds: 5`: while the database is unreachable it still answers, in about three seconds, with `"database": false`. |
+| Liveness | `GET /api/health/live`, 200 whenever the process is answering. The container's `HEALTHCHECK` uses this. |
+| Readiness | `GET /api/health/ready` (and `GET /api/health`, the same answer under the older name), 200 when the database is reachable and migrated, 503 otherwise. |
 | Build identity | `GET /api/version` returns the [build identity fields](../backend/app/_version.py); `GET /api/health` reports the same version |
 | Database | PostgreSQL 14 or newer, reached over `VCF_DOCTOR_DATABASE_URL`. Schema migrations are applied at startup and by `python3 -m app.migrate upgrade`. |
 | Database password | A file, never an environment variable. `VCF_DOCTOR_DB_PASSWORD_FILE`, default `/run/secrets/vcf-doctor-db-password`. |
@@ -54,6 +55,42 @@ checkout SHA, and an unknown build time because there was no image build.
 Follow [Cut a release](../CONTRIBUTING.md#cut-a-release) for the annotated-tag
 procedure and version pinning guidance.
 
+## Liveness and readiness
+
+They are different questions and they lead to opposite actions, so they are
+answered separately.
+
+**Liveness** is whether the process is alive. `GET /api/health/live` touches
+nothing external and stays 200 while PostgreSQL is unreachable. Restarting a
+console whose database is down fixes nothing and a restart loop makes the
+outage worse, so nothing should restart on the database.
+
+**Readiness** is whether this instance can serve. `GET /api/health/ready` is
+503 while the database is unreachable or a migration is pending. Sign-in and
+every page behind it need the database, so an instance that cannot reach it is
+one to take out of rotation, not one to send visitors to. `GET /api/health`
+returns the same readiness answer under the name the contract has always used,
+so an existing manifest keeps working and starts failing readiness correctly.
+
+```yaml
+        livenessProbe:
+          httpGet: { path: /api/health/live, port: 8000 }
+          timeoutSeconds: 5
+        readinessProbe:
+          httpGet: { path: /api/health/ready, port: 8000 }
+          timeoutSeconds: 5
+```
+
+`timeoutSeconds: 5` because readiness still answers while the database is
+unreachable, in about three seconds, rather than stalling on the ten-second
+connection pool timeout. Liveness answers in about a second in that state: it
+reads nothing itself, but the forwarded-headers middleware ahead of it looks up
+the trusted-proxies setting on every request and falls back to trusting nobody
+when it cannot.
+
+Both are public: they need no session, and they are the only endpoints that
+stay useful during a database outage.
+
 ## The database
 
 ### Schema migrations
@@ -82,26 +119,37 @@ else is registered and no shipped file is ever edited.
 No supported path carries the database password in an environment variable.
 `VCF_DOCTOR_DATABASE_URL` must not contain one; a URL that does is refused at
 startup with a message naming the file to use instead. The password is read
-from `VCF_DOCTOR_DB_PASSWORD_FILE`, a path that is a compose bind mount in one
-shape and a mounted Kubernetes Secret in the other, so the application does the
-same thing in both. No file means no password is sent, which is what a
+from `VCF_DOCTOR_DB_PASSWORD_FILE`, a path that is a mounted file in one shape
+and a mounted Kubernetes Secret in the other, so the application does the same
+thing in both. No file means no password is sent, which is what a
 trust-authenticated local server wants.
+
+Give the file to the console's uid and nobody else. `defaultMode: 0440` with
+`fsGroup: 10001` leaves it owned by root with group `10001`, readable by the
+console and by no other process in the pod. The PostgreSQL side gets its own
+copy, owned by its own uid; one shared file would have to be world readable,
+because the two run as different users.
 
 ```yaml
 # Kubernetes: the Secret arrives at the same path compose mounts.
-        env:
-          - name: VCF_DOCTOR_DATABASE_URL
-            value: postgresql://vcf_doctor@vcf-doctor-db:5432/vcf_doctor
-          - name: VCF_DOCTOR_DB_PASSWORD_FILE
-            value: /run/secrets/vcf-doctor-db-password
-        volumeMounts:
-          - name: db-password
-            mountPath: /run/secrets
-            readOnly: true
+      securityContext:
+        fsGroup: 10001
+      containers:
+        - name: vcf-doctor
+          env:
+            - name: VCF_DOCTOR_DATABASE_URL
+              value: postgresql://vcf_doctor@vcf-doctor-db:5432/vcf_doctor
+            - name: VCF_DOCTOR_DB_PASSWORD_FILE
+              value: /run/secrets/vcf-doctor-db-password
+          volumeMounts:
+            - name: db-password
+              mountPath: /run/secrets
+              readOnly: true
       volumes:
         - name: db-password
           secret:
             secretName: vcf-doctor-db
+            defaultMode: 0440
             items: [{ key: password, path: vcf-doctor-db-password }]
 ```
 
@@ -111,7 +159,8 @@ trust-authenticated local server wants.
 brings up `postgres:16` on a named volume, generates a database password into a
 second volume, applies the migrations in the one-shot `migrate` service, and
 starts the console with two uvicorn workers. There is no
-external dependency to install first.
+external dependency to install first. The password is written twice, once for
+each reader, each copy mode `0400` and owned by the uid that reads it.
 
 ### Kubernetes, single pod
 
@@ -337,13 +386,12 @@ a deployment artifact.
 - **Lost database**: history is gone; connections and settings must be
   re-entered. Nothing in vCenter is affected. Back up PostgreSQL the way you
   back up any other database; the container volume no longer holds history.
-- **Database unreachable**: the console still starts, and `GET /api/health`
-  answers within two seconds with `"database": false` rather than timing out.
-  That is deliberate: a PostgreSQL failover should not turn into a
-  crash-looping pod. Everything that needs the database does fail while it is
-  down, sign-in included, so the Settings database panel reports the outage
-  only once the page is reachable again, which covers the common partial case
-  of a database that is up but not migrated.
+- **Database unreachable**: liveness stays green so nothing restarts the
+  container, and readiness goes red so nothing routes traffic to it. Both
+  answer in about three seconds rather than stalling. Everything that needs the
+  database does fail while it is down, sign-in included; the Settings database
+  panel reports the outage once a page is reachable, which covers the common
+  partial case of a database that is up but not migrated.
 - **Lost encryption key, database intact**: history is intact; re-enter each
   vCenter password (flagged "Needs password" on Connections) and the
   Anthropic key. See [Security](SECURITY.md).

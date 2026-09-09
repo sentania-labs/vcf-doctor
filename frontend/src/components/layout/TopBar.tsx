@@ -18,7 +18,7 @@ export function TopBar() {
   const relevant = selectedId === ALL ? [...latestByConn.values()] : [latestByConn.get(selectedId)].filter(Boolean) as typeof scans
   let dot: 'ok' | 'error' | 'running' | 'none' = 'none'
   let statusLabel = 'Not scanned yet'
-  if (backend === 'down') { dot = 'error'; statusLabel = 'Backend down' }
+  if (backend === 'down') { dot = 'error'; statusLabel = 'Console unavailable' }
   else if (relevant.some(s => s.status === 'running')) { dot = 'running'; statusLabel = 'Scanning' }
   else if (relevant.length && relevant.every(s => s.status === 'ok')) { dot = 'ok'; statusLabel = 'Connected' }
   else if (relevant.some(s => s.status === 'error')) { dot = 'error'; statusLabel = selectedId === ALL ? 'A connection is failing' : 'Last scan failed' }

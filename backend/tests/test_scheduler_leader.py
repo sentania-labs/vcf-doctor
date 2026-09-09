@@ -55,6 +55,22 @@ def test_running_is_true_from_a_worker_that_is_not_the_leader():
     assert scheduler.running() is False
 
 
+def test_running_is_false_when_the_database_cannot_be_asked(monkeypatch):
+    """A leader whose database is unreachable is not scheduling anything, and
+    must not report that it is next to a readiness answer saying so."""
+    from app.config import settings as cfg
+
+    assert db.acquire_scheduler_lock() is True
+    assert scheduler.running() is True
+    monkeypatch.setattr(cfg, "database_url", "postgresql://nobody@127.0.0.1:1/nothing")
+    monkeypatch.setattr(cfg, "db_password_file", "")
+    monkeypatch.setattr(cfg, "db_pool_timeout", 0.5)
+    monkeypatch.setattr(db, "PROBE_TIMEOUT", 0.5)
+    db.close()
+    assert scheduler.running() is False
+    db.close()
+
+
 def test_leadership_is_retaken_after_the_lock_session_ends(monkeypatch):
     """A restarted or failed-over database ends the lock session. The scheduler
     has to notice and take the lock again, or scheduled scans stop silently."""

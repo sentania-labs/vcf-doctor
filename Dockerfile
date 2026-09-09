@@ -35,9 +35,12 @@ ENV VCF_DOCTOR_STATIC_DIR=/app/static \
 USER app
 VOLUME ["/data"]
 EXPOSE 8000
-# /api/health needs no session. Uses the stdlib, so no curl in the image.
+# Liveness, not readiness: an unhealthy container is a container something will
+# restart, and restarting this one does not bring a database back. Readiness
+# lives at /api/health/ready and is what a load balancer or a Kubernetes
+# readinessProbe should ask. Needs no session; uses the stdlib, so no curl.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD python3 -c "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/api/health')"
+    CMD python3 -c "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/api/health/live')"
 # Forwarded headers are handled by the app (trusted proxies setting), not
 # by uvicorn, which would believe X-Forwarded-For from anyone.
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-proxy-headers"]

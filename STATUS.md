@@ -77,7 +77,10 @@ version of this file is in git history.
 
 ## Broken
 
-- Nothing known. Open follow-ups are tracked in GitHub Issues.
+- Nothing known. Open follow-ups are tracked in GitHub Issues. The login
+  lockout counters are per worker process rather than per deployment now that
+  more than one replica is supported (#74); see
+  [Access](docs/SECURITY.md#access).
 
 ## Stretch
 

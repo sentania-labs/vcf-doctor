@@ -376,9 +376,9 @@ def shutdown() -> None:
 def running() -> bool:
     """Whether scheduled scans are running anywhere in this deployment.
 
-    Asked of a worker that is not the leader, the answer still has to be yes,
-    so it comes from the lock rather than from this process.
+    Read from the lock rather than from this process, for two reasons. A worker
+    that is not the leader still has to answer yes. And a leader whose database
+    is unreachable is not scheduling anything, so it must not claim to be
+    while the readiness answer beside it says the database is down.
     """
-    if _leader:
-        return True
     return db.scheduler_lock_held()

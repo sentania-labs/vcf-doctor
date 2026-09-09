@@ -150,17 +150,56 @@ async def key_unavailable(request: Request, exc: vault.KeyUnavailable):
     return JSONResponse({"detail": str(exc)}, status_code=503)
 
 
-@app.get("/api/health")
-def health() -> dict:
-    """Public. `database` is what the Settings database panel reads, and it is
-    the one field that stays answerable while PostgreSQL is unreachable."""
-    database, _ = db.healthy()
-    return {
-        "status": "ok",
+# Liveness and readiness are different questions and they are answered
+# separately, because they lead to opposite actions.
+#
+# Liveness: is this process alive. It touches nothing external, so it stays
+# green while PostgreSQL is unreachable. Restarting a console whose database is
+# down fixes nothing and a restart loop makes the outage worse.
+#
+# Readiness: can this instance actually serve. It goes red the moment the
+# database is unreachable or a migration is pending, so an orchestrator takes
+# the pod out of rotation instead of routing people to pages that cannot work.
+# Sign-in and everything behind it need the database, so "reachable API, dead
+# database" is not a state to send traffic to.
+
+
+def _readiness() -> tuple[dict, int]:
+    database, detail = db.healthy()
+    body = {
+        "status": "ok" if database else "degraded",
         "version": app.version,
         "scheduler": scheduler.running(),
         "database": database,
     }
+    if detail:
+        body["detail"] = detail
+    return body, 200 if database else 503
+
+
+@app.get("/api/health/live")
+def health_live() -> dict:
+    """Public liveness. 200 while the process is answering, whatever the
+    database is doing. This is what the container HEALTHCHECK and a Kubernetes
+    livenessProbe should use."""
+    return {"status": "ok", "version": app.version}
+
+
+@app.get("/api/health/ready")
+def health_ready() -> JSONResponse:
+    """Public readiness. 503 while the database is unreachable or a migration
+    is pending. This is what a Kubernetes readinessProbe should use."""
+    body, status = _readiness()
+    return JSONResponse(body, status_code=status)
+
+
+@app.get("/api/health")
+def health() -> JSONResponse:
+    """Public. The readiness answer under the name the deployment contract has
+    always used, so an existing manifest keeps working. `database` is what the
+    Settings database panel reads."""
+    body, status = _readiness()
+    return JSONResponse(body, status_code=status)
 
 
 @app.get("/api/version")

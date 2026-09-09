@@ -78,8 +78,8 @@ export function Shell() {
         {backend === 'down' ? (
           <div className="bg-critical-bg border-b border-critical/40 px-6 py-2.5 text-sm flex items-center gap-2.5 text-fg">
             <span className="h-2 w-2 rounded-full bg-critical anim-pulse" />
-            <span className="font-medium">Backend unreachable.</span>
-            <span className="text-muted">Pages show the last data they loaded. Retrying every 5 seconds.</span>
+            <span className="font-medium">This console cannot serve.</span>
+            <span className="text-muted">Its backend or its database is unreachable. Pages show the last data they loaded. Retrying every 5 seconds.</span>
             {backendError ? <span className="ml-auto font-mono text-xs text-muted">{backendError}</span> : null}
           </div>
         ) : null}

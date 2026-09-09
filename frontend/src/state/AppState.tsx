@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { ConnectionPublic, ScanRun } from '@/types'
-import { getConnections, getHealth, getScans, triggerScan } from '@/api'
+import { getConnections, getReadiness, getScans, triggerScan } from '@/api'
 import { BACKEND_UNREACHABLE_EVENT } from '@/api/client'
 import { useInterval } from '@/hooks/useAsync'
 
@@ -52,9 +52,12 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const connectionId = selectedId === ALL ? null : selectedId
   const selected = useMemo(() => connections.find(c => c.id === selectedId) ?? null, [connections, selectedId])
 
+  // Readiness, not liveness: a backend whose database is unreachable answers
+  // requests but cannot serve any page, and showing a green badge next to one
+  // that does not work is worse than showing nothing.
   const checkBackend = useCallback(async () => {
     try {
-      await getHealth()
+      await getReadiness()
       setBackend('up'); setBackendError(null)
     } catch (e) {
       setBackend('down'); setBackendError(e instanceof Error ? e.message : String(e))

@@ -12,7 +12,11 @@ capped at a minute, reported back as `Retry-After` and counted down on the
 login page. The Settings password change re-checks the current password, so
 it shares that one counter and a wrong guess in one place pauses the other.
 A process-wide ceiling (30 failures a minute across every address)
-backstops guessing from many addresses. The client address is the TCP peer
+backstops guessing from many addresses. Both counters are in memory and so are
+per worker process: a deployment running N workers or N pods gives a guesser N
+times those allowances before the backoff bites. That is a consequence of
+running more than one replica (#59) and is tracked in #74; front the console
+with ingress rate limiting if it is exposed anywhere that matters. The client address is the TCP peer
 unless that peer is a trusted proxy (Settings, or
 `VCF_DOCTOR_TRUSTED_PROXIES`), in which case the rightmost untrusted
 `X-Forwarded-For` hop is used. Nothing is trusted by default, so behind an
@@ -45,8 +49,13 @@ The database password is never an environment variable on any supported path.
 environment variable is readable from a process listing, a container inspect
 and any crash dump that captures the environment. It is read from the file
 named by `VCF_DOCTOR_DB_PASSWORD_FILE`, which is a mounted Kubernetes Secret
-in the cluster and a bind-mounted file under docker compose, so the code path
-is the same in both. See
+in the cluster and a mounted file under docker compose, so the code path is
+the same in both.
+
+That file is readable by the console's uid and nothing else: mode `0400` owned
+by uid `10001` in compose, `defaultMode: 0440` with `fsGroup: 10001` in
+Kubernetes. PostgreSQL gets its own copy owned by its own uid rather than
+sharing one world-readable file. See
 [the database](DEPLOYMENT.md#the-password) for the manifest.
 
 The connection itself (host, database, user) is a deployment binding rather
