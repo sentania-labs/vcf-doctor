@@ -28,7 +28,7 @@ from app.models import (
     Snapshot,
     SnapshotSummary,
 )
-from app.models.change import ChangeRecord
+from app.models.change import Change, ChangeRecord
 from app.models.snapshot import RetentionPolicy
 from app.snapshots import store
 
@@ -189,6 +189,10 @@ def _logged_changes(connection_id: str, since: datetime, floor: str) -> list:
     )
 
 
+class _RecoveredChange(Change):
+    observed_at: datetime
+
+
 def _pre_log_changes(connection_id: str, log_since: datetime, since: datetime) -> list:
     """Diffs for the part of the feed window that predates the change log.
 
@@ -212,7 +216,10 @@ def _pre_log_changes(connection_id: str, log_since: datetime, since: datetime) -
         new_snap, old_snap = store.get_snapshot(newer.id), store.get_snapshot(older.id)
         if new_snap is None or old_snap is None:
             break
-        out.extend(scheduler.compute_changes(old_snap.resources, new_snap.resources))
+        out.extend(
+            _RecoveredChange(**change.model_dump(), observed_at=new_snap.created_at)
+            for change in scheduler.compute_changes(old_snap.resources, new_snap.resources)
+        )
     return out
 
 

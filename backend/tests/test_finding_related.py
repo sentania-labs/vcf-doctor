@@ -561,7 +561,8 @@ def test_bracketing_parent_change_survives_a_full_page_of_logged_object_changes(
     )
     vm = Resource(id="vm:child", type="vm", name="child", source="test", parent_id=host.id)
     finding = Finding(
-        id="test:parent", check_id="TEST", severity="warning", title="Parent failed", summary="Host disconnected",
+        id="test:parent", check_id="TEST", severity="warning",
+        title="Parent failed", summary="Host disconnected",
         resource_id=vm.id, resource_type="vm", resource_name=vm.name,
     )
     before = store.save_snapshot(cid, [host, vm], "before", scheduled=True)
@@ -586,3 +587,77 @@ def test_bracketing_parent_change_survives_a_full_page_of_logged_object_changes(
     assert body["changes"][0]["resource_id"] == host.id
     assert body["changes"][0]["summary"] == "connectionState connected -> disconnected"
     assert all(c["resource_id"] == vm.id for c in body["changes"][1:])
+
+
+def test_bracketing_disconnect_keeps_a_later_logged_disconnect(client):
+    cid = _connection(client, 0)
+    host = Resource(
+        id="host:parent", type="host", name="parent", source="test",
+        properties={"connectionState": "connected"},
+    )
+    vm = Resource(id="vm:child", type="vm", name="child", source="test", parent_id=host.id)
+    finding = Finding(
+        id="test:stale", check_id="VM_SNAPSHOT_STALE", severity="warning",
+        title="Stale snapshot", summary="Snapshot remains stale", resource_id=vm.id,
+        resource_type="vm", resource_name=vm.name,
+    )
+    previous = store.save_snapshot(cid, [host, vm], "before", scheduled=True)
+    store.save_findings(previous.id, [])
+    for i, state in enumerate(("disconnected", "connected", "disconnected")):
+        host = host.model_copy(deep=True)
+        host.properties["connectionState"] = state
+        snap = store.save_snapshot(cid, [host, vm], state, scheduled=True)
+        store.save_findings(snap.id, [finding])
+        if i > 0:
+            store.save_changes(
+                cid, previous.id, snap.id, snap.created_at,
+                scheduler.compute_changes(previous.resources, snap.resources),
+            )
+        previous = snap
+
+    response = client.get(f"/api/findings/{finding.id}/related?connection_id={cid}")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["window"]["basis"] == "pre_log_bracketing_pair"
+    assert [c["summary"] for c in body["changes"]] == [
+        "connectionState connected -> disconnected",
+        "connectionState disconnected -> connected",
+        "connectionState connected -> disconnected",
+    ]
+
+
+def test_newer_recovered_change_survives_overview_cap_across_connections(client, monkeypatch):
+    start = datetime(2026, 9, 9, 7, tzinfo=UTC)
+    a, b = _connection(client, 0), _connection(client, 0)
+
+    def snapshot(cid, hour, count, state):
+        monkeypatch.setattr(store, "now", lambda: start + timedelta(hours=hour))
+        resources = [
+            Resource(
+                id=f"host:{cid}:{i}", type="host", name=f"host-{i}", source=cid,
+                properties={"connectionState": state},
+            )
+            for i in range(count)
+        ]
+        snap = store.save_snapshot(cid, resources, state, scheduled=True)
+        store.save_findings(snap.id, [])
+        return snap
+
+    snapshot(a, 0, 1, "connected")
+    before_b = snapshot(b, 0, 5, "connected")
+    after_b = snapshot(b, 1, 5, "disconnected")
+    store.save_changes(
+        b, before_b.id, after_b.id, after_b.created_at,
+        scheduler.compute_changes(before_b.resources, after_b.resources),
+    )
+    recovered = snapshot(a, 2, 1, "disconnected")
+    latest = snapshot(a, 3, 1, "disconnected")
+    store.save_changes(a, recovered.id, latest.id, latest.created_at, [])
+
+    response = client.get("/api/overview?min_significance=high")
+    assert response.status_code == 200
+    feed = response.json()["recent_changes"]
+    assert len(feed) == 5
+    assert feed[0]["resource_id"] == recovered.resources[0].id
+    assert datetime.fromisoformat(feed[0]["observed_at"]) == recovered.created_at
+    assert all(c["resource_id"].startswith(f"host:{b}:") for c in feed[1:])

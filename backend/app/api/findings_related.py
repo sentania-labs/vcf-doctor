@@ -262,9 +262,9 @@ def related_changes(connection_id: str, finding: Finding, resources: list[Resour
             else:
                 basis = "pre_log_differing_pair"
                 diff, pair_since, pair_until = _latest_differing_pair(connection_id)
-            diffed = {(c.resource_id, c.summary) for c in diff}
-            logged = [r for r in rows if (r.resource_id, r.summary) not in diffed]
-            changes = (_select(diff, near) + _select(logged, near))[:MAX_CHANGES]
+                diffed = {(c.resource_id, c.summary) for c in diff}
+                rows = [r for r in rows if (r.resource_id, r.summary) not in diffed]
+            changes = (_select(diff, near) + _select(rows, near))[:MAX_CHANGES]
             window = RelatedWindow(
                 basis=basis,
                 since=pair_since,
