@@ -10,7 +10,7 @@ import { Badge, Button, Card, CardHeader, Field, Input, Skeleton } from '@/compo
 // Settings > Encryption: what protects stored secrets and whether anything needs re-entering.
 export default function EncryptionCard({ reloadKey }: { reloadKey?: unknown }) {
   const st = useAsync(() => getEncryptionStatus(), [reloadKey])
-  const { connections } = useAppState()
+  const { connections, reloadConnections } = useAppState()
   const d = st.data
   const items = (d?.unreadable_connections ?? []).map(id => ({ id, name: connections.find(c => c.id === id)?.name ?? id }))
   const problems = items.length + (d?.assistant_key_unreadable ? 1 : 0)
@@ -55,7 +55,7 @@ export default function EncryptionCard({ reloadKey }: { reloadKey?: unknown }) {
                 </ul>
               </div>
             ) : null}
-            <RotateForm status={d} onRotated={st.reload} />
+            <RotateForm status={d} onRotated={() => { st.reload(); void reloadConnections() }} />
           </>
         )}
       </div>

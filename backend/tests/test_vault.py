@@ -552,6 +552,30 @@ def test_rekey_with_nothing_to_open_leaves_the_login_backoff_alone(monkeypatch):
         assert auth.login_blocked("testclient") > 0
 
 
+def test_rekey_without_a_usable_key_leaves_the_login_backoff_alone():
+    """A corrupt key file makes every secret unreadable, so the nothing-to-do
+    gate does not apply, yet the pasted key was never checked: 503, and the
+    caller's earlier failures are neither forgiven nor added to."""
+    from app import auth
+    from app.main import app
+
+    conn = _conn(password="first")
+    vault.reset_for_tests()
+    vault.key_file_path().write_text("not a key\n")
+    with TestClient(app) as client:
+        for _ in range(auth._BACKOFF_AFTER - 1):
+            auth.record_login("testclient", False)
+        assert auth.tracked_addresses() == 1 and auth.login_blocked("testclient") == 0
+        r = client.post(
+            "/api/settings/encryption/rekey", json={"previous_key": Fernet.generate_key().decode()}
+        )
+        assert r.status_code == 503 and "key file" in r.json()["detail"]
+        assert store.get_connection(conn.id).credentials_unreadable is True
+        assert auth.tracked_addresses() == 1 and auth.login_blocked("testclient") == 0
+        auth.record_login("testclient", False)
+        assert auth.login_blocked("testclient") > 0
+
+
 def test_rekey_moves_what_it_can_and_names_what_it_could_not(monkeypatch):
     """Two secrets under two different old keys: supplying one moves that one,
     reports the other, and does not count as a wrong-key attempt."""

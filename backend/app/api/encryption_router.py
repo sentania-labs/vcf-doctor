@@ -113,17 +113,17 @@ def rekey(body: RekeyBody, request: Request):
             return RekeyResult(
                 ok=True, message=nothing_to_do, rewritten=0, unreadable=0, status=_status()
             )
+        # Without a usable current key there is nothing to move secrets to, so
+        # the pasted value is not a password check and the limiter stays as is.
+        problem = vault.key_error()
+        if problem:
+            raise vault.KeyUnavailable(problem)
         previous, source = pasted, "the Settings page"
         ip = proxies.client_ip(request)
         wait, stamp = auth.begin_attempt(ip)
         if wait:
             return auth.too_many_response(wait)
-    try:
-        outcome = vault.rekey(previous, source)
-    except vault.KeyUnavailable:
-        if ip:
-            auth.finish_attempt(ip, stamp, True)  # not a wrong-key attempt
-        raise
+    outcome = vault.rekey(previous, source)
     # Only a key that opened at least one secret was the right key; anything
     # else counts against the limiter like a wrong password.
     if ip:
