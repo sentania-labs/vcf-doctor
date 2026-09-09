@@ -3,14 +3,10 @@
 #
 # Gates, in order: checks (lint, tests, frontend build) -> scan (dependency
 # audit, secret scan, repo misconfig/lockfile scan) -> image (build once, image
-# scan, smoke test). Only a main-branch push that passed all of them publishes,
-# and what it publishes is the exact image the `image` job scanned and smoke
-# tested: the build is exported once as an OCI tarball, handed over as a run
-# artifact, and pushed byte for byte, so the published digest is the tested
-# digest (the publish job checks this and fails otherwise). Main publishes only
-# a sha-<short> tag. A vMAJOR.MINOR.PATCH tag on main also publishes that version
-# and latest, then creates the GitHub release. The published digest carries a
-# provenance attestation, an SBOM and a keyless cosign signature.
+# scan, smoke test). Publication and release behavior is documented in
+# docs/DEPLOYMENT.md. The OCI tarball preserves the scanned and smoke-tested
+# digest across jobs. Completed-release retries reuse the recorded digest
+# instead, preserving the original signed artifact even after a rebuild.
 # Every scanner is invoked through `make`, so a developer runs exactly what CI
 # runs.
 name: ci
@@ -254,7 +250,8 @@ jobs:
 
   # Main and release-tag pushes only. Split out of `image` so the OIDC token and
   # write scopes below are never granted to a PR-triggered run. Nothing is
-  # built here: the tarball the `image` job tested is pushed as is.
+  # built here: new publications use the tested tarball; completed releases
+  # retain their recorded artifact.
   publish:
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     needs: image
@@ -309,8 +306,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: bash .github/scripts/publish-tested-image.sh
 
-      # Gate 2 of 2: what the registry now serves under every tag is the tested
-      # digest. A mismatch fails the job before anything is signed or released.
+      # Gate 2 of 2: the registry must serve the tested digest, or the recorded
+      # digest on a completed-release retry, before publication can proceed.
       - name: Verify published digest equals tested digest
         env:
           TESTED: ${{ steps.published.outputs.digest }}
@@ -345,8 +342,8 @@ jobs:
           DIGEST: ${{ steps.published.outputs.digest }}
         run: cosign sign --yes "${IMAGE}@${DIGEST}"
 
-      # The pushed tag is the release trigger. Re-runs leave an existing
-      # release alone after proving and signing the same tested digest.
+      # Completed-release retries skip signing and creation after verifying
+      # the original artifact against its release record.
       - name: Create GitHub release from pushed tag
         if: startsWith(github.ref, 'refs/tags/') && steps.published.outputs.reused != 'true'
         env:

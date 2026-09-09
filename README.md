@@ -85,18 +85,8 @@ Bugs and ideas go in [GitHub issues](https://github.com/sentania-labs/vcf-doctor
 
 ## Releasing
 
-Releases are tag-driven. From a merged `main` commit, create and push an
-annotated semantic version tag:
-
-```bash
-git tag -a vX.Y.Z -m vX.Y.Z
-git push origin vX.Y.Z
-```
-
-The tag push validates, scans, builds, smoke-tests, signs and publishes that
-version. Ordinary merges to `main` publish only a `sha-<short>` image tag and
-do not move `latest` or create a GitHub release. Deployment repositories should
-pin an exact release tag or digest.
+See [Cut a release](CONTRIBUTING.md#cut-a-release) for the release procedure
+and the [deployment contract](docs/DEPLOYMENT.md#contract) for image tag behavior.
 
 ## License
 

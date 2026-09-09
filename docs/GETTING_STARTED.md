@@ -30,9 +30,8 @@ the `/data` volume. Keep that volume: it holds every snapshot, the change log,
 your connections and your settings. Run exactly one instance per volume; two
 instances would scan twice and fight over the database.
 
-Tags: `latest` is the newest tag-driven release, `vX.Y.Z` identifies a release,
-and `sha-<7>` pins a specific commit built from `main` or a release tag. Pin a
-release or a SHA in anything that is not a laptop.
+See the [deployment contract](DEPLOYMENT.md#contract) for image tag meanings.
+Pin a release or digest in anything that is not a laptop.
 
 ## 2. Set the operator password
 

@@ -39,18 +39,16 @@ through the API. That hook is for tests and local development only.
    image build and scan, and the container smoke test all gate the merge.
    Local `make lint`, `make test` and `make scan` predict them exactly
    because CI calls the same targets.
-5. **Tags release.** A green main push publishes only the tested
-   `sha-<short>` image. From a merged main commit, an annotated `vX.Y.Z` tag
-   push reruns every gate, publishes and signs the version, and creates the
-   GitHub release. A serialized promotion makes `latest` follow the highest
-   published version. Treat main as shippable.
+5. **Tags release.** Follow [Cut a release](#cut-a-release) after merging.
+   See the [deployment contract](docs/DEPLOYMENT.md#contract) for publication
+   and retry behavior. Treat main as shippable.
 
 Write the PR body in operational terms: what changes for someone running
 it, what the blast radius is, how to recover if it is wrong.
 
 ## Cut a release
 
-From a merged `main` commit:
+From a merged `main` commit, create and push an annotated `vX.Y.Z` tag:
 
 ```bash
 git tag -a vX.Y.Z -m vX.Y.Z

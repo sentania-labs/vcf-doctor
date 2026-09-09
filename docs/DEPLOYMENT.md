@@ -25,11 +25,11 @@ move `latest`, mint a version tag or create a GitHub release.
 
 A pushed `vX.Y.Z` tag is the release trigger. CI refuses a lightweight or
 malformed tag, a tag that belongs to another commit, or a tagged commit that
-is not on `main`. The
+is not reachable from `main`. The
 same validation path builds the image with the tag as its running version. Once
 the tested digest is proven unchanged, CI publishes `vX.Y.Z`, verifies its digest,
 signs it and creates the GitHub release. Only main builds own `sha-<7>` tags.
-A separate serialized promotion selects the highest completed GitHub release,
+A separate serialized promotion selects the highest version among completed GitHub releases,
 copies the verified and signed digest recorded in its release notes to `latest`,
 and verifies that alias while holding the promotion lock. Registry tags without
 a completed release are ineligible, as are draft and prerelease records. Older release retries cannot roll it backwards;
@@ -44,16 +44,8 @@ checkout SHA, and an unknown build time because there was no image build.
 
 ## Releasing
 
-After the release commit is merged to `main`, create and push an annotated tag:
-
-```bash
-git tag -a vX.Y.Z -m vX.Y.Z
-git push origin vX.Y.Z
-```
-
-The tag push performs the release. Do not push a release tag from an unmerged
-branch. This product repository keeps quickstart defaults on `latest`; stable
-deployments such as lab-deployment pin an exact release tag or digest.
+Follow [Cut a release](../CONTRIBUTING.md#cut-a-release) for the annotated-tag
+procedure and version pinning guidance.
 
 ## Environment variables
 
