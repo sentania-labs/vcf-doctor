@@ -5,10 +5,10 @@ transaction, each recorded in `schema_migrations`. Adding the next one means
 dropping a file named `0002_<what_it_does>.sql` beside `0001_initial.sql`; there
 is nothing else to register and no file is ever edited after it has shipped.
 
-Two callers run this: the one-shot `migrate` service in docker-compose (or the
-equivalent Kubernetes Job) and the app itself at startup. Both take the same
-advisory lock, so several workers or pods starting together apply the pending
-files once, in order, and the losers wait rather than fail.
+Run this as the one-shot `migrate` service in docker-compose or the equivalent
+Kubernetes Job or init container before the console becomes ready. The advisory
+lock makes concurrent migration runners apply the pending files once, in order,
+and the losers wait rather than race.
 
 Usage:
     python -m app.migrate upgrade   # apply everything pending

@@ -69,8 +69,7 @@ dev-db:
 dev-db-stop:
 	docker stop $(DEV_PG_NAME) >/dev/null 2>&1 || true
 
-# Apply pending schema migrations to the dev database. The app does this itself
-# at startup; this target is for looking at the schema without starting it.
+# Apply pending schema migrations to the dev database before starting the app.
 migrate: dev-db
 	cd backend && VCF_DOCTOR_DATABASE_URL="$(DEV_DATABASE_URL)" uv run python -m app.migrate upgrade
 
@@ -78,12 +77,12 @@ build-frontend:
 	cd frontend && npm run build
 
 # Backend serving the built frontend, like the container does.
-run: build-frontend dev-db
+run: build-frontend migrate
 	cd backend && VCF_DOCTOR_STATIC_DIR=../frontend/dist VCF_DOCTOR_DATABASE_URL="$(DEV_DATABASE_URL)" \
 		VCF_DOCTOR_DATA_DIR=../data \
 		uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-proxy-headers
 
-dev-backend: dev-db
+dev-backend: migrate
 	cd backend && VCF_DOCTOR_DATABASE_URL="$(DEV_DATABASE_URL)" VCF_DOCTOR_DATA_DIR=../data \
 		uv run uvicorn app.main:app --reload --port 8000 --no-proxy-headers
 

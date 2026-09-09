@@ -11,13 +11,17 @@ import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
-from app import db, vault
+from app import db, scheduler, vault
 from app.assistant import settings as assistant_settings
 from app.collectors.registry import CredentialsUnreadable, get_collector
 from app.models import ConnectionCreate
 from app.snapshots import store
 
 SECRET = "sk-ant-test-not-a-real-key-0000"
+
+
+def _deferred_startup() -> None:
+    scheduler.startup_maintenance()
 
 
 @pytest.fixture(autouse=True)
@@ -183,13 +187,10 @@ def test_api_surfaces_status_and_never_the_key(monkeypatch):
 
 
 def test_startup_migrates_plaintext(tmp_path):
-    from app.main import app
-
     conn = _conn()
     with db.transaction() as c:
         c.execute("UPDATE connections SET password = %s WHERE id = %s", ("legacy", conn.id))
-    with TestClient(app):
-        pass
+    _deferred_startup()
     assert _raw_password(conn.id).startswith(vault.PREFIX)
     assert store.get_connection(conn.id).password == "legacy"
 
@@ -198,8 +199,7 @@ def test_env_fallback_is_reported_not_flagged_as_broken(monkeypatch):
     from app.main import app
 
     assistant_settings.update_settings({"api_key": SECRET})
-    with TestClient(app):
-        pass  # first boot writes the migration marker, as every deployment does
+    _deferred_startup()
     _rotate_key(monkeypatch)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-env-0000")
     with TestClient(app) as client:
@@ -369,11 +369,11 @@ def test_startup_rotates_from_the_previous_env_key(monkeypatch):
     _set_key(monkeypatch, old)
     conn = _conn(password="first")
     assistant_settings.update_settings({"api_key": SECRET})
-    with TestClient(app):
-        pass  # first boot writes the plaintext migration marker
+    _deferred_startup()
 
     _set_key(monkeypatch, Fernet.generate_key().decode())
     monkeypatch.setenv(vault.ENV_PREVIOUS_KEY, old)
+    _deferred_startup()
     with TestClient(app) as client:
         assert store.get_connection(conn.id).password == "first"
         assert assistant_settings.resolve_api_key() == SECRET
@@ -394,8 +394,7 @@ def test_key_file_rotation_is_offered_but_never_automatic(monkeypatch):
     from app.main import app
 
     conn = _conn(password="first")
-    with TestClient(app):
-        pass
+    _deferred_startup()
     assert vault.key_source() == "file"
     file_key = vault.key_file_path().read_text().strip()
 
@@ -428,8 +427,7 @@ def test_unreadable_leftover_key_file_does_not_advise_deleting_it(monkeypatch):
     from app.main import app
 
     conn = _conn(password="first")
-    with TestClient(app):
-        pass
+    _deferred_startup()
 
     _set_key(monkeypatch, Fernet.generate_key().decode())
     vault.key_file_path().write_text("not a key\n")
@@ -459,11 +457,11 @@ def test_startup_reports_a_previous_key_that_opens_nothing(monkeypatch):
     old = Fernet.generate_key().decode()
     _set_key(monkeypatch, old)
     conn = _conn(password="first")
-    with TestClient(app):
-        pass
+    _deferred_startup()
 
     _set_key(monkeypatch, Fernet.generate_key().decode())
     monkeypatch.setenv(vault.ENV_PREVIOUS_KEY, Fernet.generate_key().decode())
+    _deferred_startup()
     with TestClient(app) as client:
         body = client.get("/api/settings/encryption").json()
         assert body["unreadable_connections"] == [conn.id]
@@ -476,6 +474,7 @@ def test_startup_without_a_previous_key_records_nothing(monkeypatch):
 
     _set_key(monkeypatch, Fernet.generate_key().decode())
     _conn(password="first")
+    _deferred_startup()
     with TestClient(app) as client:
         assert client.get("/api/settings/encryption").json()["last_rekey"] is None
 
@@ -492,13 +491,13 @@ def test_startup_records_an_outcome_even_when_nothing_needed_moving(monkeypatch)
     key = Fernet.generate_key().decode()
     _set_key(monkeypatch, key)
     _conn(password="first")
-    with TestClient(app):
-        pass
+    _deferred_startup()
     assert vault.last_rekey() is None
 
     before = datetime.now(UTC).isoformat(timespec="seconds")
     monkeypatch.setenv(vault.ENV_PREVIOUS_KEY, key)
     vault.reset_for_tests()
+    _deferred_startup()
     with TestClient(app) as client:
         last = client.get("/api/settings/encryption").json()["last_rekey"]
         assert last is not None
@@ -517,8 +516,7 @@ def test_partial_rotation_reports_both_what_moved_and_what_was_left(monkeypatch)
     first = Fernet.generate_key().decode()
     _set_key(monkeypatch, first)
     stranded = _conn(password="under-first")
-    with TestClient(app):
-        pass  # first boot writes the plaintext migration marker
+    _deferred_startup()
     second = Fernet.generate_key().decode()
     _set_key(monkeypatch, second)
     moved = _conn(password="under-second")
@@ -526,6 +524,7 @@ def test_partial_rotation_reports_both_what_moved_and_what_was_left(monkeypatch)
     _set_key(monkeypatch, Fernet.generate_key().decode())
     monkeypatch.setenv(vault.ENV_PREVIOUS_KEY, second)
     vault.reset_for_tests()
+    _deferred_startup()
     with TestClient(app) as client:
         last = client.get("/api/settings/encryption").json()["last_rekey"]
         assert (last["rewritten"], last["unreadable"]) == (1, 1)
@@ -547,8 +546,7 @@ def test_rekey_endpoint_never_accepts_key_material(monkeypatch):
     old = Fernet.generate_key().decode()
     _set_key(monkeypatch, old)
     conn = _conn(password="first")
-    with TestClient(app):
-        pass
+    _deferred_startup()
     assert not vault.key_file_path().exists()  # the env key was set from the start
 
     _set_key(monkeypatch, Fernet.generate_key().decode())
@@ -568,8 +566,7 @@ def test_rekey_moves_what_it_can_and_names_what_it_could_not(monkeypatch):
     first = Fernet.generate_key().decode()
     _set_key(monkeypatch, first)
     a = _conn(password="under-first")
-    with TestClient(app):
-        pass  # first boot writes the plaintext migration marker
+    _deferred_startup()
     second = Fernet.generate_key().decode()
     _set_key(monkeypatch, second)
     b = _conn(password="under-second")

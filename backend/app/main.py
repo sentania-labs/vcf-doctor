@@ -7,8 +7,9 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 
-from app import auth, db, migrate, proxies, scheduler, vault
+from app import auth, db, proxies, scheduler, vault
 from app._version import BUILD_INFO
 from app.api.auth_router import router as auth_router
 from app.api.encryption_router import router as encryption_router
@@ -19,46 +20,13 @@ from app.api.health_score_router import router as health_score_router
 from app.api.proxies_router import router as proxies_router
 from app.api.router import router as api_router
 from app.config import settings
-from app.snapshots import store
 
 log = logging.getLogger("vcf_doctor")
 
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
-    # An unreachable database must not crash-loop the container: a PostgreSQL
-    # failover is exactly when the console should still come up and say the
-    # database is unavailable. Everything below tolerates that and logs it.
     try:
-        applied = migrate.upgrade()
-        if applied:
-            log.info("applied %d schema migration(s): %s", len(applied), ", ".join(applied))
-    except Exception:
-        log.exception("startup: schema migration failed; the database is not usable yet")
-    try:
-        # Rotation first: a secret still under the previous key must move to
-        # the current one before migrate_plaintext can judge what is plaintext.
-        vault.rekey_at_startup()
-    except Exception:
-        log.exception("startup: encryption key rotation failed; stored secrets are unchanged")
-    try:
-        vault.migrate_plaintext()
-    except Exception:
-        log.exception("startup: secret migration failed; plaintext rows are still readable")
-    try:
-        for cid, start in store.backfill_log_since().items():
-            log.info("change log coverage for %s starts %s", cid, start.isoformat())
-        interrupted = store.reconcile_interrupted_runs()
-        if interrupted:
-            log.warning("marked %d interrupted scan run(s) as error", interrupted)
-    except Exception:
-        log.exception("startup: recovering change log coverage and scan runs failed")
-    try:
-        auth.bootstrap_from_env()
-    except Exception:
-        log.exception("startup: seeding the operator password failed")
-    try:
-        scheduler.startup_maintenance()
         scheduler.start()
     except Exception:
         log.exception("startup: the scheduler did not start; scheduled scans are not running")
@@ -81,7 +49,9 @@ app = FastAPI(
 
 @app.middleware("http")
 async def require_session(request: Request, call_next):
-    if auth.requires_auth(request.url.path) and not auth.is_authenticated(request):
+    if auth.requires_auth(request.url.path) and not await run_in_threadpool(
+        auth.is_authenticated, request
+    ):
         return JSONResponse({"detail": "authentication required"}, status_code=401)
     return await call_next(request)
 
@@ -178,13 +148,17 @@ def _readiness() -> tuple[dict, int]:
         # configured secret path, and readiness needs no session, so the public
         # body says whether this instance can serve and nothing more.
         log.warning("readiness: the database is not usable: %s", detail)
+    startup_complete, startup_detail = scheduler.startup_status()
+    if database and not startup_complete:
+        log.warning("readiness: deferred startup work is incomplete: %s", startup_detail)
+    ready = database and startup_complete
     body = {
-        "status": "ok" if database else "degraded",
+        "status": "ok" if ready else "degraded",
         "version": app.version,
         "scheduler": scheduler.running(),
         "database": database,
     }
-    return body, 200 if database else 503
+    return body, 200 if ready else 503
 
 
 @app.get("/api/health/live")
@@ -200,10 +174,10 @@ def health_live() -> dict:
 @app.get("/api/health/ready")
 def health_ready() -> JSONResponse:
     """Public readiness. 503 while the database is unreachable or a migration
-    is pending. This is what a Kubernetes readinessProbe should use."""
+    or deferred startup work is pending. This is what a Kubernetes
+    readinessProbe should use."""
     body, status = _readiness()
     return JSONResponse(body, status_code=status)
-
 
 
 @app.get("/api/version")

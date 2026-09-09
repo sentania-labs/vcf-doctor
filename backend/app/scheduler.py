@@ -16,7 +16,7 @@ replaced by another worker or pod within a minute.
 import logging
 import os
 import sys
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 from app import db
 from app.collectors.registry import get_collector
@@ -33,7 +33,9 @@ _leader = False
 # What the leader has jobs for: connection id -> (interval_minutes, enabled).
 # Compared against the stored schedules by reconcile_jobs().
 _scheduled_state: dict[str, tuple[int, bool]] = {}
-RECONCILE_MINUTES = 1
+_startup_complete = True
+_startup_detail: str | None = None
+RECONCILE_SECONDS = 60
 
 
 def retention_policy() -> RetentionPolicy:
@@ -68,27 +70,27 @@ def disable_stale_fixture_schedules() -> list[str]:
 
 
 def startup_maintenance() -> None:
-    """Catch up persisted state after downtime before scheduled scans resume.
+    """Catch up persisted state after downtime before this worker becomes ready.
 
     Runs on every worker. Everything it does is idempotent, so N workers
     starting together repeat work rather than corrupt any.
     """
+    from app import auth, vault
     from app.events import store as events_store
 
-    try:
-        events_store.seed_defaults()
-    except Exception:
-        log.exception("startup: seeding the default event policy failed")
-    try:
-        disable_stale_fixture_schedules()
-    except Exception:
-        log.exception("startup: disabling stale fixture schedules failed")
+    vault.rekey_at_startup()
+    vault.migrate_plaintext()
+    for cid, start in store.backfill_log_since().items():
+        log.info("change log coverage for %s starts %s", cid, start.isoformat())
+    interrupted = store.reconcile_interrupted_runs()
+    if interrupted:
+        log.warning("marked %d interrupted scan run(s) as error", interrupted)
+    auth.bootstrap_from_env()
+    events_store.seed_defaults()
+    disable_stale_fixture_schedules()
     policy = retention_policy()
     for conn in store.list_connections():
-        try:
-            store.apply_retention(conn.id, policy)
-        except Exception:
-            log.exception("startup: retention failed for %s", conn.id)
+        store.apply_retention(conn.id, policy)
 
 
 def compute_findings(resources: list[Resource], previous: list[Resource] | None) -> list[Finding]:
@@ -210,8 +212,10 @@ def run_all_scans(trigger: str = "manual") -> list[ScanRun]:
 
 
 def scheduler_enabled() -> bool:
-    if os.environ.get("VCF_DOCTOR_SCHEDULER", "on").lower() in ("0", "off", "false"):
-        return False
+    return os.environ.get("VCF_DOCTOR_SCHEDULER", "on").lower() not in ("0", "off", "false")
+
+
+def _background_jobs_enabled() -> bool:
     return "pytest" not in sys.modules
 
 
@@ -337,40 +341,64 @@ def _leadership_job() -> None:
         log.exception("scheduler leadership check failed; retrying next interval")
 
 
+def _maintenance_job() -> None:
+    global _startup_complete, _startup_detail
+    if not _startup_complete:
+        try:
+            startup_maintenance()
+        except Exception as exc:
+            _startup_detail = f"{type(exc).__name__}: {exc}"[:500]
+            log.exception("deferred startup work failed; retrying next interval")
+            return
+        _startup_complete = True
+        _startup_detail = None
+        log.info("deferred startup work completed")
+    if scheduler_enabled():
+        _leadership_job()
+
+
 def start() -> None:
     """Start the background scheduler. Every worker runs one; only the worker
     holding the advisory lock owns scan jobs."""
-    global _scheduler
-    if _scheduler is not None or not scheduler_enabled():
+    global _scheduler, _startup_complete, _startup_detail
+    if _scheduler is not None or not _background_jobs_enabled():
         return
     from apscheduler.schedulers.background import BackgroundScheduler
     from apscheduler.triggers.interval import IntervalTrigger
 
+    _startup_complete = False
+    _startup_detail = "not attempted yet"
     _scheduler = BackgroundScheduler(timezone="UTC")
-    _scheduler.start()
     _scheduler.add_job(
-        _leadership_job,
-        IntervalTrigger(minutes=RECONCILE_MINUTES),
-        id="scheduler-leadership",
+        _maintenance_job,
+        IntervalTrigger(seconds=RECONCILE_SECONDS),
+        id="scheduler-maintenance",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
+        next_run_time=datetime.now(UTC),
     )
-    _leadership_job()
-    if _leader:
-        log.info("scheduler started with %d connections", len(_scheduled_state))
+    _scheduler.start()
+    if scheduler_enabled():
+        log.info("background startup and scheduler reconciliation started")
     else:
-        log.info("another worker holds the scheduler lock; this one serves the API only")
+        log.info("background startup started; scheduled scans are disabled")
 
 
 def shutdown() -> None:
-    global _scheduler, _leader
+    global _scheduler, _leader, _startup_complete, _startup_detail
     if _scheduler is not None:
         _scheduler.shutdown(wait=False)
         _scheduler = None
     _scheduled_state.clear()
     _leader = False
+    _startup_complete = True
+    _startup_detail = None
     db.release_scheduler_lock()
+
+
+def startup_status() -> tuple[bool, str | None]:
+    return _startup_complete, _startup_detail
 
 
 def running() -> bool:

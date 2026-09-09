@@ -62,9 +62,8 @@ services:
       db-password:
         condition: service_completed_successfully
 
-  # One-shot: applies pending schema migrations and exits. The console applies
-  # them itself at startup too, but running them here keeps a migration failure
-  # its own visible step instead of a line in the application log.
+  # One-shot: applies pending schema migrations and exits before the console
+  # starts, keeping a migration failure in its own visible step.
   # Same image as the console, named so it is built once rather than twice.
   migrate:
     build: .

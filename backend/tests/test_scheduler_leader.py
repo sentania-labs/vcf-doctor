@@ -109,7 +109,7 @@ def test_a_schedule_saved_on_another_worker_is_picked_up(monkeypatch):
 
 class _FakeScheduler:
     """Enough of APScheduler for the leadership logic. The suite never starts a
-    real one (scheduler_enabled() is false under pytest)."""
+    real one (_background_jobs_enabled() is false under pytest)."""
 
     def __init__(self):
         self.jobs = {}

@@ -46,9 +46,9 @@ SCAN_LOCK = "scan"
 
 # Nothing in libpq bounds a TCP connect by default, so a host that stops
 # answering (node loss, a failed-over primary) blocks for the kernel's SYN
-# timeout, minutes rather than seconds. Startup takes the scheduler lock on a
-# direct connection, so an unbounded connect there means a worker that serves
-# nothing at all while it waits. A URL that sets its own connect_timeout wins.
+# timeout, minutes rather than seconds. The background scheduler takes its lock
+# on a direct connection, so that retry still needs a bound. A URL that sets its
+# own connect_timeout wins.
 CONNECT_TIMEOUT = 5
 
 _pool: ConnectionPool | None = None

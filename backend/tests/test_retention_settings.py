@@ -5,7 +5,7 @@ from datetime import UTC
 import pytest
 from fastapi.testclient import TestClient
 
-from app import db, timezones
+from app import db, scheduler, timezones
 from app.config import Settings, settings
 from app.main import app
 from app.snapshots import store
@@ -14,6 +14,7 @@ from app.snapshots import store
 @pytest.fixture()
 def client(tmp_path):
     db.reset_for_tests()
+    scheduler.startup_maintenance()
     with TestClient(app) as c:
         yield c
 

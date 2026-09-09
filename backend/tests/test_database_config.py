@@ -1,7 +1,13 @@
 """How the database connection is configured: the URL is a deployment binding
 and the password never travels in an environment variable."""
 
+import base64
+import json
+import socket
+import threading
 import time
+import urllib.error
+import urllib.request
 
 import pytest
 
@@ -69,6 +75,124 @@ def _unreachable(monkeypatch) -> None:
     monkeypatch.setattr(cfg, "db_password_file", "")
     monkeypatch.setattr(cfg, "db_pool_timeout", 0.5)
     monkeypatch.setattr(db, "PROBE_TIMEOUT", 0.5)
+    db.close()
+
+
+def _free_port() -> int:
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        return listener.getsockname()[1]
+
+
+def _http_json(url: str) -> tuple[int, dict]:
+    try:
+        response = urllib.request.urlopen(url, timeout=2)
+    except urllib.error.HTTPError as exc:
+        return exc.code, json.loads(exc.read())
+    with response:
+        return response.status, json.loads(response.read())
+
+
+def test_cold_start_serves_liveness_then_recovers_readiness(monkeypatch):
+    import uvicorn
+
+    from app import scheduler
+    from app.main import app
+
+    db.reset_for_tests()
+    original_url = cfg.database_url
+    original_password_file = cfg.db_password_file
+    scheduler.shutdown()
+    monkeypatch.setattr(scheduler, "_background_jobs_enabled", lambda: True)
+    monkeypatch.setattr(scheduler, "RECONCILE_SECONDS", 0.05)
+    _unreachable(monkeypatch)
+
+    port = _free_port()
+    server_config = uvicorn.Config(
+        app,
+        host="127.0.0.1",
+        port=port,
+        lifespan="on",
+        loop="asyncio",
+        http="h11",
+        ws="none",
+        log_config=None,
+        access_log=False,
+    )
+    server_config.load()
+    server = uvicorn.Server(server_config)
+    thread = threading.Thread(target=server.run, daemon=True)
+    started = time.monotonic()
+    thread.start()
+    deadline = started + 2
+    while not server.started and thread.is_alive() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    try:
+        assert server.started
+        assert time.monotonic() - started < 0.75
+        base = f"http://127.0.0.1:{port}"
+        probe_started = time.monotonic()
+        status, live = _http_json(f"{base}/api/health/live")
+        assert status == 200 and live["status"] == "ok"
+        assert time.monotonic() - probe_started < 0.3
+
+        status, ready = _http_json(f"{base}/api/health/ready")
+        assert status == 503
+        assert ready["status"] == "degraded" and ready["database"] is False
+
+        monkeypatch.setattr(cfg, "database_url", original_url)
+        monkeypatch.setattr(cfg, "db_password_file", original_password_file)
+        db.close()
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            status, ready = _http_json(f"{base}/api/health/ready")
+            if status == 200:
+                break
+            time.sleep(0.05)
+        assert status == 200
+        assert ready["status"] == "ok" and ready["database"] is True
+        assert set(ready) == {"status", "version", "scheduler", "database"}
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+        scheduler.shutdown()
+        db.close()
+
+
+def test_authentication_database_wait_does_not_delay_liveness(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app import auth
+    from app.main import app
+
+    db.reset_for_tests()
+    monkeypatch.setattr(cfg, "auth", "on")
+    _unreachable(monkeypatch)
+    read_started = threading.Event()
+    original_get_setting = db.get_setting
+
+    def tracked_get_setting(key, *args, **kwargs):
+        if key == auth._SECRET_KEY:
+            read_started.set()
+        return original_get_setting(key, *args, **kwargs)
+
+    monkeypatch.setattr(db, "get_setting", tracked_get_setting)
+    token = base64.urlsafe_b64encode(b"1" + (b"x" * 32)).decode()
+    responses = []
+    with TestClient(app) as blocked_client, TestClient(app) as live_client:
+        blocked_client.cookies.set(auth.COOKIE, token)
+        thread = threading.Thread(
+            target=lambda: responses.append(blocked_client.get("/api/scans"))
+        )
+        thread.start()
+        assert read_started.wait(timeout=1)
+        started = time.monotonic()
+        live = live_client.get("/api/health/live")
+        elapsed = time.monotonic() - started
+        thread.join(timeout=2)
+    assert live.status_code == 200
+    assert elapsed < 0.3
+    assert not thread.is_alive() and responses
     db.close()
 
 
@@ -175,6 +299,28 @@ def test_readiness_is_red_while_a_migration_is_pending(tmp_path, monkeypatch, ca
         assert "0002_example" in caplog.text
         # Liveness is unaffected: the process is fine, its schema is not.
         assert client.get("/api/health/live").status_code == 200
+
+
+def test_readiness_is_red_while_deferred_startup_is_pending(monkeypatch, caplog):
+    import logging
+
+    from fastapi.testclient import TestClient
+
+    from app import scheduler
+    from app.main import app
+
+    db.reset_for_tests()
+    monkeypatch.setattr(
+        scheduler, "startup_status", lambda: (False, "encryption rotation retry pending")
+    )
+    with TestClient(app) as client:
+        with caplog.at_level(logging.WARNING, logger="vcf_doctor"):
+            body = client.get("/api/health/ready")
+        assert body.status_code == 503
+        assert body.json()["status"] == "degraded"
+        assert body.json()["database"] is True
+        assert set(body.json()) == {"status", "version", "scheduler", "database"}
+        assert "encryption rotation retry pending" in caplog.text
 
 
 def test_trusted_proxies_trust_nobody_when_the_database_is_unreadable(monkeypatch):

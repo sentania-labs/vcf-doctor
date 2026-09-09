@@ -92,9 +92,6 @@ def bootstrap_from_env() -> None:
 
 
 def _secret() -> bytes:
-    # Reached from require_session, an async middleware, so this read blocks the
-    # worker's event loop. Bounded like every other hot-path read: an outage
-    # costs a fast failure rather than ten seconds of a stalled worker.
     s = db.get_setting(_SECRET_KEY, timeout=db.PROBE_TIMEOUT)
     if not s:
         s = secrets.token_hex(32)

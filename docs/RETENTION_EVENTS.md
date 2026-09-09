@@ -31,9 +31,9 @@ configured-zone calendar key used by the Snapshots page. The old `retention`
 count setting is removed from the API and the GUI and is no longer read by the
 code.
 
-Snapshot resource blobs are stored gzip-compressed (`resources_gz` BLOB);
-existing rows are migrated at startup in place, in batches, without blocking
-startup for more than a few seconds per thousand rows.
+Snapshot resource blobs are stored gzip-compressed (`resources_gz` BYTEA).
+The PostgreSQL migration creates that representation directly; older SQLite
+rows are converted by the one-shot import.
 
 ## Change log (persisted)
 

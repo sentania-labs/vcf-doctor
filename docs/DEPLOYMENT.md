@@ -18,9 +18,9 @@ only whether the database is reachable.
 | Image | `ghcr.io/sentania-labs/vcf-doctor:<tag>` where tag is `vX.Y.Z` (release), `sha-<7>` or `latest` |
 | Port | `8000` (HTTP) |
 | Liveness | `GET /api/health/live` (and `GET /api/health`, the same body under the older name), 200 whenever the process is answering. Reads nothing, so it answers in milliseconds during a database outage. The container's `HEALTHCHECK` uses this. |
-| Readiness | `GET /api/health/ready`, 200 when the database is reachable and migrated, 503 otherwise. Reports `database` and `scheduler`, both of which can only be learned from the database. |
+| Readiness | `GET /api/health/ready`, 200 when the database is reachable, migrated, and this worker's deferred startup work has completed, 503 otherwise. Reports `database` and `scheduler`, both of which can only be learned from the database. |
 | Build identity | `GET /api/version` returns the [build identity fields](../backend/app/_version.py); `GET /api/health` reports the same version |
-| Database | PostgreSQL 14 or newer, reached over `VCF_DOCTOR_DATABASE_URL`. Schema migrations are applied at startup and by `python3 -m app.migrate upgrade`. |
+| Database | PostgreSQL 14 or newer, reached over `VCF_DOCTOR_DATABASE_URL`. Apply schema migrations before the console with `python3 -m app.migrate upgrade`. |
 | Database password | A file, never an environment variable. `VCF_DOCTOR_DB_PASSWORD_FILE`, default `/run/secrets/vcf-doctor-db-password`. |
 | Persistent volume | `/data`, holding only the generated encryption key file. A deployment that sets `VCF_DOCTOR_SECRET_KEY` needs no volume at all. |
 | Replicas | More than one is supported. PostgreSQL owns concurrency, and one worker takes an advisory lock that makes it the only one running scheduled scans. |
@@ -66,9 +66,10 @@ console whose database is down fixes nothing and a restart loop makes the
 outage worse, so nothing should restart on the database.
 
 **Readiness** is whether this instance can serve. `GET /api/health/ready` is
-503 while the database is unreachable or a migration is pending. Sign-in and
-every page behind it need the database, so an instance that cannot reach it is
-one to take out of rotation, not one to send visitors to.
+503 while the database is unreachable, a migration is pending, or this
+worker's deferred startup work has not completed. Sign-in and every page behind
+it need the database, so an instance that cannot reach it is one to take out of
+rotation, not one to send visitors to.
 
 `GET /api/health` is the older name for the liveness answer and returns the same
 body, so a manifest that has not been repointed yet keeps behaving as it does
@@ -104,19 +105,24 @@ stay useful during a database outage.
 
 The schema lives in numbered `.sql` files under
 [`backend/app/migrations`](../backend/app/migrations), applied in order and
-recorded in a `schema_migrations` table. Two things apply them, and both take
-the same PostgreSQL advisory lock, so several workers or pods starting together
-migrate once rather than racing:
-
-- the console itself, at startup;
-- `python3 -m app.migrate upgrade`, which is the one-shot `migrate` service in
-  `docker-compose.yml` and is the same thing a Kubernetes `Job` or an
-  `initContainer` should run.
+recorded in a `schema_migrations` table. Run `python3 -m app.migrate upgrade`
+before the console. It is the one-shot `migrate` service in
+`docker-compose.yml`, and a Kubernetes deployment should run the same command
+in a `Job` or an `initContainer`. Migration runners take the same PostgreSQL
+advisory lock, so concurrent runners migrate once rather than racing.
 
 `python3 -m app.migrate status` prints what is applied and what is pending. A
 reachable database with a pending migration reports as unhealthy on
 `GET /api/health/ready` and on the Settings database panel, because a server
 missing its tables is not a working database.
+
+The console begins serving without waiting on PostgreSQL. Once it is listening,
+each worker uses the scheduler's existing retry interval to rotate and migrate
+stored secrets, recover change-log coverage and interrupted scans, seed the
+operator password and event policy, pause stale fixture schedules, and apply
+retention. Readiness remains 503 until that work completes once. If PostgreSQL
+is unavailable, liveness stays green and the same work retries until the
+database returns, without restarting the process.
 
 Adding the next migration is dropping in `0002_<what_it_does>.sql`. Nothing
 else is registered and no shipped file is ever edited.
@@ -394,17 +400,20 @@ a deployment artifact.
   re-entered. Nothing in vCenter is affected. Back up PostgreSQL the way you
   back up any other database; the container volume no longer holds history.
 - **Database unreachable**: liveness stays green so nothing restarts the
-  container, and readiness goes red so nothing routes traffic to it. Both
-  answer in about three seconds rather than stalling. Everything that needs the
-  database does fail while it is down, sign-in included; the Settings database
-  panel reports the outage once a page is reachable, which covers the common
-  partial case of a database that is up but not migrated.
+  container, and readiness goes red so nothing routes traffic to it. Liveness
+  answers in milliseconds and readiness uses a bounded database probe. Deferred
+  startup work retries after the database returns, then readiness turns green
+  without a process restart. Everything that needs the database does fail while
+  it is down, sign-in included; the Settings database panel reports the outage
+  once a page is reachable, which covers the common partial case of a database
+  that is up but not migrated.
 - **Lost encryption key, database intact**: history is intact; re-enter each
   vCenter password (flagged "Needs password" on Connections) and the
   Anthropic key. See [Security](SECURITY.md).
 - **Rotated encryption key, previous key still available**: no re-entry is
   needed; follow [rotation and recovery](SECURITY.md#secrets-at-rest).
 - **Bad release**: re-pin the previous digest or tag and file an issue. The
-  database schema is migrated forward on startup; going back a release is
-  not guaranteed to be safe once a newer release has written to the volume,
-  so snapshot the volume before upgrading anything you care about.
+  database schema is migrated forward by the deployment migration step. Going
+  back a release is not guaranteed to be safe once a newer release has written
+  to the volume, so snapshot the volume before upgrading anything you care
+  about.

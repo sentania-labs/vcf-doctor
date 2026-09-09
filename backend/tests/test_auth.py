@@ -2,7 +2,7 @@ from fastapi.testclient import TestClient
 
 
 def _client(tmp_path, monkeypatch, **env):
-    from app import db
+    from app import auth, db
     from app.config import settings
 
     db.reset_for_tests()
@@ -14,6 +14,7 @@ def _client(tmp_path, monkeypatch, **env):
     import app.main as main
 
     importlib.reload(main)
+    auth.bootstrap_from_env()
     return TestClient(main.app)
 
 

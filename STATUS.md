@@ -11,8 +11,8 @@ version of this file is in git history.
   uvicorn worker and more than one replica; one of them takes an advisory lock
   that makes it the only one running scheduled scans, and a schedule edited on
   any worker reaches it within a minute. The schema is numbered `.sql`
-  migrations in `backend/app/migrations`, applied at startup and by
-  `python3 -m app.migrate upgrade` under the same lock. `docker compose up` is
+  migrations in `backend/app/migrations`, applied before the console by
+  `python3 -m app.migrate upgrade` under an advisory lock. `docker compose up` is
   still one command: it bundles `postgres:16`, generates the database password
   into a file and runs the migration as a one-shot service. The password is
   never an environment variable, and a URL carrying one is refused at startup.
