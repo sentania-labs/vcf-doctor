@@ -153,11 +153,11 @@ def _recent_changes(connection_id: str | None, min_significance: str | None) -> 
     floor = _resolve_min_significance(min_significance)
     since = store.now() - timedelta(hours=24)
     out: list = []
+    log_since = store.log_since()
     for conn in _target_connections(connection_id):
-        oldest = store.oldest_change(conn.id)
-        if oldest is not None:
+        if log_since is not None:
             out.extend(_logged_changes(conn.id, since, floor))
-            out.extend(_at_least(_pre_log_changes(conn.id, oldest, since), floor))
+            out.extend(_at_least(_pre_log_changes(conn.id, log_since, since), floor))
             continue
         pair = store.latest_snapshots(conn.id, 2)
         if len(pair) == 2:
@@ -189,22 +189,21 @@ def _logged_changes(connection_id: str, since: datetime, floor: str) -> list:
     )
 
 
-def _pre_log_changes(connection_id: str, oldest, since: datetime) -> list:
+def _pre_log_changes(connection_id: str, log_since: datetime, since: datetime) -> list:
     """Diffs for the part of the feed window that predates the change log.
 
-    The first logged row covers the interval ending at its own stamp, so the
-    log says nothing about anything before the snapshot it diffed from. On a
-    database upgraded mid-life those older snapshots still exist; diff the
-    consecutive pairs between `since` and that boundary, newest first and
-    capped, so the Overview does not silently drop that part of the window.
+    The log says nothing about anything before the snapshot its first diff
+    was taken from (store.log_since). On a database upgraded mid-life those
+    older snapshots still exist; diff the consecutive pairs between `since`
+    and that boundary, newest first and capped, so the Overview does not
+    silently drop that part of the window.
     """
-    boundary = store.snapshot_summary_at(connection_id, before=oldest.observed_at)
-    if boundary is None or boundary.created_at <= since:
+    if log_since <= since:
         return []
     summaries = [
         s
         for s in store.list_snapshots(connection_id)  # newest first
-        if s.created_at <= boundary.created_at
+        if s.created_at <= log_since
     ][: MAX_PRE_LOG_PAIRS + 1]
     out: list = []
     for newer, older in zip(summaries, summaries[1:], strict=False):

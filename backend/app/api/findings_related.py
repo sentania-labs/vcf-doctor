@@ -11,11 +11,12 @@ one scan older (issue #5). This walks back instead:
    related objects, plus any high-significance row on the connection.
 3. Databases predating the change log have no rows at all; then fall back to
    diffing the newest pair of snapshots that actually differ. A database
-   upgraded to the change log mid-life has a finding older than the first
-   logged row, and no query over the log can reach the change that caused it
-   (issue #41): diff the two snapshots bracketing first observation instead,
-   or the newest differing pair when retention has pruned one of those two.
-   The window says which case it is.
+   upgraded to the change log mid-life has findings older than the log
+   (store.log_since), and no query over the log can reach the change that
+   caused those (issue #41): diff the two snapshots bracketing first
+   observation, or the newest differing pair when retention has pruned one
+   of those two, and show the logged rows after that diff. The window says
+   which case it is.
 
 The window is capped (MAX_WINDOW, MAX_SCANS_BACK) and the response says which
 window it shows, so the drawer can print it.
@@ -61,8 +62,8 @@ class RelatedWindow(BaseModel):
     first_observed: datetime | None = None  # created_at of the first snapshot holding the finding
     scans_present: int = 0  # consecutive snapshots (newest first) containing the finding
     capped: bool = False  # true when MAX_WINDOW or MAX_SCANS_BACK cut the walk short
-    # Oldest row the change log holds for this connection, set only when the
-    # finding is older than it: the log cannot contain the cause (issue #41).
+    # Where the change log starts, set only when the finding is older than
+    # that: the log cannot contain the cause (issue #41).
     log_starts_at: datetime | None = None
 
 
@@ -183,19 +184,6 @@ def _logged(connection_id: str, since: datetime, near: list[str]) -> list:
     return list(unique.values())
 
 
-def _log_coverage_start(connection_id: str, oldest) -> datetime:
-    """The oldest moment the change log can speak about.
-
-    The first logged row describes the interval that ends at its own
-    observed_at, so coverage starts at the snapshot it diffed from: the newest
-    snapshot before that stamp. Anything older is only in the snapshots, which
-    is the whole of a database upgraded to the change log mid-life (issue #41).
-    When that snapshot has itself been pruned, coverage starts at the row.
-    """
-    previous = store.snapshot_summary_at(connection_id, before=oldest.observed_at)
-    return previous.created_at if previous is not None else oldest.observed_at
-
-
 def _latest_differing_pair(connection_id: str) -> tuple[list, datetime | None, datetime | None]:
     """Fallback when nothing is logged: diff newest pairs until one differs."""
     summaries = store.list_snapshots(connection_id)[: MAX_PAIRS_BACK + 1]
@@ -233,8 +221,8 @@ def related_changes(connection_id: str, finding: Finding, resources: list[Resour
         return FindingRelated(
             finding_id=finding.id, connection_id=connection_id, resource_ids=near, window=window
         )
-    oldest_logged = store.oldest_change(connection_id)
-    if oldest_logged is not None:
+    log_starts = store.log_since()
+    if log_starts is not None:
         floor = store.now() - MAX_WINDOW
         # The introducing diff is stamped with the first snapshot that holds the finding, or
         # with a snapshot retention has since pruned; either way it is at or after the
@@ -250,22 +238,20 @@ def related_changes(connection_id: str, finding: Finding, resources: list[Resour
         since = max(first.interval_start, floor)
         if first.all_surviving and rows:
             since = min(since, max(min(r.observed_at for r in rows), floor))
-        # A log that starts after the finding did cannot hold the change that
-        # caused it: the pre-log era is only in the snapshots (issue #41).
-        coverage_start = _log_coverage_start(connection_id, oldest_logged)
-        pre_log = first.interval_start < coverage_start
-        changes = _select(rows, near)
-        near_set = set(near)
-        window = RelatedWindow(
-            basis="first_observed",
-            since=since,
-            until=None,
-            first_observed=seen_at,
-            scans_present=count,
-            capped=walk_capped or first.interval_start < floor,
-            log_starts_at=coverage_start if pre_log else None,
-        )
-        if pre_log and not any(c.resource_id in near_set for c in changes):
+        if first.interval_start >= log_starts:
+            changes = _select(rows, near)
+            window = RelatedWindow(
+                basis="first_observed",
+                since=since,
+                until=None,
+                first_observed=seen_at,
+                scans_present=count,
+                capped=walk_capped or first.interval_start < floor,
+            )
+        else:
+            # The log starts after the finding did, so it cannot hold the cause: the
+            # pre-log era is only in the snapshots (issue #41). Diff the pair around first
+            # observation and let the logged rows follow it.
             diff = _bracketing_pair(first)
             if diff is not None:
                 basis, pair_since, pair_until = (
@@ -276,18 +262,19 @@ def related_changes(connection_id: str, finding: Finding, resources: list[Resour
             else:
                 basis = "pre_log_differing_pair"
                 diff, pair_since, pair_until = _latest_differing_pair(connection_id)
-            fallback = _select(diff, near)
-            if fallback:
-                changes = fallback
-                window = RelatedWindow(
-                    basis=basis,
-                    since=pair_since,
-                    until=pair_until,
-                    first_observed=seen_at,
-                    scans_present=count,
-                    capped=walk_capped,
-                    log_starts_at=coverage_start,
-                )
+            diffed = {(c.resource_id, c.summary) for c in diff}
+            changes = _select(
+                list(diff) + [r for r in rows if (r.resource_id, r.summary) not in diffed], near
+            )
+            window = RelatedWindow(
+                basis=basis,
+                since=pair_since,
+                until=pair_until,
+                first_observed=seen_at,
+                scans_present=count,
+                capped=walk_capped,
+                log_starts_at=log_starts,
+            )
     else:
         diff, since, until = _latest_differing_pair(connection_id)
         window = RelatedWindow(

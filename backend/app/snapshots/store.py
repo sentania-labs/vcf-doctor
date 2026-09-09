@@ -535,6 +535,12 @@ def existing_snapshot_ids(snapshot_ids: list[str]) -> set[str]:
     return found
 
 
+def snapshot_summary(snapshot_id: str) -> SnapshotSummary | None:
+    """One snapshot's summary without decoding its resources."""
+    row = db.fetchone(f"SELECT {_SUMMARY_COLS} FROM snapshots WHERE id = ?", (snapshot_id,))
+    return _row_to_summary(row) if row is not None else None
+
+
 def get_snapshot(snapshot_id: str) -> Snapshot | None:
     row = db.fetchone("SELECT * FROM snapshots WHERE id = ?", (snapshot_id,))
     if row is None:
@@ -698,7 +704,11 @@ def save_changes(
     changes: list[Change],
 ) -> int:
     """Persist one scan's diff(previous, current). Every significance is
-    stored; readers filter."""
+    stored; readers filter. An empty diff still marks the log as covering
+    this interval (see log_since)."""
+    if log_since() is None:
+        previous = snapshot_summary(from_snapshot_id)
+        _set_log_since(previous.created_at if previous is not None else observed_at)
     if not changes:
         return 0
     with db.transaction() as c:
@@ -786,17 +796,45 @@ def count_changes_by_significance(
     return out
 
 
-def oldest_change(connection_id: str) -> ChangeRecord | None:
-    """The first row the change log ever recorded for a connection.
+LOG_SINCE_KEY = "log_since"
 
-    A database upgraded to the change-log release mid-life has snapshots older
-    than this row, and no log at all for that era (issue #41).
+
+def log_since() -> datetime | None:
+    """When the change log started covering this database: the snapshot the
+    first ever diff was taken from. None until the first diff runs.
+
+    Rows alone cannot say this, because a quiet interval writes no row and
+    retention prunes old ones; a database upgraded to the change-log release
+    mid-life has snapshots older than this stamp and no log for that era
+    (issue #41). Internal marker, not an operator setting.
     """
-    row = db.fetchone(
-        "SELECT * FROM changes WHERE connection_id = ? ORDER BY observed_at ASC LIMIT 1",
-        (connection_id,),
+    raw = db.get_setting(LOG_SINCE_KEY)
+    return datetime.fromisoformat(raw) if raw else None
+
+
+def _set_log_since(at: datetime) -> None:
+    db.set_setting(LOG_SINCE_KEY, at.isoformat())
+
+
+def backfill_log_since() -> datetime | None:
+    """Startup: a database that already has change rows but no marker gets one
+    from its oldest surviving row (the snapshot that row diffed from, or the
+    row itself when that snapshot is gone). Conservative: rows pruned before
+    the marker existed make the log look younger than it was."""
+    current = log_since()
+    if current is not None:
+        return current
+    row = db.fetchone("SELECT observed_at FROM changes ORDER BY observed_at ASC LIMIT 1")
+    if row is None:
+        return None
+    observed = datetime.fromisoformat(row["observed_at"])
+    previous = db.fetchone(
+        "SELECT created_at FROM snapshots WHERE created_at < ? ORDER BY created_at DESC LIMIT 1",
+        (row["observed_at"],),
     )
-    return _row_to_change(row) if row is not None else None
+    start = datetime.fromisoformat(previous["created_at"]) if previous is not None else observed
+    _set_log_since(start)
+    return start
 
 
 def count_changes(connection_id: str) -> int:

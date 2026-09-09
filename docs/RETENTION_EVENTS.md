@@ -46,16 +46,21 @@ change rows: daily_days. Endpoints:
   a naive value is read as UTC. An unencoded `+HH:MM` offset (which arrives as
   a space) is still understood.
 
-A database upgraded to the change-log release mid-life has snapshots older than
-its first logged row, and the log cannot describe that era. Both readers say so
-rather than showing an empty window:
+The database records when its change log started: the first diff ever saved
+(an empty one included, so a quiet estate does not look like a late start)
+stamps the snapshot it was taken from into the `log_since` settings row. A
+database that already had change rows gets the marker at startup from its
+oldest surviving row. This is an internal marker, not an operator setting, and
+it is not part of `GET /api/settings`. A database upgraded to the change-log
+release mid-life has snapshots older than that stamp, and the log cannot
+describe that era. Both readers say so rather than showing an empty window:
 
 - `GET /api/findings/{id}/related` sets `window.log_starts_at` when the finding
-  was first observed before the log begins, and, when the log holds nothing
-  about the finding's own object, diffs the two snapshots around first
-  observation instead (`window.basis = "pre_log_bracketing_pair"`), or the
-  newest differing pair when retention has pruned one of those two
-  (`"pre_log_differing_pair"`).
+  was first observed before the log begins. It then diffs the two snapshots
+  around first observation (`window.basis = "pre_log_bracketing_pair"`), or
+  the newest differing pair when retention has pruned one of those two
+  (`"pre_log_differing_pair"`), and lists the logged rows about the finding's
+  neighbourhood after that diff.
 - the Overview feed recovers the part of its 24 h window that predates the log
   by diffing the snapshots that do cover it, newest first and bounded.
 

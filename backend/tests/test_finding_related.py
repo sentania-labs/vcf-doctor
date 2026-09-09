@@ -147,11 +147,18 @@ def test_rows_ending_at_the_pre_finding_snapshot_are_excluded(client):
     assert summaries[0] == "connectionState connected -> disconnected"
 
 
+def _forget_the_change_log(cid: str) -> None:
+    """Make the database look like one from before the change log: no rows and
+    no record of the log ever having started."""
+    with db.transaction() as c:
+        c.execute("DELETE FROM changes WHERE connection_id = ?", (cid,))
+        c.execute("DELETE FROM settings WHERE key = ?", (store.LOG_SINCE_KEY,))
+
+
 def test_no_log_falls_back_to_latest_differing_pair(client):
     """A database from before the change log has no rows: diff the newest pair that differs."""
     cid = _connection(client, 3)
-    with db.transaction() as c:
-        c.execute("DELETE FROM changes WHERE connection_id = ?", (cid,))
+    _forget_the_change_log(cid)
     finding = _finding(client, cid, "HOST_DISCONNECTED")
     body = client.get(f"/api/findings/{finding['id']}/related?connection_id={cid}").json()
     snaps = client.get(f"/api/snapshots?connection_id={cid}").json()
@@ -307,13 +314,13 @@ def _scan_with_another_host_powered_off(cid: str) -> None:
 
 def _restart_log_at_the_newest_interval(client, cid: str) -> dict:
     """Make the database look like one upgraded to the change log mid-life:
-    every row before the newest scan interval is gone, so the log starts long
-    after the finding did. The newest pair differs, as it does on a live
-    estate, so the log's own interval is not where the cause hides."""
-    with db.transaction() as c:
-        c.execute("DELETE FROM changes WHERE connection_id = ?", (cid,))
+    the log only starts at the newest scan interval, long after the finding
+    did. The newest pair differs, as it does on a live estate, so the log's
+    own interval is not where the cause hides."""
+    _forget_the_change_log(cid)
     _scan_with_another_host_powered_off(cid)
     snaps = store.list_snapshots(cid)  # newest first
+    assert store.log_since() == snaps[1].created_at
     unrelated = Change(
         change_type="modified",
         resource_id=f"datastore:{cid}:datastore-99",
@@ -348,9 +355,10 @@ def test_finding_older_than_the_change_log_gets_a_window_that_can_hold_the_cause
     assert body["changes"][0]["resource_id"] == finding["resource_id"]
     assert body["changes"][0]["summary"] == "connectionState connected -> disconnected"
     summaries = [c["summary"] for c in body["changes"]]
-    # Neither the logged row nor the newest pair's own diff is passed off as the cause.
+    # The logged rows follow the bracketing diff; the medium one is not near and is dropped.
     assert "usage 40.0% -> 41.0%" not in summaries
-    assert not any("poweredOff" in s for s in summaries)
+    logged_high = next(i for i, s in enumerate(summaries) if "poweredOff" in s)
+    assert logged_high > 0
 
 
 def test_pre_log_fallback_uses_the_newest_differing_pair_once_the_bracketing_pair_is_pruned(
@@ -388,10 +396,10 @@ def test_a_complete_change_log_is_never_reported_as_starting_late(client):
         assert body["window"]["log_starts_at"] is None, check
 
 
-def test_pre_log_fallback_keeps_the_log_when_it_holds_a_related_row(client):
-    """The log still wins when it has a row about the finding's own object, even
-    though it starts after the finding: that row is evidence, the pair diff is a
-    guess."""
+def test_pre_log_bracketing_diff_leads_even_when_the_log_has_later_rows_on_the_object(client):
+    """A host that keeps changing after it disconnected logs rows about itself
+    once the log starts; those are not the cause. The bracketing diff still
+    comes first and the logged rows follow it."""
     cid = _connection(client, 3)
     snaps = _restart_log_at_the_newest_interval(client, cid)["snaps"]
     stamps = [s["created_at"] for s in client.get(f"/api/snapshots?connection_id={cid}").json()]
@@ -408,10 +416,65 @@ def test_pre_log_fallback_keeps_the_log_when_it_holds_a_related_row(client):
 
     body = client.get(f"/api/findings/{finding['id']}/related?connection_id={cid}").json()
 
-    assert body["window"]["basis"] == "first_observed"
-    # The window still says the log cannot reach back to the cause.
+    assert body["window"]["basis"] == "pre_log_bracketing_pair"
     assert body["window"]["log_starts_at"] == stamps[1]
-    assert "LOGGED: still disconnected" in [c["summary"] for c in body["changes"]]
+    assert body["window"]["since"] == stamps[3]
+    assert body["window"]["until"] == stamps[2]
+    own = [c["summary"] for c in body["changes"] if c["resource_id"] == finding["resource_id"]]
+    assert own == ["connectionState connected -> disconnected", "LOGGED: still disconnected"]
+    assert body["changes"][0]["summary"] == "connectionState connected -> disconnected"
+
+
+def test_a_quiet_estate_is_not_mistaken_for_a_late_change_log(client):
+    """Scans S1 to S5 see identical resources, so the log records nothing until
+    S5 to S6; a time-based finding first appearing at S3 is still inside the
+    log's coverage and must not be labelled older than the log. Rows alone
+    cannot tell this apart from a mid-life upgrade; the log_since marker can."""
+    cid = _connection(client, 1)
+    s1 = store.latest_snapshot(cid)
+    findings = store.get_findings(s1.id)
+    finding = next(f for f in findings if f.check_id == "VM_SNAPSHOT_STALE")
+    without = [f for f in findings if f.id != finding.id]
+    store.save_findings(s1.id, without)
+    previous = s1
+    for n in range(2, 6):
+        snap = store.save_snapshot(cid, s1.resources, f"S{n}", scheduled=True)
+        store.save_findings(snap.id, without if n == 2 else findings)
+        diff = scheduler.compute_changes(previous.resources, snap.resources)
+        assert diff == []
+        store.save_changes(cid, previous.id, snap.id, snap.created_at, diff)
+        previous = snap
+    assert store.log_since() == s1.created_at
+    assert store.count_changes(cid) == 0
+    _scan_with_another_host_powered_off(cid)
+    assert store.count_changes(cid) > 0
+
+    body = client.get(f"/api/findings/{finding.id}/related?connection_id={cid}").json()
+
+    assert body["window"]["basis"] == "first_observed"
+    assert body["window"]["log_starts_at"] is None
+    assert body["window"]["scans_present"] == 4
+
+
+def test_startup_backfills_log_since_from_the_oldest_surviving_row(client):
+    """A database that already has change rows but predates the marker gets
+    one at startup: the snapshot its oldest row diffed from. The marker is
+    internal and never surfaces as a setting."""
+    cid = _connection(client, 3)
+    snaps = store.list_snapshots(cid)
+    with db.transaction() as c:
+        c.execute("DELETE FROM settings WHERE key = ?", (store.LOG_SINCE_KEY,))
+    assert store.log_since() is None
+
+    assert store.backfill_log_since() == snaps[2].created_at
+    assert store.log_since() == snaps[2].created_at
+    assert store.backfill_log_since() == snaps[2].created_at
+
+    assert "log_since" not in client.get("/api/settings").json()
+    finding = _finding(client, cid, "HOST_DISCONNECTED")
+    body = client.get(f"/api/findings/{finding['id']}/related?connection_id={cid}").json()
+    assert body["window"]["basis"] == "first_observed"
+    assert body["window"]["log_starts_at"] is None
 
 
 def _copy_snapshots(cid: str, count: int) -> None:

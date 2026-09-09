@@ -30,8 +30,9 @@ export type ChangeLogEntry = Change & { id: string; observed_at: string; from_sn
 // GET /findings/{id}/related: changes around a finding since it was first observed (issue #5).
 // first_observed: the change log since the finding first appeared. latest_differing_pair: no change log on this
 // database, so the newest pair of snapshots that differ. pre_log_bracketing_pair: the log starts after the finding
-// did, so it cannot hold the cause and the two snapshots around first observation are diffed instead (issue #41).
-// pre_log_differing_pair: same, but one of those two snapshots is gone, so the newest differing pair is shown.
+// did, so it cannot hold the cause: the two snapshots around first observation are diffed and the logged rows
+// follow (issue #41). pre_log_differing_pair: same, but one of those two snapshots is gone, so the newest
+// differing pair is diffed instead.
 // no_snapshots: nothing to compare.
 export type RelatedWindowBasis =
   | 'first_observed'
