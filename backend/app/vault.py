@@ -103,14 +103,27 @@ def _normalise(raw: str) -> bytes:
         return base64.urlsafe_b64encode(derived)
 
 
-def _read_key_file(path: Path) -> bytes:
+_ACTIVE_KEY_REMEDY = (
+    "restore it from backup, or remove it to generate a new key and re-enter credentials"
+)
+# The leftover file is the only copy of the previous key and the active key is
+# an env value, so deleting it recovers nothing and destroys the one thing that
+# could still open the stored secrets.
+_PREVIOUS_KEY_REMEDY = (
+    "it holds the previous key and not the active one, so your stored secrets are "
+    "unchanged. Fix or restore the file, rotate through "
+    f"{ENV_PREVIOUS_KEY} instead, or re-enter the affected credentials"
+)
+
+
+def _read_key_file(path: Path, remedy: str = _ACTIVE_KEY_REMEDY) -> bytes:
     try:
         data = path.read_text().strip().encode()
         Fernet(data)
     except (OSError, ValueError) as exc:
         raise KeyUnavailable(
             f"encryption key file {path} is unreadable or corrupt ({exc.__class__.__name__}); "
-            "restore it from backup, or remove it to generate a new key and re-enter credentials"
+            f"{remedy}"
         ) from exc
     if stat.S_IMODE(path.stat().st_mode) & 0o077:
         log.warning("encryption key file %s is readable by others; expected mode 0600", path)
@@ -359,9 +372,10 @@ def rekey(previous_key: str, source: str) -> RekeyOutcome:
         error = None
         if unreadable:
             noun = "secret is" if unreadable == 1 else "secrets are"
+            left = "it was" if unreadable == 1 else "they were"
             error = (
                 f"{unreadable} stored {noun} encrypted with a key that was not supplied, "
-                "so they were left untouched. Restart with that key in "
+                f"so {left} left untouched. Restart with that key in "
                 f"{ENV_PREVIOUS_KEY}, or re-enter those credentials."
             )
         outcome = RekeyOutcome(
@@ -423,7 +437,7 @@ def read_previous_key_file() -> str:
         raise KeyUnavailable(
             "there is no generated key file next to the database to rotate from"
         )
-    return _read_key_file(path).decode()
+    return _read_key_file(path, _PREVIOUS_KEY_REMEDY).decode()
 
 
 def rekey_at_startup() -> RekeyOutcome | None:

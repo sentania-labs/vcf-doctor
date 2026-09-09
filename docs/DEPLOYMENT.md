@@ -146,15 +146,26 @@ name-suffixed generated Secret.
 
 ### Confirm it ran
 
-Whatever the shape, open Settings > Encryption at rest after the restart and
-check that it reports a rotation. That line is the only signal separating a
-rotation that ran from one that silently did not, and dropping the previous
-key without it leaves every stored secret encrypted under a key you no longer
-have. If no rotation is reported, either it did not run or there was nothing
-left to move; a connection still showing "Needs password", or an Assistant
-key still asking to be re-entered, means it did not run.
+Whatever the shape, open Settings > Encryption at rest after the restart. The
+card names the time of the last rotation, and that time has to be the restart
+you just performed. A record from an earlier cycle stays on the card
+indefinitely, so "a rotation is reported" proves nothing on its own. Read the
+timestamp.
 
-Once the outcome is on the card, drop `VCF_DOCTOR_SECRET_KEY_PREVIOUS` (and
+Either of these two clears the rotation:
+
+- The card reports a rotation dated at the restart you just performed.
+- Nothing is flagged anywhere on the page: no connection showing "Needs
+  password" and no Assistant key asking to be re-entered. Nothing was left
+  under the old key, which is why there was nothing to record.
+
+An older timestamp, or none, while a credential is still flagged means this
+rotation did not run. Leave `VCF_DOCTOR_SECRET_KEY_PREVIOUS` in place and find
+out why the restart did not pick it up; in the Argo shape that is usually the
+missing rollout described above. Dropping the previous key at that point
+leaves every stored secret encrypted under a key you no longer have.
+
+Only once the rotation is cleared, drop `VCF_DOCTOR_SECRET_KEY_PREVIOUS` (and
 the sealed `secret-key-previous` entry, where one is used) on the next pass
 and restart again. Leaving it set is not dangerous, it only keeps the old key
 present longer than it needs to be.

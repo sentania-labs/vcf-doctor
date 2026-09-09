@@ -421,6 +421,27 @@ def test_key_file_rotation_is_offered_but_never_automatic(monkeypatch):
         assert "Nothing to do" in again["message"]
 
 
+def test_unreadable_leftover_key_file_does_not_advise_deleting_it(monkeypatch):
+    """The leftover file is the only copy of the previous key, and the active
+    key is an env value, so the active-key advice to remove it and re-enter
+    would destroy the one thing that can still open the stored secrets."""
+    from app.main import app
+
+    conn = _conn(password="first")
+    with TestClient(app):
+        pass
+
+    _set_key(monkeypatch, Fernet.generate_key().decode())
+    vault.key_file_path().write_text("not a key\n")
+    with TestClient(app) as client:
+        r = client.post("/api/settings/encryption/rekey")
+        assert r.status_code == 503, r.text
+        detail = r.json()["detail"]
+        assert "remove it" not in detail
+        assert vault.ENV_PREVIOUS_KEY in detail
+        assert store.get_connection(conn.id).credentials_unreadable is True
+
+
 def test_key_file_rotation_needs_a_key_file(monkeypatch):
     from app.main import app
 
