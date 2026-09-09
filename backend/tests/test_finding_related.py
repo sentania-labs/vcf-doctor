@@ -595,34 +595,43 @@ def test_startup_backfills_log_since_from_the_oldest_surviving_row(client):
 def test_pruned_backfill_source_does_not_replay_the_first_logged_change(client, monkeypatch):
     now = datetime(2026, 9, 9, 12, tzinfo=UTC)
     cid = _connection(client, 0)
-    connected = Resource(
-        id="host:backfill",
+    connected_a = Resource(
+        id="host:backfill-a",
         type="host",
-        name="backfill-host",
+        name="backfill-host-a",
         source="test",
         properties={"connectionState": "connected"},
     )
-    disconnected = connected.model_copy(deep=True)
-    disconnected.properties["connectionState"] = "disconnected"
+    connected_b = Resource(
+        id="host:backfill-b",
+        type="host",
+        name="backfill-host-b",
+        source="test",
+        properties={"connectionState": "connected"},
+    )
+    disconnected_a = connected_a.model_copy(deep=True)
+    disconnected_a.properties["connectionState"] = "disconnected"
+    disconnected_b = connected_b.model_copy(deep=True)
+    disconnected_b.properties["connectionState"] = "disconnected"
     finding = Finding(
         id="test:backfill",
         check_id="HOST_DISCONNECTED",
         severity="critical",
         title="Host disconnected",
         summary="The host is disconnected",
-        resource_id=disconnected.id,
-        resource_type=disconnected.type,
-        resource_name=disconnected.name,
+        resource_id=disconnected_a.id,
+        resource_type=disconnected_a.type,
+        resource_name=disconnected_a.name,
     )
 
     monkeypatch.setattr(store, "now", lambda: now - timedelta(minutes=15))
-    s0 = store.save_snapshot(cid, [connected], "S0", scheduled=False)
+    s0 = store.save_snapshot(cid, [connected_a, connected_b], "S0", scheduled=False)
     store.save_findings(s0.id, [])
     monkeypatch.setattr(store, "now", lambda: now - timedelta(minutes=10))
-    s1 = store.save_snapshot(cid, [connected], "S1", scheduled=True)
-    store.save_findings(s1.id, [finding])
+    s1 = store.save_snapshot(cid, [connected_a, disconnected_b], "S1", scheduled=True)
+    store.save_findings(s1.id, [])
     monkeypatch.setattr(store, "now", lambda: now - timedelta(minutes=5))
-    s2 = store.save_snapshot(cid, [disconnected], "S2", scheduled=True)
+    s2 = store.save_snapshot(cid, [disconnected_a, connected_b], "S2", scheduled=True)
     store.save_findings(s2.id, [finding])
     store.save_changes(
         cid,
@@ -640,15 +649,52 @@ def test_pruned_backfill_source_does_not_replay_the_first_logged_change(client, 
     overview = client.get(f"/api/overview?connection_id={cid}&min_significance=high")
     assert overview.status_code == 200
     overview_changes = overview.json()["recent_changes"]
-    assert [change["summary"] for change in overview_changes] == [
-        "connectionState connected -> disconnected"
-    ]
+    assert {
+        (change["resource_id"], change["summary"]) for change in overview_changes
+    } == {
+        (disconnected_a.id, "connectionState connected -> disconnected"),
+        (connected_b.id, "connectionState disconnected -> connected"),
+    }
 
     response = client.get(f"/api/findings/{finding.id}/related?connection_id={cid}")
     assert response.status_code == 200
     body = response.json()
     assert body["window"]["basis"] == "pre_log_bracketing_pair"
-    assert [change["summary"] for change in body["changes"]] == [
+    assert [(change["resource_id"], change["summary"]) for change in body["changes"]] == [
+        (disconnected_a.id, "connectionState connected -> disconnected"),
+        (connected_b.id, "connectionState disconnected -> connected"),
+    ]
+
+
+def test_overview_recovers_the_full_24_hour_window(client, monkeypatch):
+    now = datetime(2026, 9, 9, 12, 30, tzinfo=UTC)
+    cid = _connection(client, 0)
+    connected = Resource(
+        id="host:early",
+        type="host",
+        name="early-host",
+        source="test",
+        properties={"connectionState": "connected"},
+    )
+    previous = None
+    for index in range(14):
+        observed_at = now - timedelta(hours=3, minutes=30) + timedelta(minutes=15 * index)
+        host = connected.model_copy(deep=True)
+        if index >= 3:
+            host.properties["connectionState"] = "disconnected"
+        monkeypatch.setattr(store, "now", lambda at=observed_at: at)
+        current = store.save_snapshot(cid, [host], f"S{index}", scheduled=True)
+        store.save_findings(current.id, [])
+        if index == 13:
+            assert previous is not None
+            store.save_changes(cid, previous.id, current.id, current.created_at, [])
+        previous = current
+    monkeypatch.setattr(store, "now", lambda: now)
+
+    response = client.get(f"/api/overview?connection_id={cid}&min_significance=high")
+
+    assert response.status_code == 200
+    assert [change["summary"] for change in response.json()["recent_changes"]] == [
         "connectionState connected -> disconnected"
     ]
 

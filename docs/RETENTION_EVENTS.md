@@ -77,12 +77,13 @@ available snapshot history:
   Genuinely later occurrences remain visible even when their summaries match
   the snapshot diff.
 - the Overview feed recovers the part of its 24 h window that predates the log
-  by diffing the snapshots that do cover it, newest first and bounded. Recovered
+  by diffing every snapshot pair in that time window, newest first. Recovered
   changes use the newer snapshot's observation time when ranked alongside
   logged changes for the five-row feed. If startup recovery had to use the
   oldest row's observation time because its source snapshot was pruned, both
-  surfaces omit that exact logged snapshot pair when a recovered diff reaches
-  the same target snapshot. Rows from distinct pairs remain visible.
+  surfaces omit only logged changes structurally represented by a recovered
+  diff that reaches the same target snapshot. Other changes from that pair and
+  rows from distinct pairs remain visible.
 
 Diff additions: `bootTime` tracked (host medium, vm low, summary
 "rebooted <old> -> <new>").

@@ -30,7 +30,7 @@ from pydantic import BaseModel, Field
 
 from app import scheduler
 from app.models import Finding, Resource
-from app.models.change import Change
+from app.models.change import Change, change_identity
 from app.snapshots import store
 
 router = APIRouter(prefix="/api")
@@ -274,10 +274,12 @@ def related_changes(connection_id: str, finding: Finding, resources: list[Resour
                 and coverage.overlapping_pair[1] == pair_ids[1]
             ):
                 excluded_pairs.add(coverage.overlapping_pair)
+            represented = {change_identity(change) for change in diff}
             rows = [
                 row
                 for row in rows
                 if (row.from_snapshot_id, row.to_snapshot_id) not in excluded_pairs
+                or change_identity(row) not in represented
             ]
             changes = (_select(diff, near) + _select(rows, near))[:MAX_CHANGES]
             window = RelatedWindow(

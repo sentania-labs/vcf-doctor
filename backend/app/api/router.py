@@ -28,7 +28,7 @@ from app.models import (
     Snapshot,
     SnapshotSummary,
 )
-from app.models.change import Change, ChangeRecord
+from app.models.change import Change, ChangeRecord, change_identity
 from app.models.snapshot import RetentionPolicy
 from app.snapshots import store
 
@@ -108,7 +108,6 @@ def _latest_findings(connection_id: str | None) -> list[Finding]:
 
 SIGNIFICANCE_LEVELS = ("low", "medium", "high")
 CHANGES_MIN_SIGNIFICANCE_KEY = "changes_min_significance"
-MAX_PRE_LOG_PAIRS = 8  # snapshot pairs the Overview diffs to cover a window older than the log
 
 
 def changes_min_significance() -> str:
@@ -158,13 +157,19 @@ def _recent_changes(connection_id: str | None, min_significance: str | None) -> 
         log_since = coverage.since
         if log_since is not None:
             logged = _logged_changes(conn.id, since, floor)
-            recovered, recovered_targets = _pre_log_changes(conn.id, log_since, since)
-            if coverage.overlapping_pair and coverage.overlapping_pair[1] in recovered_targets:
+            recovered, recovered_at = _pre_log_changes(conn.id, log_since, since)
+            represented = (
+                recovered_at.get(coverage.overlapping_pair[1], set())
+                if coverage.overlapping_pair
+                else set()
+            )
+            if represented:
                 logged = [
                     row
                     for row in logged
                     if (row.from_snapshot_id, row.to_snapshot_id)
                     != coverage.overlapping_pair
+                    or change_identity(row) not in represented
                 ]
             out.extend(logged)
             out.extend(_at_least(recovered, floor))
@@ -205,38 +210,42 @@ class _RecoveredChange(Change):
 
 def _pre_log_changes(
     connection_id: str, log_since: datetime, since: datetime
-) -> tuple[list, set[str]]:
+) -> tuple[list, dict[str, set[tuple[str, str, str, str]]]]:
     """Diffs for the part of the feed window that predates the change log.
 
     The log says nothing about anything before the snapshot its first diff
     was taken from (store.log_since). On a database upgraded mid-life those
     older snapshots still exist; diff the consecutive pairs between `since`
-    and that boundary, newest first and capped, so the Overview does not
+    and that boundary, newest first and bounded by time, so the Overview does not
     silently drop that part of the window.
     """
     if log_since <= since:
-        return [], set()
+        return [], {}
+    # The feed promises this full time window, so time bounds recovery. A pair
+    # count would silently shorten coverage at faster snapshot cadences.
     summaries = [
         s
         for s in store.list_snapshots(connection_id)  # newest first
         if s.created_at <= log_since
-    ][: MAX_PRE_LOG_PAIRS + 1]
+    ]
     out: list = []
-    recovered_targets: set[str] = set()
+    recovered_at: dict[str, set[tuple[str, str, str, str]]] = {}
+    new_snap = store.get_snapshot(summaries[0].id) if summaries else None
     for newer, older in zip(summaries, summaries[1:], strict=False):
         if newer.created_at < since:
             break
-        new_snap, old_snap = store.get_snapshot(newer.id), store.get_snapshot(older.id)
+        old_snap = store.get_snapshot(older.id)
         if new_snap is None or old_snap is None:
             break
         changes = scheduler.compute_changes(old_snap.resources, new_snap.resources)
         if changes:
-            recovered_targets.add(newer.id)
+            recovered_at[newer.id] = {change_identity(change) for change in changes}
         out.extend(
             _RecoveredChange(**change.model_dump(), observed_at=new_snap.created_at)
             for change in changes
         )
-    return out, recovered_targets
+        new_snap = old_snap
+    return out, recovered_at
 
 
 def _all_changes(connection_id: str | None, from_id: str | None, to_id: str | None) -> list:
