@@ -19,20 +19,29 @@ function problem(w: HealthWeights): string | null {
   return null
 }
 
+type RawWeights = Record<HealthSeverity, string>
+
+const toRaw = (w: HealthWeights): RawWeights => ({ critical: String(w.critical), warning: String(w.warning), info: String(w.info) })
+// Empty or non-numeric text parses to NaN, which problem() below already rejects as "not a whole number".
+const toWeight = (v: string): number => (v.trim() === '' ? NaN : Math.floor(Number(v)))
+
 // Health score weights. Saves on its own (separate endpoint from the main Settings form)
 // so the score on the Overview moves as soon as a weight changes.
 export default function HealthScoreCard() {
   const s = useAsync(() => getHealthScoreSettings(), [])
-  const [weights, setWeights] = useState<HealthWeights>({ critical: 40, warning: 15, info: 0 })
+  // Raw input text, not numbers: coercing an empty box to 0 immediately makes it
+  // impossible to clear a field and retype. Coercion happens only at save/validate time.
+  const [raw, setRaw] = useState<RawWeights>({ critical: '40', warning: '15', info: '0' })
+  const weights: HealthWeights = { critical: toWeight(raw.critical), warning: toWeight(raw.warning), info: toWeight(raw.info) }
   // What the server currently holds; dirty and Defaults are judged against this, not the initial load.
   const [applied, setApplied] = useState<HealthScoreSettings | null>(null)
   const [busy, setBusy] = useState(false)
   const [saved, setSaved] = useState(false)
   const [err, setErr] = useState<string | null>(null)
-  useEffect(() => { if (s.data) { setWeights(s.data.weights); setApplied(s.data) } }, [s.data])
+  useEffect(() => { if (s.data) { setRaw(toRaw(s.data.weights)); setApplied(s.data) } }, [s.data])
 
-  const set = (k: HealthSeverity) => (e: ChangeEvent<HTMLInputElement>) => setWeights(w => ({ ...w, [k]: e.target.value === '' ? 0 : Math.floor(Number(e.target.value)) }))
-  const apply = (d: HealthScoreSettings) => { setWeights(d.weights); setApplied(d); setSaved(true); setTimeout(() => setSaved(false), 2500) }
+  const set = (k: HealthSeverity) => (e: ChangeEvent<HTMLInputElement>) => setRaw(r => ({ ...r, [k]: e.target.value }))
+  const apply = (d: HealthScoreSettings) => { setRaw(toRaw(d.weights)); setApplied(d); setSaved(true); setTimeout(() => setSaved(false), 2500) }
   const run = async (op: () => Promise<HealthScoreSettings>) => {
     setBusy(true); setErr(null); setSaved(false)
     try { apply(await op()) } catch (e) { setErr(e instanceof Error ? e.message : String(e)) } finally { setBusy(false) }
@@ -52,7 +61,7 @@ export default function HealthScoreCard() {
               <div className="grid sm:grid-cols-3 gap-4">
                 {SEVERITIES.map(({ key, label, hint }) => (
                   <Field key={key} label={label} hint={hint}>
-                    <Input type="number" min={0} max={100} inputMode="numeric" value={weights[key]} onChange={set(key)} disabled={busy} aria-label={label} />
+                    <Input type="number" min={0} max={100} inputMode="numeric" value={raw[key]} onChange={set(key)} disabled={busy} aria-label={label} />
                   </Field>
                 ))}
               </div>
