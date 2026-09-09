@@ -223,7 +223,8 @@ def related_changes(connection_id: str, finding: Finding, resources: list[Resour
         return FindingRelated(
             finding_id=finding.id, connection_id=connection_id, resource_ids=near, window=window
         )
-    log_starts = store.effective_log_since(connection_id)
+    coverage = store.effective_log_coverage(connection_id)
+    log_starts = coverage.since
     if log_starts is not None:
         floor = store.now() - MAX_WINDOW
         # The introducing diff is stamped with the first snapshot that holds the finding, or
@@ -261,21 +262,23 @@ def related_changes(connection_id: str, finding: Finding, resources: list[Resour
                     first.interval_start,
                     seen_at,
                 )
-                rows = [
-                    row
-                    for row in rows
-                    if (row.from_snapshot_id, row.to_snapshot_id)
-                    != (first.interval_start_id, first.seen_id)
-                ]
+                pair_ids = (first.interval_start_id, first.seen_id)
             else:
                 basis = "pre_log_differing_pair"
                 diff, pair_since, pair_until, pair_ids = _latest_differing_pair(connection_id)
-                if pair_ids is not None:
-                    rows = [
-                        row
-                        for row in rows
-                        if (row.from_snapshot_id, row.to_snapshot_id) != pair_ids
-                    ]
+            excluded_pairs = {pair_ids} if pair_ids is not None else set()
+            if (
+                coverage.overlapping_pair is not None
+                and diff
+                and pair_ids is not None
+                and coverage.overlapping_pair[1] == pair_ids[1]
+            ):
+                excluded_pairs.add(coverage.overlapping_pair)
+            rows = [
+                row
+                for row in rows
+                if (row.from_snapshot_id, row.to_snapshot_id) not in excluded_pairs
+            ]
             changes = (_select(diff, near) + _select(rows, near))[:MAX_CHANGES]
             window = RelatedWindow(
                 basis=basis,

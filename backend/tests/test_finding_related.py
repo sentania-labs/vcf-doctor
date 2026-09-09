@@ -592,6 +592,67 @@ def test_startup_backfills_log_since_from_the_oldest_surviving_row(client):
     assert body["window"]["log_starts_at"] is None
 
 
+def test_pruned_backfill_source_does_not_replay_the_first_logged_change(client, monkeypatch):
+    now = datetime(2026, 9, 9, 12, tzinfo=UTC)
+    cid = _connection(client, 0)
+    connected = Resource(
+        id="host:backfill",
+        type="host",
+        name="backfill-host",
+        source="test",
+        properties={"connectionState": "connected"},
+    )
+    disconnected = connected.model_copy(deep=True)
+    disconnected.properties["connectionState"] = "disconnected"
+    finding = Finding(
+        id="test:backfill",
+        check_id="HOST_DISCONNECTED",
+        severity="critical",
+        title="Host disconnected",
+        summary="The host is disconnected",
+        resource_id=disconnected.id,
+        resource_type=disconnected.type,
+        resource_name=disconnected.name,
+    )
+
+    monkeypatch.setattr(store, "now", lambda: now - timedelta(minutes=15))
+    s0 = store.save_snapshot(cid, [connected], "S0", scheduled=False)
+    store.save_findings(s0.id, [])
+    monkeypatch.setattr(store, "now", lambda: now - timedelta(minutes=10))
+    s1 = store.save_snapshot(cid, [connected], "S1", scheduled=True)
+    store.save_findings(s1.id, [finding])
+    monkeypatch.setattr(store, "now", lambda: now - timedelta(minutes=5))
+    s2 = store.save_snapshot(cid, [disconnected], "S2", scheduled=True)
+    store.save_findings(s2.id, [finding])
+    store.save_changes(
+        cid,
+        s1.id,
+        s2.id,
+        s2.created_at,
+        scheduler.compute_changes(s1.resources, s2.resources),
+    )
+    assert store.delete_snapshots([s1.id]) == 1
+    with db.transaction() as c:
+        c.execute("DELETE FROM settings WHERE key = ?", (f"{store.LOG_SINCE_KEY}:{cid}",))
+    assert store.backfill_log_since() == {cid: s2.created_at}
+    monkeypatch.setattr(store, "now", lambda: now)
+
+    overview = client.get(f"/api/overview?connection_id={cid}&min_significance=high")
+    assert overview.status_code == 200
+    overview_changes = overview.json()["recent_changes"]
+    assert [change["summary"] for change in overview_changes] == [
+        "connectionState connected -> disconnected"
+    ]
+
+    response = client.get(f"/api/findings/{finding.id}/related?connection_id={cid}")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["window"]["basis"] == "pre_log_bracketing_pair"
+    assert [change["summary"] for change in body["changes"]] == [
+        "connectionState connected -> disconnected"
+    ]
+
+
 def _copy_snapshots(cid: str, count: int) -> None:
     """More snapshots holding the same findings, like an estate on 15-minute scans."""
     latest = store.latest_snapshot(cid)

@@ -11,6 +11,7 @@ import gzip
 import json
 import logging
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta, tzinfo
 
 from pydantic import ValidationError
@@ -819,6 +820,26 @@ LOG_SINCE_KEY = "log_since"
 LOG_RETAINED_SINCE_KEY = "log_retained_since"
 
 
+@dataclass(frozen=True)
+class LogCoverage:
+    since: datetime | None
+    overlapping_pair: tuple[str, str] | None = None
+
+
+def _oldest_change_row(connection_id: str):
+    return db.fetchone(
+        "SELECT c.from_snapshot_id, c.to_snapshot_id, c.observed_at, "
+        "source.id AS source_id, source.created_at AS source_created_at, "
+        "target.id AS target_id FROM changes c "
+        "LEFT JOIN snapshots source ON source.id = c.from_snapshot_id "
+        "AND source.connection_id = c.connection_id "
+        "LEFT JOIN snapshots target ON target.id = c.to_snapshot_id "
+        "AND target.connection_id = c.connection_id "
+        "WHERE c.connection_id = ? ORDER BY c.observed_at ASC LIMIT 1",
+        (connection_id,),
+    )
+
+
 def log_since(connection_id: str) -> datetime | None:
     """First covered interval for this connection, including empty diffs."""
     raw = db.get_setting(f"{LOG_SINCE_KEY}:{connection_id}")
@@ -827,12 +848,26 @@ def log_since(connection_id: str) -> datetime | None:
 
 def effective_log_since(connection_id: str) -> datetime | None:
     """Oldest interval still covered after change-log retention."""
+    return effective_log_coverage(connection_id).since
+
+
+def effective_log_coverage(connection_id: str) -> LogCoverage:
     started = log_since(connection_id)
     if started is None:
-        return None
+        return LogCoverage(None)
     raw = db.get_setting(f"{LOG_RETAINED_SINCE_KEY}:{connection_id}")
     retained = datetime.fromisoformat(raw) if raw else started
-    return max(started, retained)
+    since = max(started, retained)
+    row = _oldest_change_row(connection_id)
+    pair = None
+    if (
+        row is not None
+        and row["source_id"] is None
+        and row["target_id"] is not None
+        and _dt(row["observed_at"]) == since
+    ):
+        pair = (row["from_snapshot_id"], row["to_snapshot_id"])
+    return LogCoverage(since, pair)
 
 
 # The marker is a settings row, written through save_changes' own transaction so
@@ -854,14 +889,8 @@ def backfill_log_since() -> dict[str, datetime]:
         cid = connection["connection_id"]
         start = log_since(cid)
         if start is None:
-            row = db.fetchone(
-                "SELECT c.observed_at, s.created_at FROM changes c "
-                "LEFT JOIN snapshots s ON s.id = c.from_snapshot_id "
-                "AND s.connection_id = c.connection_id "
-                "WHERE c.connection_id = ? ORDER BY c.observed_at ASC LIMIT 1",
-                (cid,),
-            )
-            start = datetime.fromisoformat(row["created_at"] or row["observed_at"])
+            row = _oldest_change_row(cid)
+            start = datetime.fromisoformat(row["source_created_at"] or row["observed_at"])
             _set_log_since(cid, start)
         starts[cid] = start
     return starts

@@ -154,10 +154,20 @@ def _recent_changes(connection_id: str | None, min_significance: str | None) -> 
     since = store.now() - timedelta(hours=24)
     out: list = []
     for conn in _target_connections(connection_id):
-        log_since = store.effective_log_since(conn.id)
+        coverage = store.effective_log_coverage(conn.id)
+        log_since = coverage.since
         if log_since is not None:
-            out.extend(_logged_changes(conn.id, since, floor))
-            out.extend(_at_least(_pre_log_changes(conn.id, log_since, since), floor))
+            logged = _logged_changes(conn.id, since, floor)
+            recovered, recovered_targets = _pre_log_changes(conn.id, log_since, since)
+            if coverage.overlapping_pair and coverage.overlapping_pair[1] in recovered_targets:
+                logged = [
+                    row
+                    for row in logged
+                    if (row.from_snapshot_id, row.to_snapshot_id)
+                    != coverage.overlapping_pair
+                ]
+            out.extend(logged)
+            out.extend(_at_least(recovered, floor))
             continue
         pair = store.latest_snapshots(conn.id, 2)
         if len(pair) == 2:
@@ -193,7 +203,9 @@ class _RecoveredChange(Change):
     observed_at: datetime
 
 
-def _pre_log_changes(connection_id: str, log_since: datetime, since: datetime) -> list:
+def _pre_log_changes(
+    connection_id: str, log_since: datetime, since: datetime
+) -> tuple[list, set[str]]:
     """Diffs for the part of the feed window that predates the change log.
 
     The log says nothing about anything before the snapshot its first diff
@@ -203,24 +215,28 @@ def _pre_log_changes(connection_id: str, log_since: datetime, since: datetime) -
     silently drop that part of the window.
     """
     if log_since <= since:
-        return []
+        return [], set()
     summaries = [
         s
         for s in store.list_snapshots(connection_id)  # newest first
         if s.created_at <= log_since
     ][: MAX_PRE_LOG_PAIRS + 1]
     out: list = []
+    recovered_targets: set[str] = set()
     for newer, older in zip(summaries, summaries[1:], strict=False):
         if newer.created_at < since:
             break
         new_snap, old_snap = store.get_snapshot(newer.id), store.get_snapshot(older.id)
         if new_snap is None or old_snap is None:
             break
+        changes = scheduler.compute_changes(old_snap.resources, new_snap.resources)
+        if changes:
+            recovered_targets.add(newer.id)
         out.extend(
             _RecoveredChange(**change.model_dump(), observed_at=new_snap.created_at)
-            for change in scheduler.compute_changes(old_snap.resources, new_snap.resources)
+            for change in changes
         )
-    return out
+    return out, recovered_targets
 
 
 def _all_changes(connection_id: str | None, from_id: str | None, to_id: str | None) -> list:
