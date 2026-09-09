@@ -26,11 +26,14 @@ function AccessCard() {
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
     if (lockUntil === null) return
-    const id = setInterval(() => setNow(Date.now()), 250)
+    const id = setInterval(() => {
+      const time = Date.now()
+      if (time >= lockUntil) setLockUntil(null)
+      setNow(time)
+    }, 250)
     return () => clearInterval(id)
   }, [lockUntil])
   const waitSeconds = lockUntil === null ? 0 : Math.max(0, Math.ceil((lockUntil - now) / 1000))
-  useEffect(() => { if (lockUntil !== null && waitSeconds === 0) setLockUntil(null) }, [lockUntil, waitSeconds])
   const locked = waitSeconds > 0
 
   const submit = async (e: FormEvent) => {
