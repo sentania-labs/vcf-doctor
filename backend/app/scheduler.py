@@ -5,12 +5,13 @@ of a connection at a time is enforced by a PostgreSQL advisory lock, so a
 manual scan on one worker and a scheduled scan on another cannot overlap.
 
 Every worker serves the API, but only one runs scheduled scans: the one holding
-the scheduler advisory lock. Every worker runs a background job once a minute
-that tries to take that lock, checks it is still held, and re-reads the stored
-schedules. That one loop covers three things: a schedule edited on another
-worker reaches the worker that owns the jobs, a database restart that ended the
-lock session is noticed and the lock retaken, and a leader that goes away is
-replaced by another worker or pod within a minute.
+the scheduler advisory lock. Every worker runs a background job that tries to
+take that lock, checks it is still held, and re-reads the stored schedules. It
+runs more often while startup work is pending, then once a minute. That one loop
+covers three things: a schedule edited on another worker reaches the worker that
+owns the jobs, a database restart that ended the lock session is noticed and the
+lock retaken, and a leader that goes away is replaced by another worker or pod
+within a minute.
 """
 
 import logging
@@ -37,6 +38,7 @@ _startup_pending: frozenset[str] = frozenset()
 _startup_failures: tuple[str, ...] = ()
 _retention_completed: set[str] = set()
 RECONCILE_SECONDS = 60
+STARTUP_RETRY_SECONDS = 5
 
 
 def retention_policy() -> RetentionPolicy:
@@ -70,64 +72,77 @@ def disable_stale_fixture_schedules() -> list[str]:
     return paused
 
 
-def _startup_vault_rekey() -> None:
+def _startup_vault_rekey() -> bool:
     from app import vault
 
     vault.rekey_at_startup()
+    return True
 
 
-def _startup_vault_plaintext() -> None:
+def _startup_vault_plaintext() -> bool:
     from app import vault
 
     vault.migrate_plaintext()
+    return True
 
 
-def _startup_event_defaults() -> None:
+def _startup_event_defaults() -> bool:
     from app.events import store as events_store
 
     events_store.seed_defaults()
+    return True
 
 
-def _startup_change_log_backfill() -> None:
+def _startup_change_log_backfill() -> bool:
     for cid, start in store.backfill_log_since().items():
         log.info("change log coverage for %s starts %s", cid, start.isoformat())
+    return True
 
 
-def _startup_scan_reconciliation() -> None:
+def _startup_scan_reconciliation() -> bool:
     interrupted = store.reconcile_interrupted_runs()
     if interrupted:
         log.warning("marked %d interrupted scan run(s) as error", interrupted)
+    return True
 
 
-def _startup_auth_bootstrap() -> None:
+def _startup_auth_bootstrap() -> bool:
     from app import auth
 
     auth.bootstrap_from_env()
+    return True
 
 
-def _startup_fixture_schedules() -> None:
+def _startup_fixture_schedules() -> bool:
     disable_stale_fixture_schedules()
+    return True
 
 
-def _startup_retention() -> bool:
+def _startup_retention() -> bool | None:
     connections = store.list_connections()
     policy = retention_policy()
-    complete = True
+    blocked = False
+    failed = False
     for conn in connections:
         if conn.id in _retention_completed:
             continue
         try:
             store.apply_retention(conn.id, policy)
-        except Exception:
-            complete = False
-            log.exception(
-                "deferred startup step retention failed for connection %s; "
-                "retrying next interval",
-                conn.id,
-            )
+        except Exception as exc:
+            if db.is_connection_unavailable(exc):
+                blocked = True
+            else:
+                failed = True
+                log.exception(
+                    "deferred startup step retention failed for connection %s; "
+                    "retrying next interval",
+                    conn.id,
+                )
         else:
             _retention_completed.add(conn.id)
-    return complete
+    if failed:
+        return False
+    return None if blocked else True
 
 
 _STARTUP_STEPS = (
@@ -152,22 +167,30 @@ def startup_maintenance() -> None:
 
     pending = set(_startup_pending)
     failures: set[str] = set()
+    blocked = False
     for identifier, action in _STARTUP_STEPS:
         if identifier not in pending:
             continue
         try:
             complete = action()
-        except Exception:
-            failures.add(identifier)
-            log.exception("deferred startup step %s failed; retrying next interval", identifier)
+        except Exception as exc:
+            if db.is_connection_unavailable(exc):
+                blocked = True
+            else:
+                failures.add(identifier)
+                log.exception("deferred startup step %s failed; retrying next interval", identifier)
         else:
             if complete is False:
                 failures.add(identifier)
-            else:
+            elif complete is True:
                 pending.remove(identifier)
+            else:
+                blocked = True
 
     _startup_pending = frozenset(pending)
     _startup_failures = tuple(sorted(failures))
+    if blocked:
+        log.info("deferred startup work is waiting for the database")
 
 
 def _begin_startup() -> None:
@@ -437,11 +460,22 @@ def _maintenance_job() -> None:
     if _startup_pending:
         try:
             startup_maintenance()
-        except Exception:
-            _startup_failures = tuple(sorted(set(_startup_failures) | {"maintenance_pass"}))
-            log.exception("deferred startup maintenance pass failed; retrying next interval")
+        except Exception as exc:
+            if db.is_connection_unavailable(exc):
+                _startup_failures = ()
+                log.info("deferred startup work is waiting for the database")
+            else:
+                _startup_failures = ("maintenance_pass",)
+                log.exception("deferred startup maintenance pass failed; retrying next interval")
         if not _startup_pending:
             log.info("deferred startup work completed")
+            if _scheduler is not None:
+                from apscheduler.triggers.interval import IntervalTrigger
+
+                _scheduler.reschedule_job(
+                    "scheduler-maintenance",
+                    trigger=IntervalTrigger(seconds=RECONCILE_SECONDS),
+                )
     if scheduler_enabled():
         _leadership_job()
 
@@ -459,7 +493,7 @@ def start() -> None:
     _scheduler = BackgroundScheduler(timezone="UTC")
     _scheduler.add_job(
         _maintenance_job,
-        IntervalTrigger(seconds=RECONCILE_SECONDS),
+        IntervalTrigger(seconds=STARTUP_RETRY_SECONDS),
         id="scheduler-maintenance",
         replace_existing=True,
         max_instances=1,

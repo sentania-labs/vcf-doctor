@@ -35,3 +35,25 @@ test('readiness only reports the console up from a complete healthy response', (
     { backend: 'up', backendError: null, databaseHealthy: true },
   )
 })
+
+test('database recovery moves startup to normal without a maintenance alarm', () => {
+  const states = [
+    classifyReadiness({
+      status: 'degraded',
+      database: true,
+      startup_complete: false,
+      startup_failures: [],
+    }),
+    classifyReadiness({
+      status: 'ok',
+      database: true,
+      startup_complete: true,
+      startup_failures: [],
+    }),
+  ]
+
+  assert.deepEqual(
+    states.map(({ backend }) => backend),
+    ['starting', 'up'],
+  )
+})

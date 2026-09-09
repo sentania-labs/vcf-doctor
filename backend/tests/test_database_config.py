@@ -3,6 +3,7 @@ and the password never travels in an environment variable."""
 
 import base64
 import json
+import logging
 import socket
 import threading
 import time
@@ -129,7 +130,7 @@ def _http_json(url: str) -> tuple[int, dict]:
         return response.status, json.loads(response.read())
 
 
-def test_cold_start_serves_liveness_then_recovers_readiness(monkeypatch):
+def test_cold_start_serves_liveness_then_recovers_readiness(monkeypatch, caplog):
     import uvicorn
 
     from app import scheduler
@@ -141,7 +142,11 @@ def test_cold_start_serves_liveness_then_recovers_readiness(monkeypatch):
     scheduler.shutdown()
     monkeypatch.setattr(scheduler, "_background_jobs_enabled", lambda: True)
     monkeypatch.setattr(scheduler, "RECONCILE_SECONDS", 0.05)
+    monkeypatch.setattr(scheduler, "STARTUP_RETRY_SECONDS", 2)
     _unreachable(monkeypatch)
+    monkeypatch.setattr(cfg, "db_pool_timeout", 0.1)
+    monkeypatch.setattr(db, "PROBE_TIMEOUT", 0.1)
+    caplog.set_level(logging.INFO, logger="vcf_doctor.scan")
 
     port = _free_port()
     server_config = uvicorn.Config(
@@ -175,10 +180,24 @@ def test_cold_start_serves_liveness_then_recovers_readiness(monkeypatch):
         status, ready = _http_json(f"{base}/api/health/ready")
         assert status == 503
         assert ready["status"] == "degraded" and ready["database"] is False
+        assert ready["startup_failures"] == []
+
+        deadline = time.monotonic() + 10
+        while (
+            "deferred startup work is waiting for the database" not in caplog.text
+            and time.monotonic() < deadline
+        ):
+            time.sleep(0.05)
+        assert "deferred startup work is waiting for the database" in caplog.text
 
         monkeypatch.setattr(cfg, "database_url", original_url)
         monkeypatch.setattr(cfg, "db_password_file", original_password_file)
         db.close()
+        status, ready = _http_json(f"{base}/api/health/ready")
+        assert status == 503
+        assert ready["database"] is True
+        assert ready["startup_complete"] is False
+        assert ready["startup_failures"] == []
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:
             status, ready = _http_json(f"{base}/api/health/ready")

@@ -74,6 +74,10 @@ def conninfo() -> str:
     return make_conninfo(url, **extra)
 
 
+def is_connection_unavailable(exc: BaseException) -> bool:
+    return isinstance(exc, (psycopg.OperationalError, psycopg.InterfaceError))
+
+
 def _new_pool() -> ConnectionPool:
     pool = ConnectionPool(
         conninfo(),
