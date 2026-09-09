@@ -31,6 +31,8 @@ async def lifespan(application: FastAPI):
         vault.migrate_plaintext()
     except Exception:
         log.exception("startup: secret migration failed; plaintext rows are still readable")
+    for cid, start in store.backfill_log_since().items():
+        log.info("change log coverage for %s starts %s", cid, start.isoformat())
     interrupted = store.reconcile_interrupted_runs()
     if interrupted:
         log.warning("marked %d interrupted scan run(s) as error", interrupted)

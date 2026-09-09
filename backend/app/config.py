@@ -5,7 +5,14 @@ container. Operator-time configuration (connections, schedules, retention,
 assistant settings) lives in SQLite and is edited through the GUI.
 """
 
+import os
+
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _retention_timezone_default() -> str:
+    return (os.environ.get("TZ") or "UTC").strip() or "UTC"
 
 
 class Settings(BaseSettings):
@@ -26,6 +33,8 @@ class Settings(BaseSettings):
     retention_recent_days: int = 14
     retention_hourly_days: int = 30
     retention_daily_days: int = 365
+    # IANA zone whose midnights are the daily tier's day marks.
+    retention_timezone: str = Field(default_factory=_retention_timezone_default)
     # Event history is intentionally independent from snapshot history. The
     # effective values live in the settings table and are editable in the GUI.
     event_retention_hours: int = 48

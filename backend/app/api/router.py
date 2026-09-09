@@ -28,7 +28,7 @@ from app.models import (
     Snapshot,
     SnapshotSummary,
 )
-from app.models.change import ChangeRecord
+from app.models.change import Change, ChangeRecord, change_identity
 from app.models.snapshot import RetentionPolicy
 from app.snapshots import store
 
@@ -145,13 +145,34 @@ def _recent_changes(connection_id: str | None, min_significance: str | None) -> 
     """Overview feed: the persisted log (last 24 h, or the newest observation
     when the last scan is older than that) for each connection that has one;
     the on-demand diff of the latest pair for connections that do not
-    (databases predating the log). Sorted high significance first, then newest."""
+    (databases predating the log). When the log itself starts inside the window
+    (a database upgraded to the change log mid-life, issue #41) the earlier part
+    of the window is recovered by diffing the snapshots that do cover it.
+    Sorted high significance first, then newest."""
     floor = _resolve_min_significance(min_significance)
     since = store.now() - timedelta(hours=24)
     out: list = []
     for conn in _target_connections(connection_id):
-        if store.count_changes(conn.id):
-            out.extend(_logged_changes(conn.id, since, floor))
+        coverage = store.effective_log_coverage(conn.id)
+        log_since = coverage.since
+        if log_since is not None:
+            logged = _logged_changes(conn.id, since, floor)
+            recovered, recovered_at = _pre_log_changes(conn.id, log_since, since)
+            represented = (
+                recovered_at.get(coverage.overlapping_pair[1], set())
+                if coverage.overlapping_pair
+                else set()
+            )
+            if represented:
+                logged = [
+                    row
+                    for row in logged
+                    if (row.from_snapshot_id, row.to_snapshot_id)
+                    != coverage.overlapping_pair
+                    or change_identity(row) not in represented
+                ]
+            out.extend(logged)
+            out.extend(_at_least(recovered, floor))
             continue
         pair = store.latest_snapshots(conn.id, 2)
         if len(pair) == 2:
@@ -181,6 +202,50 @@ def _logged_changes(connection_id: str, since: datetime, floor: str) -> list:
     return store.list_change_log(
         connection_id, since=observed, until=observed, min_significance=floor
     )
+
+
+class _RecoveredChange(Change):
+    observed_at: datetime
+
+
+def _pre_log_changes(
+    connection_id: str, log_since: datetime, since: datetime
+) -> tuple[list, dict[str, set[tuple[str, str, str, str]]]]:
+    """Diffs for the part of the feed window that predates the change log.
+
+    The log says nothing about anything before the snapshot its first diff
+    was taken from (store.log_since). On a database upgraded mid-life those
+    older snapshots still exist; diff the consecutive pairs between `since`
+    and that boundary, newest first and bounded by time, so the Overview does not
+    silently drop that part of the window.
+    """
+    if log_since <= since:
+        return [], {}
+    # The feed promises this full time window, so time bounds recovery. A pair
+    # count would silently shorten coverage at faster snapshot cadences.
+    summaries = [
+        s
+        for s in store.list_snapshots(connection_id)  # newest first
+        if s.created_at <= log_since
+    ]
+    out: list = []
+    recovered_at: dict[str, set[tuple[str, str, str, str]]] = {}
+    new_snap = store.get_snapshot(summaries[0].id) if summaries else None
+    for newer, older in zip(summaries, summaries[1:], strict=False):
+        if newer.created_at < since:
+            break
+        old_snap = store.get_snapshot(older.id)
+        if new_snap is None or old_snap is None:
+            break
+        changes = scheduler.compute_changes(old_snap.resources, new_snap.resources)
+        if changes:
+            recovered_at[newer.id] = {change_identity(change) for change in changes}
+        out.extend(
+            _RecoveredChange(**change.model_dump(), observed_at=new_snap.created_at)
+            for change in changes
+        )
+        new_snap = old_snap
+    return out, recovered_at
 
 
 def _all_changes(connection_id: str | None, from_id: str | None, to_id: str | None) -> list:
@@ -300,12 +365,17 @@ def get_changes(
 def _parse_time(value: str | None, name: str) -> datetime | None:
     if value is None or value == "":
         return None
-    # An unencoded "+HH:MM" offset reaches us as " HH:MM"; put the plus back.
-    text = re.sub(r" (\d{2}:\d{2})$", r"+\1", value.strip().replace("Z", "+00:00"))
+    text = value.strip().replace("Z", "+00:00")
     try:
         parsed = datetime.fromisoformat(text)
-    except ValueError as exc:
-        raise HTTPException(400, f"{name} must be an ISO 8601 timestamp") from exc
+    except ValueError:
+        # An unencoded "+HH:MM" offset reaches us as " HH:MM"; put the plus back.
+        # Only after the plain parse has failed, so a hand-typed local time such
+        # as "2026-01-01 10:00" is still accepted (issue #28).
+        try:
+            parsed = datetime.fromisoformat(re.sub(r" (\d{2}:\d{2})$", r"+\1", text))
+        except ValueError as exc:
+            raise HTTPException(400, f"{name} must be an ISO 8601 timestamp") from exc
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
@@ -511,7 +581,7 @@ def run_compaction_migration():
     return events_store.bounded_maintenance()
 
 
-_TIER_KEYS = ("recent_days", "hourly_days", "daily_days")
+_TIER_KEYS = ("recent_days", "hourly_days", "daily_days", "timezone")
 
 
 def _merge_retention_policy(update: dict[str, Any]) -> RetentionPolicy:
@@ -520,6 +590,11 @@ def _merge_retention_policy(update: dict[str, Any]) -> RetentionPolicy:
         raise HTTPException(400, f"unknown retention_policy keys: {', '.join(sorted(unknown))}")
     merged = scheduler.retention_policy().model_dump()
     for key, value in update.items():
+        if key == "timezone":
+            if not isinstance(value, str):
+                raise HTTPException(400, "retention_policy.timezone must be an IANA zone name")
+            merged[key] = value.strip()
+            continue
         if isinstance(value, bool) or not isinstance(value, int):
             raise HTTPException(400, f"retention_policy.{key} must be an integer number of days")
         merged[key] = value

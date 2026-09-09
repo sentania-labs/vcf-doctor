@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from typing import Any, Literal
 
@@ -32,3 +33,13 @@ class ChangeRecord(Change):
     from_snapshot_id: str
     to_snapshot_id: str
     observed_at: datetime  # the "to" snapshot's created_at
+
+
+def change_identity(change: Change) -> tuple[str, str, str, str]:
+    properties = json.dumps(
+        {key: value.model_dump(mode="json") for key, value in change.property_changes.items()},
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    return change.change_type, change.resource_id, change.resource_type, properties

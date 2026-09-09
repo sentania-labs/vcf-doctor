@@ -97,6 +97,11 @@ def test_log_filters_and_validation(client):
     # offset (the "+" arrives as a space).
     assert client.get(base + "&since=2020-01-01T00:00:00Z").status_code == 200
     assert client.get(base + "&since=2020-01-01T00:00:00+00:00").status_code == 200
+    # A hand-typed timestamp with a space instead of a T, and no offset, is a
+    # valid ISO 8601 datetime and is read as UTC (issue #28).
+    assert client.get(base + "&since=2020-01-01 10:00").status_code == 200
+    assert client.get(base + "&since=2020-01-01T10:00:00").status_code == 200
+    assert len(client.get(base + "&since=2020-01-01 10:00&min_significance=low").json()) == 15
 
 
 def test_on_demand_compare_endpoint_unchanged(client):
@@ -138,13 +143,21 @@ def test_overview_reads_log_and_falls_back_when_empty(client):
     latest = store.latest_snapshots(cid, 2)
     store.save_changes(cid, latest[1].id, latest[0].id, latest[0].created_at, [seeded])
     ov = client.get(f"/api/overview?connection_id={cid}").json()
-    assert [c["summary"] for c in ov["recent_changes"]] == ["seeded row"]
-    assert (
-        client.get(f"/api/overview?connection_id={cid}&min_significance=high").json()[
+    summaries = [c["summary"] for c in ov["recent_changes"]]
+    assert "seeded row" in summaries
+    # The log starts at the newest interval, so the A -> B interval before it is
+    # still pre-log and inside the 24 h window: the feed recovers it from the
+    # snapshots rather than pretending nothing happened there (issue #41).
+    assert "connectionState connected -> disconnected" in summaries
+    assert len(summaries) == 5  # the feed shows the top five
+    high = [
+        c["summary"]
+        for c in client.get(f"/api/overview?connection_id={cid}&min_significance=high").json()[
             "recent_changes"
         ]
-        == []
-    )
+    ]
+    assert "connectionState connected -> disconnected" in high
+    assert "seeded row" not in high  # medium, filtered out as before
 
 
 def test_overview_keeps_latest_pair_when_last_scan_is_older_than_24h(client):

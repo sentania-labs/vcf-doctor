@@ -1,6 +1,6 @@
 import type { ScanRun, SnapshotSummary } from '@/types'
 import { apiGet, apiSend } from './client'
-import { qs } from '@/lib/format'
+import { dayKey, qs } from '@/lib/format'
 import { USE_MOCKS, delay, mockEstate, mockState } from './mocks'
 
 export function getScans(connectionId?: string | null): Promise<ScanRun[]> {
@@ -19,7 +19,8 @@ export function triggerScan(connectionId?: string | null): Promise<ScanRun[]> {
       setTimeout(() => {
         run.status = 'ok'
         run.finished = new Date().toISOString()
-        const snap: SnapshotSummary = { id: `snap-${e.connection.id}-${mockState.nextId++}`, created_at: run.finished, label: 'Manual scan', connection_id: e.connection.id, scheduled: false, resource_count: e.resources.length, tier: 'manual' }
+        const timezone = mockState.settings.retention_policy.timezone
+        const snap: SnapshotSummary = { id: `snap-${e.connection.id}-${mockState.nextId++}`, created_at: run.finished, label: 'Manual scan', connection_id: e.connection.id, scheduled: false, resource_count: e.resources.length, tier: 'manual', retention_day: dayKey(run.finished, timezone) }
         run.snapshot_id = snap.id
         e.snapshots.unshift(snap)
         e.schedule.last_run = run.finished
