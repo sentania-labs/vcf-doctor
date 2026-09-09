@@ -55,6 +55,7 @@ MAX_PLACEHOLDER_TYPES = 8  # distinct registrations per drain before giving up
 _TYPE_NAME = re.compile(r"^[A-Z][A-Za-z0-9_]*$")
 _placeholder_lock = threading.Lock()
 _placeholders: set[str] = set()
+_wrong_placeholders: set[str] = set()
 
 # (attribute on the event, attribute on the EventArgument holding the moref)
 ENTITY_ARGS: tuple[tuple[str, str], ...] = (
@@ -350,20 +351,27 @@ def _drain(collector: Any, reader: str) -> FetchBatch:
     it, rewind and read the window again. Bounded: the same name twice, more
     than MAX_PLACEHOLDER_TYPES names, a KeyError that names no type, or a type
     pyVmomi already defines all re-raise the original error. A KeyError that
-    names no type after a registration means the placeholder was wrong (the
-    name was a data object type, not a managed one), so the first error, the
-    one naming the real type, is what surfaces.
+    names no type after a registration means the latest placeholder was wrong
+    (the name was a data object type, not a managed one), so the latest error,
+    the one naming the real type, is what surfaces.
     """
     registered: list[str] = []
-    first_error: KeyError | None = None
+    last_error: KeyError | None = None
     try:
         while True:
             try:
                 return _read_pages(collector, reader)
             except KeyError as exc:
                 name = unknown_type_name(exc)
-                if name is None and first_error is not None:
-                    raise first_error from exc
+                if name is None:
+                    if last_error is not None:
+                        with _placeholder_lock:
+                            _wrong_placeholders.add(registered[-1])
+                        raise last_error from exc
+                    with _placeholder_lock:
+                        wrong_names = ", ".join(sorted(_wrong_placeholders))
+                    if wrong_names:
+                        raise KeyError(wrong_names) from exc
                 if (
                     name is None
                     or name in registered
@@ -371,7 +379,7 @@ def _drain(collector: Any, reader: str) -> FetchBatch:
                     or not register_placeholder_type(name)
                 ):
                     raise
-                first_error = first_error or exc
+                last_error = exc
                 registered.append(name)
                 log.warning(
                     "%s returned managed object type %r that pyVmomi %s does not define; "

@@ -10,6 +10,7 @@ future pyVmomi release adds; placeholder registration is process-global.
 
 import logging
 from datetime import UTC, datetime, timedelta
+from uuid import uuid4
 
 import pytest
 
@@ -319,7 +320,7 @@ def test_drain_reports_the_real_name_for_an_unknown_event_class():
     still name the event class, and 'type' must never become a placeholder."""
     from pyVmomi import SoapAdapter, vim
 
-    name = "VcfProbeNewEvent"
+    name = f"VcfProbeNewEvent{uuid4().hex}"
     page = _unknown_event_class_page(name)
 
     class Collector:
@@ -335,12 +336,42 @@ def test_drain_reports_the_real_name_for_an_unknown_event_class():
         def DestroyCollector(self):
             pass
 
-    collector = Collector()
-    with pytest.raises(KeyError) as excinfo:
-        _drain(collector, "ReadNextEvents")
-    assert excinfo.value.args == (name,)
-    assert collector.rewinds == 2
+    first = Collector()
+    with pytest.raises(KeyError) as first_excinfo:
+        _drain(first, "ReadNextEvents")
+    assert first_excinfo.value.args == (name,)
+    assert first.rewinds == 2
+
+    second = Collector()
+    with pytest.raises(KeyError) as second_excinfo:
+        _drain(second, "ReadNextEvents")
+    assert second_excinfo.value.args == (name,)
+    assert second.rewinds == 1
     assert "type" not in placeholder_types()
+
+
+def test_drain_reports_the_latest_registration_when_its_placeholder_is_wrong(monkeypatch):
+    monkeypatch.setattr(collector_events, "register_placeholder_type", lambda name: True)
+
+    class MixedUnknownTypes:
+        rewinds = 0
+
+        def RewindCollector(self):
+            self.rewinds += 1
+
+        def ReadNextEvents(self, size):
+            if self.rewinds == 1:
+                raise KeyError("VcfProbeManagedType")
+            if self.rewinds == 2:
+                raise KeyError("VcfProbeEventClass")
+            raise KeyError("type")
+
+        def DestroyCollector(self):
+            pass
+
+    with pytest.raises(KeyError) as excinfo:
+        _drain(MixedUnknownTypes(), "ReadNextEvents")
+    assert excinfo.value.args == ("VcfProbeEventClass",)
 
 
 def test_capture_logs_the_minimum_window_cap(monkeypatch, caplog, tmp_path):
