@@ -153,9 +153,11 @@ async def key_unavailable(request: Request, exc: vault.KeyUnavailable):
 # Liveness and readiness are different questions and they are answered
 # separately, because they lead to opposite actions.
 #
-# Liveness: is this process alive. It touches nothing external, so it stays
-# green while PostgreSQL is unreachable. Restarting a console whose database is
-# down fixes nothing and a restart loop makes the outage worse.
+# Liveness: is this process alive. It performs no input or output at all, so it
+# answers just as fast while PostgreSQL is unreachable. Restarting a console
+# whose database is down fixes nothing and a restart loop makes the outage
+# worse, and a livenessProbe defaults to a one-second timeout, so anything on
+# this path that can wait on the database turns an outage into a restart loop.
 #
 # Readiness: can this instance actually serve. It goes red the moment the
 # database is unreachable or a migration is pending, so an orchestrator takes
@@ -163,9 +165,10 @@ async def key_unavailable(request: Request, exc: vault.KeyUnavailable):
 # Sign-in and everything behind it need the database, so "reachable API, dead
 # database" is not a state to send traffic to.
 #
-# /api/health is the older name and keeps answering the older question,
-# liveness, so a manifest that has not been repointed yet behaves as it always
-# has instead of restart-looping through an outage.
+# /api/health is the older name for the liveness answer, so a manifest that has
+# not been repointed yet behaves as it always has instead of restart-looping
+# through an outage. Whether scheduled scans are running can now only be learned
+# from the database, so it is reported by readiness alone.
 
 
 def _readiness() -> tuple[dict, int]:
@@ -185,9 +188,11 @@ def _readiness() -> tuple[dict, int]:
 
 
 @app.get("/api/health/live")
+@app.get("/api/health")
 def health_live() -> dict:
-    """Public liveness. 200 while the process is answering, whatever the
-    database is doing. This is what the container HEALTHCHECK and a Kubernetes
+    """Public liveness, under the current name and the older one. 200 while the
+    process is answering, whatever the database is doing, and it reads nothing
+    to say so. This is what the container HEALTHCHECK and a Kubernetes
     livenessProbe should use."""
     return {"status": "ok", "version": app.version}
 
@@ -199,16 +204,6 @@ def health_ready() -> JSONResponse:
     body, status = _readiness()
     return JSONResponse(body, status_code=status)
 
-
-@app.get("/api/health")
-def health() -> dict:
-    """Public. The liveness answer under the name the deployment contract has
-    always used, unchanged: 200 while the process is answering, whatever the
-    database is doing. The manifest lives in another repository and cannot be
-    repointed in lockstep with this change, so this path keeps its old meaning
-    rather than turning a database outage into a restart loop. Readiness is
-    /api/health/ready."""
-    return {"status": "ok", "version": app.version, "scheduler": scheduler.running()}
 
 
 @app.get("/api/version")

@@ -25,7 +25,7 @@ export default function DatabaseCard() {
         <div className="flex items-start gap-2 text-xs text-faint bg-surface-2 rounded-md px-3 py-2">
           <Database size={14} className="mt-0.5 shrink-0" />
           <span>{backend === 'down'
-            ? 'The console cannot reach its database, so nothing is being recorded and history cannot be read. The connection is set by whoever deployed this instance; fix it there.'
+            ? 'This console cannot serve: its backend or its database is unreachable, so nothing is being recorded and history cannot be read. The connection is set by whoever deployed this instance; fix it there.'
             : 'The connection is set by whoever deployed this instance and is not editable here.'}</span>
         </div>
       </div>

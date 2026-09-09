@@ -172,22 +172,23 @@ def lock_in_transaction(cur: psycopg.Cursor, namespace: str, ident: str) -> None
 def try_advisory_lock(namespace: str, ident: str) -> Iterator[bool]:
     """Hold a session advisory lock for the block, or yield False immediately.
 
-    The lock lives on one pooled connection and is released before that
-    connection goes back to the pool, so a crashed worker's lock dies with its
-    session rather than outliving it. The block it wraps is a whole scan, so the
-    acquiring statement is committed straight away: an open transaction held for
-    minutes pins the oldest snapshot and stops autovacuum reclaiming the rows
-    retention just deleted. A session advisory lock survives the commit.
+    The lock lives on its own connection rather than a pooled one. The block it
+    wraps is a whole scan, and that scan needs the pool for its own work, so a
+    lock that sat on a pooled connection for the duration would let a handful of
+    overlapping scans hold every connection and starve each other. Autocommit,
+    so nothing pins a snapshot and blocks autovacuum for the length of a scan.
+    Closing the session releases the lock however the block ends, and a killed
+    process takes it with it rather than leaving it held.
     """
     key = _lock_key(namespace, ident)
-    with pool().connection() as conn:
+    conn = psycopg.connect(conninfo(), autocommit=True, row_factory=dict_row)
+    try:
         got = bool(conn.execute("SELECT pg_try_advisory_lock(%s) AS ok", (key,)).fetchone()["ok"])
-        conn.commit()
-        try:
-            yield got
-        finally:
-            if got:
-                conn.execute("SELECT pg_advisory_unlock(%s)", (key,))
+        if not got:
+            conn.close()
+        yield got
+    finally:
+        conn.close()
 
 
 def acquire_scheduler_lock() -> bool:

@@ -10,8 +10,8 @@ Run it against a migrated but empty PostgreSQL database:
     python -m app.migrate upgrade
     python -m app.import_sqlite --path /data/vcf-doctor.db
 
-It refuses a target that already holds history unless `--force` is given, so a
-second accidental run cannot double one. Settings do not count as history: the
+It refuses a target that already holds history, so a second accidental run
+cannot double one. Settings do not count as history: the
 console seeds a few rows the moment it starts, and the upgrading deployment's
 own settings, its operator password included, replace them.
 
@@ -261,17 +261,17 @@ def _resync_identity() -> None:
         )
 
 
-def run(path: Path, force: bool = False) -> dict[str, int]:
+def run(path: Path) -> dict[str, int]:
     """Copy every table across. Returns rows moved per table."""
     if not path.is_file():
         raise FileNotFoundError(f"no SQLite database at {path}")
     existing = {table: n for table, n in target_row_counts().items() if n}
-    if existing and not force:
+    if existing:
         summary = ", ".join(f"{table}={n}" for table, n in sorted(existing.items()))
         raise SystemExit(
             f"the target database already holds history ({summary}). Import into a "
-            "database that has none, or pass --force to add these rows to what is "
-            "already there."
+            "database that has none: create an empty one, run `python -m app.migrate "
+            "upgrade` against it, and import into that."
         )
     source = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     source.row_factory = sqlite3.Row
@@ -294,13 +294,8 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--path", required=True, help="path to the old vcf-doctor.db file")
-    parser.add_argument(
-        "--force",
-        action="store_true",
-        help="import even though the target database already holds rows",
-    )
     args = parser.parse_args(argv)
-    moved = run(Path(args.path), force=args.force)
+    moved = run(Path(args.path))
     for table, count in moved.items():
         print(f"{table}: {count}")
     print(f"imported {sum(moved.values())} rows from {args.path}")

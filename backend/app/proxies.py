@@ -28,21 +28,52 @@ SETTING_KEY = "trusted_proxies"
 Network = ipaddress.IPv4Network | ipaddress.IPv6Network
 
 # The stored list is read by the outermost middleware on every request, and
-# against PostgreSQL that is a network round trip on the event loop rather than
-# a local page read. It changes only when an operator saves Settings, so it is
-# held for a few seconds; the cost of a stale answer is one visitor sharing the
-# ingress login lockout until it expires.
+# against PostgreSQL that is a network round trip rather than a local page read.
+# The liveness answer sits behind this middleware and has to be given while the
+# database is unreachable, so no request ever waits for the read: the answer
+# comes from memory and a missing or expired entry is refreshed on a background
+# thread. A cold cache trusts nobody, which is the safe default and costs at
+# most one visitor sharing the ingress's login lockout until the refresh lands.
 CACHE_TTL = 5.0
-_cache: tuple[float, list[str]] | None = None
+_cache: list[str] | None = None
+_cached_at = 0.0
+_refreshing = False
 _cache_guard = threading.Lock()
 
 
 def reset_cache() -> None:
-    """Forget the cached list. Called when Settings writes a new one and when
-    the test database is rebuilt under a running process."""
-    global _cache
+    """Forget the cached list. Called when the test database is rebuilt under a
+    running process."""
+    global _cache, _cached_at
     with _cache_guard:
         _cache = None
+        _cached_at = 0.0
+
+
+def _remember(value: list[str]) -> None:
+    global _cache, _cached_at
+    with _cache_guard:
+        _cache = value
+        _cached_at = time.monotonic()
+
+
+def _refresh_stored() -> None:
+    """Read the list and remember it, off the request path. A failed read is
+    remembered as "trust nobody" like any other answer, so an outage cannot make
+    the next request wait; the read is retried once the entry expires."""
+    global _refreshing
+    try:
+        try:
+            value = parse_list(db.get_setting(SETTING_KEY, timeout=db.PROBE_TIMEOUT) or [])
+        except ValueError:
+            value = []
+        except Exception:  # noqa: BLE001  a database that cannot be read trusts nobody
+            log.warning("trusted proxies unreadable; trusting nobody until the database returns")
+            value = []
+        _remember(value)
+    finally:
+        with _cache_guard:
+            _refreshing = False
 
 
 def parse_list(raw: Any) -> list[str]:
@@ -98,34 +129,25 @@ def env_problem() -> str | None:
 
 
 def stored_value() -> list[str]:
-    """The saved list, or nothing when it cannot be read.
+    """The saved list, answered from memory and never by waiting.
 
     This runs in the outermost middleware, on every request including the health
-    endpoints and the login page, so the answer is cached for CACHE_TTL seconds
-    rather than fetched every time. An unreachable database must not turn every
-    response into a 500: the console has to stay up to say the database is
-    unavailable. Trusting nobody is also the safe answer to fall back to, since
-    it only means each visitor shares the ingress's login lockout. A failed read
-    is never cached, so a database that comes back is picked up at once rather
-    than after the TTL.
+    endpoints and the login page, so it returns what is remembered and starts a
+    refresh in the background when that is missing or older than CACHE_TTL.
+    Nothing here can block a response, which is what lets liveness answer in
+    milliseconds while PostgreSQL is unreachable, and an unreachable database
+    trusts nobody rather than turning every response into a 500.
     """
-    global _cache
+    global _refreshing
     with _cache_guard:
-        cached = _cache
-    if cached is not None and time.monotonic() - cached[0] < CACHE_TTL:
-        return cached[1]
-    try:
-        stored = db.get_setting(SETTING_KEY, timeout=db.PROBE_TIMEOUT) or []
-    except Exception:  # noqa: BLE001  a database that cannot be read trusts nobody
-        log.warning("trusted proxies unreadable; trusting nobody until the database returns")
-        return []
-    try:
-        value = parse_list(stored)
-    except ValueError:
-        value = []
-    with _cache_guard:
-        _cache = (time.monotonic(), value)
-    return value
+        value = _cache
+        expired = value is None or time.monotonic() - _cached_at >= CACHE_TTL
+        refresh = expired and not _refreshing
+        if refresh:
+            _refreshing = True
+    if refresh:
+        threading.Thread(target=_refresh_stored, name="trusted-proxies", daemon=True).start()
+    return value if value is not None else []
 
 
 def effective() -> tuple[list[str], str]:
@@ -139,7 +161,7 @@ def effective() -> tuple[list[str], str]:
 def set_stored(raw: Any) -> list[str]:
     value = parse_list(raw)
     db.set_setting(SETTING_KEY, value)
-    reset_cache()
+    _remember(value)
     return value
 
 
@@ -207,10 +229,10 @@ def resolve_client(peer: str | None, forwarded_for: list[str], nets: list[Networ
 
 class ForwardedHeadersMiddleware:
     """Pure ASGI: rewrite scope["client"] and scope["scheme"] from the
-    forwarded headers, but only when the TCP peer is a trusted proxy. Reads the
-    setting through the few-second cache in stored_value, so a change in
-    Settings applies within seconds and without a restart, and an unreachable
-    database cannot stall the event loop once per request. Replaces uvicorn's
+    forwarded headers, but only when the TCP peer is a trusted proxy. Takes the
+    setting from stored_value, which answers from memory and refreshes in the
+    background, so a change in Settings applies within seconds and without a
+    restart and no request ever waits on the database here. Replaces uvicorn's
     --proxy-headers, which trusted everyone."""
 
     def __init__(self, app):

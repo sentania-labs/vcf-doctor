@@ -80,10 +80,12 @@ build-frontend:
 # Backend serving the built frontend, like the container does.
 run: build-frontend dev-db
 	cd backend && VCF_DOCTOR_STATIC_DIR=../frontend/dist VCF_DOCTOR_DATABASE_URL="$(DEV_DATABASE_URL)" \
+		VCF_DOCTOR_DATA_DIR=../data \
 		uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-proxy-headers
 
 dev-backend: dev-db
-	cd backend && VCF_DOCTOR_DATABASE_URL="$(DEV_DATABASE_URL)" uv run uvicorn app.main:app --reload --port 8000 --no-proxy-headers
+	cd backend && VCF_DOCTOR_DATABASE_URL="$(DEV_DATABASE_URL)" VCF_DOCTOR_DATA_DIR=../data \
+		uv run uvicorn app.main:app --reload --port 8000 --no-proxy-headers
 
 dev-frontend:
 	cd frontend && npm run dev

@@ -175,13 +175,17 @@ def test_legacy_text_snapshots_arrive_compressed_and_readable(tmp_path):
 
 
 def test_import_refuses_a_target_that_already_holds_history(tmp_path):
+    """One behaviour, with no escape hatch: a second run is refused, and the
+    refusal says to start from an empty database rather than to add to this
+    one. Re-running blind after a partly committed import is the situation
+    where adding rows to what is there is least safe."""
     path = tmp_path / "vcf-doctor.db"
     _legacy_db(path)
     import_sqlite.run(path)
     with pytest.raises(SystemExit) as refused:
         import_sqlite.run(path)
     assert "already holds history" in str(refused.value)
-    assert import_sqlite.run(path, force=True)["connections"] == 1  # nothing doubles
+    assert "database that has none" in str(refused.value)
     assert db.fetchone("SELECT COUNT(*) AS n FROM connections")["n"] == 1
 
 

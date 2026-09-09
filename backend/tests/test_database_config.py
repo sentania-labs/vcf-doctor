@@ -1,6 +1,8 @@
 """How the database connection is configured: the URL is a deployment binding
 and the password never travels in an environment variable."""
 
+import time
+
 import pytest
 
 from app import config, db
@@ -90,8 +92,35 @@ def test_liveness_stays_green_while_the_database_is_down(monkeypatch):
         # database and restart-loop a pod that only needs its database back.
         old_name = client.get("/api/health")
         assert old_name.status_code == 200
-        assert old_name.json()["status"] == "ok"
+        assert old_name.json() == live.json()
     db.close()  # the next pool is built from the restored URL
+
+
+def test_liveness_answers_fast_from_the_first_probe_after_the_database_dies(monkeypatch):
+    """A Kubernetes livenessProbe times out after one second by default, so
+    liveness that merely returns 200 is not enough: it has to return quickly on
+    every request, the first one after the database goes away included. Nothing
+    on this path may wait on the database, handler or middleware."""
+    from fastapi.testclient import TestClient
+
+    from app import proxies
+    from app.main import app
+
+    db.reset_for_tests()
+    proxies.set_stored(["10.0.0.0/8"])
+    with TestClient(app) as client:
+        assert client.get("/api/health/live").status_code == 200
+        _unreachable(monkeypatch)
+        proxies.reset_cache()  # nothing remembered, exactly as after a restart
+        for path in ("/api/health", "/api/health/live"):
+            for _ in range(3):
+                started = time.monotonic()
+                probe = client.get(path)
+                elapsed = time.monotonic() - started
+                assert probe.status_code == 200, path
+                assert elapsed < 0.3, f"{path} took {elapsed:.2f}s"
+    db.close()
+    proxies.reset_cache()
 
 
 def test_readiness_goes_red_while_the_database_is_down(monkeypatch):
@@ -166,29 +195,43 @@ def test_trusted_proxies_trust_nobody_when_the_database_is_unreadable(monkeypatc
         proxies.reset_cache()
 
 
-def test_a_failed_lookup_is_not_remembered_as_an_answer(monkeypatch):
-    """The trusted-proxies lookup is cached so it is not a database round trip
-    on the event loop per request, but a failure is not an answer: the list has
-    to come back with the database, not one cache lifetime later."""
+def test_the_stored_list_comes_back_after_the_database_does(monkeypatch):
+    """The lookup answers from memory and refreshes behind the request, so an
+    outage costs no waiting. Trusting nobody while the database is away is the
+    safe answer, but it must not be the permanent one: the saved list has to
+    return on its own once the database does."""
     from app import proxies
 
     db.reset_for_tests()
-    proxies.set_stored(["10.42.0.0/16"])   # saving forgets the cached list
+    proxies.set_stored(["10.42.0.0/16"])
+    monkeypatch.setattr(proxies, "CACHE_TTL", 0.0)  # every read refreshes
 
     monkeypatch.setattr(cfg, "database_url", "postgresql://nobody@127.0.0.1:1/nothing")
     monkeypatch.setattr(cfg, "db_password_file", "")
     monkeypatch.setattr(cfg, "db_pool_timeout", 0.5)
     db.close()
-    assert proxies.stored_value() == []
+    assert _settles_on(proxies, []) == []
 
     monkeypatch.undo()
+    monkeypatch.setattr(proxies, "CACHE_TTL", 0.0)  # undo restored it; keep refreshing
     db.close()
-    # Straight away, well inside CACHE_TTL: the empty answer was never stored.
-    assert proxies.stored_value() == ["10.42.0.0/16"]
+    assert _settles_on(proxies, ["10.42.0.0/16"]) == ["10.42.0.0/16"]
+    proxies.reset_cache()
 
 
-def test_a_saved_list_applies_without_waiting_for_the_cache(monkeypatch):
-    """An operator who saves Settings must not have to wait out the TTL."""
+def _settles_on(proxies, expected: list[str], timeout: float = 5.0) -> list[str]:
+    """Poll the lookup until the background refresh has landed."""
+    deadline = time.monotonic() + timeout
+    value = proxies.stored_value()
+    while value != expected and time.monotonic() < deadline:
+        time.sleep(0.05)
+        value = proxies.stored_value()
+    return value
+
+
+def test_a_saved_list_applies_without_waiting_for_a_refresh(monkeypatch):
+    """An operator who saves Settings must not have to wait out the TTL, nor
+    briefly see the list empty while a background read catches up."""
     from app import proxies
 
     db.reset_for_tests()
@@ -196,3 +239,4 @@ def test_a_saved_list_applies_without_waiting_for_the_cache(monkeypatch):
     assert proxies.stored_value() == ["10.42.0.0/16"]
     proxies.set_stored(["192.0.2.0/24"])
     assert proxies.stored_value() == ["192.0.2.0/24"]
+    proxies.reset_cache()

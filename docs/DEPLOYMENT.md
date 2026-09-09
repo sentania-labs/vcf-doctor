@@ -17,8 +17,8 @@ only whether the database is reachable.
 |---|---|
 | Image | `ghcr.io/sentania-labs/vcf-doctor:<tag>` where tag is `vX.Y.Z` (release), `sha-<7>` or `latest` |
 | Port | `8000` (HTTP) |
-| Liveness | `GET /api/health/live` (and `GET /api/health`, the same answer under the older name), 200 whenever the process is answering. The container's `HEALTHCHECK` uses this. |
-| Readiness | `GET /api/health/ready`, 200 when the database is reachable and migrated, 503 otherwise. |
+| Liveness | `GET /api/health/live` (and `GET /api/health`, the same body under the older name), 200 whenever the process is answering. Reads nothing, so it answers in milliseconds during a database outage. The container's `HEALTHCHECK` uses this. |
+| Readiness | `GET /api/health/ready`, 200 when the database is reachable and migrated, 503 otherwise. Reports `database` and `scheduler`, both of which can only be learned from the database. |
 | Build identity | `GET /api/version` returns the [build identity fields](../backend/app/_version.py); `GET /api/health` reports the same version |
 | Database | PostgreSQL 14 or newer, reached over `VCF_DOCTOR_DATABASE_URL`. Schema migrations are applied at startup and by `python3 -m app.migrate upgrade`. |
 | Database password | A file, never an environment variable. `VCF_DOCTOR_DB_PASSWORD_FILE`, default `/run/secrets/vcf-doctor-db-password`. |
@@ -70,27 +70,30 @@ outage worse, so nothing should restart on the database.
 every page behind it need the database, so an instance that cannot reach it is
 one to take out of rotation, not one to send visitors to.
 
-`GET /api/health` is the older name and still answers the older question,
-liveness, unchanged. A manifest that has not been repointed yet keeps behaving
-as it does today rather than restart-looping through a database outage. Point
-the probes at the two specific paths; the old name is compatibility, not a
-third answer.
+`GET /api/health` is the older name for the liveness answer and returns the same
+body, so a manifest that has not been repointed yet keeps behaving as it does
+today rather than restart-looping through a database outage. Point the probes at
+the two specific paths; the old name is compatibility, not a third answer.
+Whether scheduled scans are running is on the readiness body only, because the
+answer can only be read from the database.
 
 ```yaml
         livenessProbe:
           httpGet: { path: /api/health/live, port: 8000 }
-          timeoutSeconds: 5
         readinessProbe:
           httpGet: { path: /api/health/ready, port: 8000 }
           timeoutSeconds: 5
 ```
 
-`timeoutSeconds: 5` because readiness still answers while the database is
-unreachable, in about three seconds, rather than stalling on the ten-second
-connection pool timeout. Liveness reads nothing itself, and the
-forwarded-headers middleware ahead of it holds the trusted-proxies setting for
-a few seconds rather than looking it up per request, so an outage costs one
-lookup every few seconds and not one per probe.
+Liveness needs no `timeoutSeconds` raise: nothing on that path reads the
+database, not the handler and not the forwarded-headers middleware ahead of it,
+which answers from memory and refreshes in the background. It stays inside the
+one-second default during an outage, which is what makes an un-repointed
+manifest safe.
+
+Readiness gets `timeoutSeconds: 5` because it does read the database, and while
+that is unreachable it answers in about three seconds rather than stalling on
+the ten-second connection pool timeout.
 
 Both are public: they need no session, and they are the only endpoints that
 stay useful during a database outage.
@@ -210,9 +213,9 @@ and health score weights survive; the encryption key must come across too, or
 the vCenter passwords need re-entering exactly as they would after any key loss.
 
 It refuses a target that already holds history, so a second accidental run
-cannot double one. `--force` overrides that; it adds rows to what is there.
-Nothing writes back to the SQLite file, so the old volume stays a rollback
-option until you delete it.
+cannot double one; import into an empty, migrated database instead. Nothing
+writes back to the SQLite file, so the old volume stays a rollback option until
+you delete it.
 
 ## Environment variables
 
@@ -224,7 +227,7 @@ them.
 |---|---|---|
 | `VCF_DOCTOR_DATABASE_URL` | `postgresql://vcf_doctor@postgres:5432/vcf_doctor` | PostgreSQL connection, without a password. `DATABASE_URL` is read when this is unset. A URL carrying a password is refused. |
 | `VCF_DOCTOR_DB_PASSWORD_FILE` | `/run/secrets/vcf-doctor-db-password` | File holding the database password. Missing file means none is sent. |
-| `VCF_DOCTOR_DB_POOL_MAX_SIZE` | `10` | Pooled connections per worker process. A scan holds one for its whole run, so keep this above the number of vCenters that can scan at once, and multiply by the worker count when sizing the server's `max_connections`. |
+| `VCF_DOCTOR_DB_POOL_MAX_SIZE` | `10` | Pooled connections per worker process. Multiply by the worker count when sizing the server's `max_connections`; a running scan holds its lock on its own connection outside the pool, so scans cannot consume it. |
 | `VCF_DOCTOR_DB_POOL_MIN_SIZE` | `1` | Connections kept open per worker process |
 | `VCF_DOCTOR_DB_POOL_TIMEOUT` | `10` | Seconds a request waits for a free pooled connection |
 | `VCF_DOCTOR_DATA_DIR` | `/data` | Writable directory for the generated encryption key file. Nothing else is written there. |

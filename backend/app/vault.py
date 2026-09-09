@@ -137,13 +137,13 @@ def _read_key_file(path: Path, remedy: str = _ACTIVE_KEY_REMEDY) -> bytes:
 def _load_or_create_key_file(path: Path) -> bytes:
     if path.exists():
         return _read_key_file(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
     key = Fernet.generate_key()
     # Write a private temp file, fsync it, then link it into place. The link
     # is atomic and exclusive, so a crash mid-write never leaves a half key
     # file behind and two processes racing at first boot agree on one key.
     tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     try:
+        path.parent.mkdir(parents=True, exist_ok=True)
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(fd, "w") as fh:
             fh.write(key.decode() + "\n")
@@ -154,7 +154,10 @@ def _load_or_create_key_file(path: Path) -> bytes:
         except FileExistsError:
             return _read_key_file(path)
     except OSError as exc:
-        raise KeyUnavailable(f"cannot create encryption key file {path}: {exc}") from exc
+        raise KeyUnavailable(
+            f"cannot create encryption key file {path}: {exc}. Point VCF_DOCTOR_DATA_DIR at a "
+            "writable directory, or set VCF_DOCTOR_SECRET_KEY and no file is needed."
+        ) from exc
     finally:
         tmp.unlink(missing_ok=True)
     log.warning(
