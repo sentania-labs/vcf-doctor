@@ -263,6 +263,8 @@ jobs:
       actions: read # download the tested image artifact from this run
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
 
       - name: Install skopeo
         run: sudo apt-get update -qq && sudo apt-get install -y -qq skopeo
@@ -351,7 +353,9 @@ jobs:
           DIGEST: ${{ steps.published.outputs.digest }}
           V: ${{ needs.image.outputs.version }}
         run: |
-          gh release view "$V" >/dev/null 2>&1 || gh release create "$V" --generate-notes --title "$V" \
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          VERSION="$V" MAINLINE_REF=origin/main bash .github/scripts/check-release-version.sh
+          gh release view "$V" >/dev/null 2>&1 || gh release create "$V" --verify-tag --generate-notes --title "$V" \
             --notes "Image: $IMAGE:$V. Digest: $DIGEST (the digest scanned and smoke-tested in this run; cosign keyless signed, SBOM + provenance attached)"
 
   promote-latest:
