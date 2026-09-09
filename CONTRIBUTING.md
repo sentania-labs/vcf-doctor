@@ -39,11 +39,25 @@ through the API. That hook is for tests and local development only.
    image build and scan, and the container smoke test all gate the merge.
    Local `make lint`, `make test` and `make scan` predict them exactly
    because CI calls the same targets.
-5. **Merge to main publishes.** A green main push builds, signs and pushes
-   the image and cuts the next `v0.1.N` release. Treat main as shippable.
+5. **Tags release.** A green main push publishes only the tested
+   `sha-<short>` image. From a merged main commit, an annotated `vX.Y.Z` tag
+   push reruns every gate, publishes the version and `latest`, signs the
+   digest and creates the GitHub release. Treat main as shippable.
 
 Write the PR body in operational terms: what changes for someone running
 it, what the blast radius is, how to recover if it is wrong.
+
+## Cut a release
+
+From a merged `main` commit:
+
+```bash
+git tag -a vX.Y.Z -m vX.Y.Z
+git push origin vX.Y.Z
+```
+
+Do not create a version-bump PR. The product quickstart tracks `latest`, while
+deployment repositories pin the exact version or digest they run.
 
 ## House style
 

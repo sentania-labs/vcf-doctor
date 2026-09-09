@@ -12,6 +12,7 @@ everything is set in the GUI.
 Use the published image:
 
 ```bash
+# Quickstarts track latest. Deployments should pin an exact vX.Y.Z release.
 docker run -d --name vcf-doctor \
   -p 8000:8000 \
   -v vcf-doctor-data:/data \
@@ -29,9 +30,9 @@ the `/data` volume. Keep that volume: it holds every snapshot, the change log,
 your connections and your settings. Run exactly one instance per volume; two
 instances would scan twice and fight over the database.
 
-Tags: `latest` is the newest build of `main` that passed every CI gate,
-`v0.1.N` are numbered releases, `sha-<7>` pins a specific commit. Pin a
-release or a sha in anything that is not a laptop.
+Tags: `latest` is the newest tag-driven release, `vX.Y.Z` identifies a release,
+and `sha-<7>` pins a specific commit built from `main` or a release tag. Pin a
+release or a SHA in anything that is not a laptop.
 
 ## 2. Set the operator password
 

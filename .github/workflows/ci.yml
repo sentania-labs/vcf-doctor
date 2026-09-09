@@ -7,8 +7,10 @@
 # and what it publishes is the exact image the `image` job scanned and smoke
 # tested: the build is exported once as an OCI tarball, handed over as a run
 # artifact, and pushed byte for byte, so the published digest is the tested
-# digest (the publish job checks this and fails otherwise). The published digest
-# carries a provenance attestation, an SBOM and a keyless cosign signature.
+# digest (the publish job checks this and fails otherwise). Main publishes only
+# a sha-<short> tag. A vMAJOR.MINOR.PATCH tag on main also publishes that version
+# and latest, then creates the GitHub release. The published digest carries a
+# provenance attestation, an SBOM and a keyless cosign signature.
 # Every scanner is invoked through `make`, so a developer runs exactly what CI
 # runs.
 name: ci
@@ -17,6 +19,7 @@ on:
   pull_request:
   push:
     branches: [main]
+    tags: ["v*"]
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -41,6 +44,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Validate release tag
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          VERSION: ${{ github.ref_name }}
+          MAINLINE_REF: origin/main
+        run: |
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          bash .github/scripts/check-release-version.sh
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           python-version: "3.14"
@@ -115,23 +128,17 @@ jobs:
         with:
           version: ${{ env.TRIVY_VERSION }}
           cache: true
-      # The release number is decided before the only image build, so the
-      # identity shown by the running product matches every published tag.
-      # Pull requests carry the next candidate number; main is serialized and
-      # therefore stamps the number that the publish job will claim.
+      # The identity is decided before the only image build, so the running
+      # product reports the pushed release tag or an unambiguous CI identity.
       - name: Compute build identity
         id: identity
         run: |
-          TAGS="$(git ls-remote --tags --refs origin 'refs/tags/v0.1.*' | sed -n 's|^\([0-9a-f]*\)[[:space:]]*refs/tags/\(v0\.1\.[0-9][0-9]*\)$|\1 \2|p')"
-          EXISTING="$(echo "$TAGS" | awk -v sha="$GITHUB_SHA" '$1 == sha { print $2 }' | sort -V | tail -1)"
-          if [ -n "$EXISTING" ]; then
-            VERSION="$EXISTING"
-            echo "commit already tagged $VERSION; reusing it"
-          else
-            LAST="$(echo "$TAGS" | awk '{ print $2 }' | sed 's/^v0\.1\.//' | sort -n | tail -1)"
-            VERSION="v0.1.$(( ${LAST:--1} + 1 ))"
-            echo "highest existing tag: ${LAST:+v0.1.$LAST}${LAST:-(none)}; next: $VERSION"
-          fi
+          case "$GITHUB_REF" in
+            refs/tags/*) VERSION="$GITHUB_REF_NAME" ;;
+            refs/heads/main) VERSION="main-${GITHUB_SHA::7}" ;;
+            *) VERSION="dev-${GITHUB_SHA::7}" ;;
+          esac
+          echo "build identity: $VERSION"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
       # skopeo moves the OCI tarball into the daemon (docker load cannot read an
@@ -245,11 +252,11 @@ jobs:
           compression-level: 0 # layers are already gzip; recompressing only burns time
           if-no-files-found: error
 
-  # Main-branch pushes only. Split out of `image` so the OIDC token and
+  # Main and release-tag pushes only. Split out of `image` so the OIDC token and
   # write scopes below are never granted to a PR-triggered run. Nothing is
   # built here: the tarball the `image` job tested is pushed as is.
   publish:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     needs: image
     runs-on: ubuntu-latest
     permissions:
@@ -292,18 +299,17 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Verify release version ownership
-        env:
-          VERSION: ${{ needs.image.outputs.version }}
-        run: bash .github/scripts/check-release-version.sh
-
       # `--all` copies the whole index (image manifest plus the provenance and
       # SBOM attestation manifests) byte for byte, so the digest survives.
       - name: Publish tested tarball
         env:
           VERSION: ${{ needs.image.outputs.version }}
         run: |
-          TAGS="$VERSION sha-${GITHUB_SHA::7} latest"
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            TAGS="$VERSION sha-${GITHUB_SHA::7} latest"
+          else
+            TAGS="sha-${GITHUB_SHA::7}"
+          fi
           for TAG in $TAGS; do
             skopeo copy --all "oci-archive:$RUNNER_TEMP/image.tar" "docker://$IMAGE:$TAG"
           done
@@ -315,7 +321,11 @@ jobs:
           TESTED: ${{ steps.tested.outputs.digest }}
           VERSION: ${{ needs.image.outputs.version }}
         run: |
-          TAGS="$VERSION sha-${GITHUB_SHA::7} latest"
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            TAGS="$VERSION sha-${GITHUB_SHA::7} latest"
+          else
+            TAGS="sha-${GITHUB_SHA::7}"
+          fi
           for TAG in $TAGS; do
             PUBLISHED="$(docker buildx imagetools inspect "$IMAGE:$TAG" --format '{{json .Manifest}}' | jq -r .digest)"
             if [ "$PUBLISHED" != "$TESTED" ]; then
@@ -338,22 +348,14 @@ jobs:
           DIGEST: ${{ steps.tested.outputs.digest }}
         run: cosign sign --yes "${IMAGE}@${DIGEST}"
 
-      # Idempotent on re-run: an existing tag on this commit is reused above,
-      # and an existing release is left alone. If the tag push is rejected,
-      # something else tagged v0.1.N in between (main pushes serialise through
-      # the concurrency group, so this should not happen); the image and
-      # signature already pushed under that tag then need manual GHCR cleanup.
-      - name: Tag release
+      # The pushed tag is the release trigger. Re-runs leave an existing
+      # release alone after proving and signing the same tested digest.
+      - name: Create GitHub release from pushed tag
+        if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
           DIGEST: ${{ steps.tested.outputs.digest }}
           V: ${{ needs.image.outputs.version }}
         run: |
-          if git ls-remote --exit-code --tags origin "refs/tags/$V" >/dev/null; then
-            echo "tag $V already on origin"
-          else
-            git tag "$V"
-            git push origin "$V"
-          fi
           gh release view "$V" >/dev/null 2>&1 || gh release create "$V" --generate-notes --title "$V" \
             --notes "Image: $IMAGE:$V (also sha-${GITHUB_SHA::7}, latest). Digest: $DIGEST (the digest scanned and smoke-tested in this run; cosign keyless signed, SBOM + provenance attached)"

@@ -50,6 +50,7 @@ healthy and never runs anything. The console is read-only by design.
 Read the [Getting Started guide](docs/GETTING_STARTED.md). The short version:
 
 ```bash
+# Quickstarts track latest. Deployments should pin an exact vX.Y.Z release.
 docker run -d --name vcf-doctor -p 8000:8000 -v vcf-doctor-data:/data \
   ghcr.io/sentania-labs/vcf-doctor:latest
 ```
@@ -81,6 +82,21 @@ click Scan Now.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the local workflow and the PR bar.
 Bugs and ideas go in [GitHub issues](https://github.com/sentania-labs/vcf-doctor/issues).
+
+## Releasing
+
+Releases are tag-driven. From a merged `main` commit, create and push an
+annotated semantic version tag:
+
+```bash
+git tag -a vX.Y.Z -m vX.Y.Z
+git push origin vX.Y.Z
+```
+
+The tag push validates, scans, builds, smoke-tests, signs and publishes that
+version. Ordinary merges to `main` publish only a `sha-<short>` image tag and
+do not move `latest` or create a GitHub release. Deployment repositories should
+pin an exact release tag or digest.
 
 ## License
 
