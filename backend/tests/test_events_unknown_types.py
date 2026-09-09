@@ -160,6 +160,7 @@ def test_drain_bounds_the_number_of_registrations(monkeypatch, fake_registry):
         (KeyError("urn:vim25 ContentLibrary"), "ContentLibrary"),
         (KeyError(("urn:vim25", "ContentLibrary")), None),
         (KeyError("not a type name!"), None),
+        (KeyError("type"), None),
         (KeyError(), None),
         (RuntimeError("ContentLibrary"), None),
     ],
@@ -301,6 +302,45 @@ def test_drain_via_real_pyvmomi_deserializer_recovers(monkeypatch):
     [raw] = batch.items
     assert raw.entity.entity._wsdlName == name
     assert name in placeholder_types()
+
+
+def _unknown_event_class_page(class_name: str) -> bytes:
+    """An event whose xsi:type is an event class pyVmomi does not define."""
+    return f"""<obj {XMLNS} xsi:type="{class_name}">
+<key>103</key><chainId>103</chainId><createdTime>2026-09-09T04:50:00Z</createdTime>
+<userName>admin</userName><fullFormattedMessage>Probe</fullFormattedMessage>
+</obj>""".encode()
+
+
+def test_drain_reports_the_real_name_for_an_unknown_event_class():
+    """An unknown data object type raises the same KeyError(name) as an
+    unknown managed type. The placeholder does not help there, and pyVmomi's
+    re-read then fails with KeyError('type'); the error that surfaces must
+    still name the event class, and 'type' must never become a placeholder."""
+    from pyVmomi import SoapAdapter, vim
+
+    name = "VcfProbeNewEvent"
+    page = _unknown_event_class_page(name)
+
+    class Collector:
+        def __init__(self):
+            self.rewinds = 0
+
+        def RewindCollector(self):
+            self.rewinds += 1
+
+        def ReadNextEvents(self, size):
+            return [SoapAdapter.Deserialize(page, vim.event.Event)]
+
+        def DestroyCollector(self):
+            pass
+
+    collector = Collector()
+    with pytest.raises(KeyError) as excinfo:
+        _drain(collector, "ReadNextEvents")
+    assert excinfo.value.args == (name,)
+    assert collector.rewinds == 2
+    assert "type" not in placeholder_types()
 
 
 def test_capture_logs_the_minimum_window_cap(monkeypatch, caplog, tmp_path):
