@@ -50,6 +50,7 @@ healthy and never runs anything. The console is read-only by design.
 Read the [Getting Started guide](docs/GETTING_STARTED.md). The short version:
 
 ```bash
+# Quickstarts track latest. Deployments should pin an exact vX.Y.Z release.
 docker run -d --name vcf-doctor -p 8000:8000 -v vcf-doctor-data:/data \
   ghcr.io/sentania-labs/vcf-doctor:latest
 ```
@@ -81,6 +82,11 @@ click Scan Now.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the local workflow and the PR bar.
 Bugs and ideas go in [GitHub issues](https://github.com/sentania-labs/vcf-doctor/issues).
+
+## Releasing
+
+See [Cut a release](CONTRIBUTING.md#cut-a-release) for the release procedure
+and the [deployment contract](docs/DEPLOYMENT.md#contract) for image tag behavior.
 
 ## License
 

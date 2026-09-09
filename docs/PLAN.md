@@ -73,13 +73,8 @@ shell, demo mode) carries over unchanged.
 This repo is not responsible for deployment. It is deployed by Argo CD from
 the lab deployment repo.
 
-This repo delivers:
-
-- one container image at `ghcr.io/sentania-labs/vcf-doctor`, tagged on merge
-  to `main` (semver plus `sha-<short>`);
-- a tagged GitHub release per merge to `main`;
-- a README "deployment contract" section listing image name, listening port,
-  environment variables, and the SQLite volume path.
+The [deployment contract](DEPLOYMENT.md) defines the published artifact,
+release behavior, and runtime requirements.
 
 This repo does not contain Kubernetes manifests, Helm charts, or Argo
 configuration. `docker-compose.yml` is a local development shortcut only.
@@ -345,9 +340,8 @@ Jobs on pull request: lint, pytest, frontend type-check and build (`checks`);
 pip-audit, npm audit, gitleaks and trivy repo scan (`scan`, via `make scan`);
 GitHub dependency review; CodeQL for Python and TypeScript; image build,
 trivy image scan (`make scan-image`) and the fixture-mode smoke test, which
-also asserts the security headers and the non-root user. Jobs on merge to
-`main`: the above, plus image push to GHCR with SLSA provenance and an SBOM
-attached, keyless cosign signing of the digest, and a tagged release.
+also asserts the security headers and the non-root user. Publication behavior
+is defined in the [deployment contract](DEPLOYMENT.md#contract).
 
 Every scanner is a `make` target so CI and a developer run the same command;
 severities and accepted findings live in `trivy.yaml` and `.trivyignore`.

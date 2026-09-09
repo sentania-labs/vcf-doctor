@@ -10,7 +10,7 @@ application state set through the GUI and stored on the volume.
 
 | Item | Value |
 |---|---|
-| Image | `ghcr.io/sentania-labs/vcf-doctor:<tag>` where tag is `v0.1.N` (release), `sha-<7>` or `latest` |
+| Image | `ghcr.io/sentania-labs/vcf-doctor:<tag>` where tag is `vX.Y.Z` (release), `sha-<7>` or `latest` |
 | Port | `8000` (HTTP) |
 | Health | `GET /api/health` (the container also declares a `HEALTHCHECK` on it) |
 | Build identity | `GET /api/version` returns the [build identity fields](../backend/app/_version.py); `GET /api/health` reports the same version |
@@ -18,16 +18,34 @@ application state set through the GUI and stored on the volume.
 | Replicas | **exactly 1**, `strategy: Recreate`. Two pods would double-scan and contend for SQLite. |
 | User | runs as uid `10001`; set `fsGroup: 10001` so the volume is writable |
 
-Only a main-branch push that passed every CI gate publishes an image, and
-the digest that was scanned and smoke-tested is the digest that is pushed.
-Release numbers continue from the highest existing `v0.1.N` tag.
-CI supplies that release number, the full commit SHA, and the UTC build time to
-the single image build before it is scanned and smoke-tested, storing the
-identity in `/app/VERSION`. Before publishing, CI rejects a release number
-already tagged to another commit. `make image`
-uses `dev`, the current checkout SHA, and the current UTC time. A backend run
-directly from a checkout reports `dev`, its checkout SHA, and an unknown build
-time because there was no image build.
+Every published digest first passes the checks, repository scan, image scan and
+container smoke test. An ordinary push to `main` publishes only the
+`sha-<7>` image tag and reports `main-<7>` as its running version. It does not
+move `latest`, mint a version tag or create a GitHub release.
+
+A pushed `vX.Y.Z` tag is the release trigger. CI refuses a lightweight or
+malformed tag, a tag that belongs to another commit, or a tagged commit that
+is not reachable from `main`. The
+same validation path builds the image with the tag as its running version. Once
+the tested digest is proven unchanged, CI publishes `vX.Y.Z`, verifies its digest,
+signs it and creates the GitHub release. Only main builds own `sha-<7>` tags.
+A separate serialized promotion selects the highest version among completed GitHub releases,
+copies the verified and signed digest recorded in its release notes to `latest`,
+and verifies that alias while holding the promotion lock. Registry tags without
+a completed release are ineligible, as are draft and prerelease records. Older release retries cannot roll it backwards;
+queued promotions can be replaced because each reconciles all completed releases.
+Full reruns verify and reuse an existing completed release digest before any
+version-tag write, even if the rebuilt image has a different build date. A
+version tag that disagrees with its release record fails publication and promotion.
+Only alias promotion shares a concurrency group; builds and releases stay per-ref.
+
+`make image` uses `dev`, the current checkout SHA, and the current UTC time. A backend run directly from a checkout reports `dev`, its
+checkout SHA, and an unknown build time because there was no image build.
+
+## Releasing
+
+Follow [Cut a release](../CONTRIBUTING.md#cut-a-release) for the annotated-tag
+procedure and version pinning guidance.
 
 ## Environment variables
 
