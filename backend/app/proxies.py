@@ -14,6 +14,8 @@ ingress, which is today's behaviour: one login bucket shared by everyone.
 
 import ipaddress
 import logging
+import threading
+import time
 from typing import Any
 
 from app import db
@@ -24,6 +26,23 @@ log = logging.getLogger("vcf_doctor.proxies")
 SETTING_KEY = "trusted_proxies"
 
 Network = ipaddress.IPv4Network | ipaddress.IPv6Network
+
+# The stored list is read by the outermost middleware on every request, and
+# against PostgreSQL that is a network round trip on the event loop rather than
+# a local page read. It changes only when an operator saves Settings, so it is
+# held for a few seconds; the cost of a stale answer is one visitor sharing the
+# ingress login lockout until it expires.
+CACHE_TTL = 5.0
+_cache: tuple[float, list[str]] | None = None
+_cache_guard = threading.Lock()
+
+
+def reset_cache() -> None:
+    """Forget the cached list. Called when Settings writes a new one and when
+    the test database is rebuilt under a running process."""
+    global _cache
+    with _cache_guard:
+        _cache = None
 
 
 def parse_list(raw: Any) -> list[str]:
@@ -81,21 +100,32 @@ def env_problem() -> str | None:
 def stored_value() -> list[str]:
     """The saved list, or nothing when it cannot be read.
 
-    This runs in the outermost middleware, on every request including
-    /api/health and the login page. An unreachable database must not turn every
+    This runs in the outermost middleware, on every request including the health
+    endpoints and the login page, so the answer is cached for CACHE_TTL seconds
+    rather than fetched every time. An unreachable database must not turn every
     response into a 500: the console has to stay up to say the database is
     unavailable. Trusting nobody is also the safe answer to fall back to, since
-    it only means each visitor shares the ingress's login lockout.
+    it only means each visitor shares the ingress's login lockout. A failed read
+    is never cached, so a database that comes back is picked up at once rather
+    than after the TTL.
     """
+    global _cache
+    with _cache_guard:
+        cached = _cache
+    if cached is not None and time.monotonic() - cached[0] < CACHE_TTL:
+        return cached[1]
     try:
         stored = db.get_setting(SETTING_KEY, timeout=db.PROBE_TIMEOUT) or []
     except Exception:  # noqa: BLE001  a database that cannot be read trusts nobody
         log.warning("trusted proxies unreadable; trusting nobody until the database returns")
         return []
     try:
-        return parse_list(stored)
+        value = parse_list(stored)
     except ValueError:
-        return []
+        value = []
+    with _cache_guard:
+        _cache = (time.monotonic(), value)
+    return value
 
 
 def effective() -> tuple[list[str], str]:
@@ -109,6 +139,7 @@ def effective() -> tuple[list[str], str]:
 def set_stored(raw: Any) -> list[str]:
     value = parse_list(raw)
     db.set_setting(SETTING_KEY, value)
+    reset_cache()
     return value
 
 
@@ -176,10 +207,11 @@ def resolve_client(peer: str | None, forwarded_for: list[str], nets: list[Networ
 
 class ForwardedHeadersMiddleware:
     """Pure ASGI: rewrite scope["client"] and scope["scheme"] from the
-    forwarded headers, but only when the TCP peer is a trusted proxy. Reads
-    the live setting on every request so a change in Settings applies
-    without a restart. Replaces uvicorn's --proxy-headers, which trusted
-    everyone."""
+    forwarded headers, but only when the TCP peer is a trusted proxy. Reads the
+    setting through the few-second cache in stored_value, so a change in
+    Settings applies within seconds and without a restart, and an unreachable
+    database cannot stall the event loop once per request. Replaces uvicorn's
+    --proxy-headers, which trusted everyone."""
 
     def __init__(self, app):
         self.app = app

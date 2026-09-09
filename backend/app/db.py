@@ -25,7 +25,7 @@ from hashlib import blake2b
 from typing import Any
 
 import psycopg
-from psycopg.conninfo import make_conninfo
+from psycopg.conninfo import conninfo_to_dict, make_conninfo
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
@@ -44,6 +44,13 @@ LOCK_OBJ_SCHEDULER = 1
 # time across every worker and pod, not merely inside one process.
 SCAN_LOCK = "scan"
 
+# Nothing in libpq bounds a TCP connect by default, so a host that stops
+# answering (node loss, a failed-over primary) blocks for the kernel's SYN
+# timeout, minutes rather than seconds. Startup takes the scheduler lock on a
+# direct connection, so an unbounded connect there means a worker that serves
+# nothing at all while it waits. A URL that sets its own connect_timeout wins.
+CONNECT_TIMEOUT = 5
+
 _pool: ConnectionPool | None = None
 _pool_guard = threading.Lock()
 _leader: psycopg.Connection | None = None
@@ -51,12 +58,16 @@ _leader_guard = threading.Lock()
 
 
 def conninfo() -> str:
-    """libpq connection string: the configured URL plus the password file."""
+    """libpq connection string: the configured URL, the password file and a
+    bounded connect."""
     url = config.database_url_without_password()
+    extra: dict[str, Any] = {}
     password = config.database_password()
-    if password is None:
-        return url
-    return make_conninfo(url, password=password)
+    if password is not None:
+        extra["password"] = password
+    if "connect_timeout" not in conninfo_to_dict(url):
+        extra["connect_timeout"] = CONNECT_TIMEOUT
+    return make_conninfo(url, **extra)
 
 
 def _new_pool() -> ConnectionPool:
@@ -163,11 +174,15 @@ def try_advisory_lock(namespace: str, ident: str) -> Iterator[bool]:
 
     The lock lives on one pooled connection and is released before that
     connection goes back to the pool, so a crashed worker's lock dies with its
-    session rather than outliving it.
+    session rather than outliving it. The block it wraps is a whole scan, so the
+    acquiring statement is committed straight away: an open transaction held for
+    minutes pins the oldest snapshot and stops autovacuum reclaiming the rows
+    retention just deleted. A session advisory lock survives the commit.
     """
     key = _lock_key(namespace, ident)
     with pool().connection() as conn:
         got = bool(conn.execute("SELECT pg_try_advisory_lock(%s) AS ok", (key,)).fetchone()["ok"])
+        conn.commit()
         try:
             yield got
         finally:
@@ -302,7 +317,10 @@ def reset_for_tests() -> None:
             f"reset_for_tests drops the schema and needs {TEST_DATABASE_URL_ENV} set; "
             "run the suite through `make test`"
         )
+    from app import proxies
+
     close()
+    proxies.reset_cache()
     with transaction() as c:
         c.execute("DROP SCHEMA public CASCADE")
         c.execute("CREATE SCHEMA public")

@@ -162,18 +162,25 @@ async def key_unavailable(request: Request, exc: vault.KeyUnavailable):
 # the pod out of rotation instead of routing people to pages that cannot work.
 # Sign-in and everything behind it need the database, so "reachable API, dead
 # database" is not a state to send traffic to.
+#
+# /api/health is the older name and keeps answering the older question,
+# liveness, so a manifest that has not been repointed yet behaves as it always
+# has instead of restart-looping through an outage.
 
 
 def _readiness() -> tuple[dict, int]:
     database, detail = db.healthy()
+    if detail:
+        # Server-side only. The diagnostic comes from libpq or names the
+        # configured secret path, and readiness needs no session, so the public
+        # body says whether this instance can serve and nothing more.
+        log.warning("readiness: the database is not usable: %s", detail)
     body = {
         "status": "ok" if database else "degraded",
         "version": app.version,
         "scheduler": scheduler.running(),
         "database": database,
     }
-    if detail:
-        body["detail"] = detail
     return body, 200 if database else 503
 
 
@@ -194,12 +201,14 @@ def health_ready() -> JSONResponse:
 
 
 @app.get("/api/health")
-def health() -> JSONResponse:
-    """Public. The readiness answer under the name the deployment contract has
-    always used, so an existing manifest keeps working. `database` is what the
-    Settings database panel reads."""
-    body, status = _readiness()
-    return JSONResponse(body, status_code=status)
+def health() -> dict:
+    """Public. The liveness answer under the name the deployment contract has
+    always used, unchanged: 200 while the process is answering, whatever the
+    database is doing. The manifest lives in another repository and cannot be
+    repointed in lockstep with this change, so this path keeps its old meaning
+    rather than turning a database outage into a restart loop. Readiness is
+    /api/health/ready."""
+    return {"status": "ok", "version": app.version, "scheduler": scheduler.running()}
 
 
 @app.get("/api/version")

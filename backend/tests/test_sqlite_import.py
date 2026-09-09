@@ -219,6 +219,42 @@ def test_settings_the_console_seeded_do_not_block_an_import(tmp_path):
     assert db.get_setting("session_secret") == "fresh"  # not in the old database
 
 
+def test_a_column_the_old_volume_never_had_takes_the_target_default(tmp_path):
+    """Columns were added to the SQLite schema over time, so an older volume is
+    missing some of them, and four of the targets are NOT NULL. A column the
+    source never had is left out of the INSERT so the target's default applies,
+    rather than failing partway through a batched import."""
+    path = tmp_path / "vcf-doctor.db"
+    raw = sqlite3.connect(path)
+    raw.executescript(
+        """
+        CREATE TABLE connections (
+            id TEXT PRIMARY KEY, name TEXT NOT NULL, host TEXT NOT NULL,
+            username TEXT NOT NULL, password TEXT NOT NULL,
+            verify_tls INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL
+        );
+        CREATE TABLE event_capture_state (
+            connection_id TEXT PRIMARY KEY, last_complete_end TEXT
+        );
+        """
+    )
+    raw.execute(
+        "INSERT INTO connections VALUES('legacy1','Lab WLD','vc01','svc','encrypted',1,?)",
+        (NOW.isoformat(),),
+    )
+    raw.execute("INSERT INTO event_capture_state VALUES('legacy1', ?)", (NOW.isoformat(),))
+    raw.commit()
+    raw.close()
+
+    moved = import_sqlite.run(path)
+
+    assert moved["connections"] == 1 and moved["event_capture_state"] == 1
+    assert store.get_connection("legacy1").kind == "vcenter"
+    status = events_store.capture_status("legacy1")
+    assert status.task_history_unavailable is False
+    assert status.last_complete_end == NOW
+
+
 def test_missing_file_is_named_not_a_traceback(tmp_path):
     with pytest.raises(FileNotFoundError) as missing:
         import_sqlite.run(tmp_path / "not-here.db")

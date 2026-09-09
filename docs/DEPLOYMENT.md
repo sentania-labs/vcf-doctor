@@ -17,8 +17,8 @@ only whether the database is reachable.
 |---|---|
 | Image | `ghcr.io/sentania-labs/vcf-doctor:<tag>` where tag is `vX.Y.Z` (release), `sha-<7>` or `latest` |
 | Port | `8000` (HTTP) |
-| Liveness | `GET /api/health/live`, 200 whenever the process is answering. The container's `HEALTHCHECK` uses this. |
-| Readiness | `GET /api/health/ready` (and `GET /api/health`, the same answer under the older name), 200 when the database is reachable and migrated, 503 otherwise. |
+| Liveness | `GET /api/health/live` (and `GET /api/health`, the same answer under the older name), 200 whenever the process is answering. The container's `HEALTHCHECK` uses this. |
+| Readiness | `GET /api/health/ready`, 200 when the database is reachable and migrated, 503 otherwise. |
 | Build identity | `GET /api/version` returns the [build identity fields](../backend/app/_version.py); `GET /api/health` reports the same version |
 | Database | PostgreSQL 14 or newer, reached over `VCF_DOCTOR_DATABASE_URL`. Schema migrations are applied at startup and by `python3 -m app.migrate upgrade`. |
 | Database password | A file, never an environment variable. `VCF_DOCTOR_DB_PASSWORD_FILE`, default `/run/secrets/vcf-doctor-db-password`. |
@@ -68,9 +68,13 @@ outage worse, so nothing should restart on the database.
 **Readiness** is whether this instance can serve. `GET /api/health/ready` is
 503 while the database is unreachable or a migration is pending. Sign-in and
 every page behind it need the database, so an instance that cannot reach it is
-one to take out of rotation, not one to send visitors to. `GET /api/health`
-returns the same readiness answer under the name the contract has always used,
-so an existing manifest keeps working and starts failing readiness correctly.
+one to take out of rotation, not one to send visitors to.
+
+`GET /api/health` is the older name and still answers the older question,
+liveness, unchanged. A manifest that has not been repointed yet keeps behaving
+as it does today rather than restart-looping through a database outage. Point
+the probes at the two specific paths; the old name is compatibility, not a
+third answer.
 
 ```yaml
         livenessProbe:
@@ -83,10 +87,10 @@ so an existing manifest keeps working and starts failing readiness correctly.
 
 `timeoutSeconds: 5` because readiness still answers while the database is
 unreachable, in about three seconds, rather than stalling on the ten-second
-connection pool timeout. Liveness answers in about a second in that state: it
-reads nothing itself, but the forwarded-headers middleware ahead of it looks up
-the trusted-proxies setting on every request and falls back to trusting nobody
-when it cannot.
+connection pool timeout. Liveness reads nothing itself, and the
+forwarded-headers middleware ahead of it holds the trusted-proxies setting for
+a few seconds rather than looking it up per request, so an outage costs one
+lookup every few seconds and not one per probe.
 
 Both are public: they need no session, and they are the only endpoints that
 stay useful during a database outage.
@@ -108,8 +112,8 @@ migrate once rather than racing:
 
 `python3 -m app.migrate status` prints what is applied and what is pending. A
 reachable database with a pending migration reports as unhealthy on
-`GET /api/health` and on the Settings database panel, because a server missing
-its tables is not a working database.
+`GET /api/health/ready` and on the Settings database panel, because a server
+missing its tables is not a working database.
 
 Adding the next migration is dropping in `0002_<what_it_does>.sql`. Nothing
 else is registered and no shipped file is ever edited.

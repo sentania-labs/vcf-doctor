@@ -169,9 +169,22 @@ def target_row_counts() -> dict[str, int]:
     }
 
 
-def _value(table: str, column: str, row: sqlite3.Row, present: set[str]):
-    if column not in present:
-        return None
+def _target_columns(table: str, present: set[str]) -> tuple[str, ...]:
+    """The target columns this source table can fill. A column the source never
+    had is left out of the INSERT so the target's own default applies; a volume
+    written before `kind`, `resource_count`, `enabled` or
+    `task_history_unavailable` existed is exactly what this importer is for, and
+    those four targets are NOT NULL."""
+
+    def available(column: str) -> bool:
+        if table == "snapshots" and column == "resources_gz":
+            return bool(present & {"resources_gz", "resources"})
+        return column in present
+
+    return tuple(column for column in TARGET_COLUMNS[table] if available(column))
+
+
+def _value(table: str, column: str, row: sqlite3.Row):
     raw = row[column]
     if (table, column) in BOOLEAN_COLUMNS:
         return bool(raw)
@@ -195,7 +208,7 @@ def _snapshot_blob(row: sqlite3.Row, present: set[str]) -> bytes | None:
 
 def import_table(source: sqlite3.Connection, table: str) -> int:
     present = _sqlite_columns(source, table)
-    columns = TARGET_COLUMNS[table]
+    columns = _target_columns(table, present)
     placeholders = ",".join(["%s"] * len(columns))
     names = ",".join(_quoted(table, c) for c in columns)
     # The old deployment's settings win, so an upgrade keeps its operator
@@ -223,12 +236,12 @@ def import_table(source: sqlite3.Connection, table: str) -> int:
                     tuple(
                         _snapshot_blob(row, present)
                         if column == "resources_gz"
-                        else _value(table, column, row, present)
+                        else _value(table, column, row)
                         for column in columns
                     )
                 )
                 continue
-            payload.append(tuple(_value(table, column, row, present) for column in columns))
+            payload.append(tuple(_value(table, column, row) for column in columns))
         if not payload:
             continue
         with db.transaction() as c:

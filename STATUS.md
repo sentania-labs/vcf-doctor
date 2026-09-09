@@ -102,6 +102,10 @@ version of this file is in git history.
   it or the vCenter passwords need re-entering.
 - Drop the exactly-one-replica and `strategy: Recreate` rules; more than one
   pod is supported now.
+- Point `livenessProbe` at `/api/health/live` and `readinessProbe` at
+  `/api/health/ready`. `/api/health` still answers liveness, so an un-updated
+  manifest is safe, but it no longer tells an orchestrator when to stop sending
+  traffic.
 - Drop `VCF_DOCTOR_DB_PATH` (no longer read).
 - Drop `VCF_DOCTOR_DEMO_MODE` from the manifest (no longer read).
 - Add a SealedSecret for `VCF_DOCTOR_SECRET_KEY` so the encryption key

@@ -242,8 +242,8 @@ jobs:
           curl -fsS localhost:8000/api/health/live | grep -q '"status":"ok"'
           # The database is reachable and migrated, and one worker holds the
           # scheduler lock, which every worker reports.
-          curl -fsS localhost:8000/api/health | grep -q '"database":true'
-          curl -fsS localhost:8000/api/health | grep -q '"scheduler":true'
+          curl -fsS localhost:8000/api/health/ready | grep -q '"database":true'
+          curl -fsS localhost:8000/api/health/ready | grep -q '"scheduler":true'
           # The console reads its password from a file only it can read.
           test "$(docker exec smoke stat -c '%a %u' /run/secrets/db-password)" = "400 10001"
           test "$(docker exec smoke sh -c 'cat /run/secrets/postgres-password 2>/dev/null' | wc -c)" = 0
@@ -288,7 +288,7 @@ jobs:
           # 51 fixture resources are all still there afterwards.
           docker restart smoke
           for i in $(seq 1 60); do
-            curl -fsS localhost:8000/api/health >/dev/null && break
+            curl -fsS localhost:8000/api/health/ready >/dev/null && break
             if [ "$i" = 60 ]; then echo "container did not come back"; docker logs smoke; exit 1; fi
             sleep 1
           done
@@ -301,6 +301,9 @@ jobs:
           # traffic to it either.
           docker stop smoke-db
           test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8000/api/health/live)" = 200
+          # The older name still answers liveness, so a manifest that has not
+          # been repointed yet does not restart-loop through the outage.
+          test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8000/api/health)" = 200
           test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8000/api/health/ready)" = 503
           curl -s localhost:8000/api/health/ready | grep -q '"database":false'
           test "$(docker inspect --format '{{.State.Health.Status}}' smoke)" = healthy

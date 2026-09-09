@@ -85,6 +85,12 @@ def test_liveness_stays_green_while_the_database_is_down(monkeypatch):
         live = client.get("/api/health/live")
         assert live.status_code == 200
         assert live.json()["status"] == "ok"
+        # /api/health is the older name for the same question. The deployment
+        # manifest lives elsewhere and probes it, so it must not go red on the
+        # database and restart-loop a pod that only needs its database back.
+        old_name = client.get("/api/health")
+        assert old_name.status_code == 200
+        assert old_name.json()["status"] == "ok"
     db.close()  # the next pool is built from the restored URL
 
 
@@ -103,17 +109,20 @@ def test_readiness_goes_red_while_the_database_is_down(monkeypatch):
         assert ready.json()["database"] is True
 
         _unreachable(monkeypatch)
-        for path in ("/api/health/ready", "/api/health"):
-            body = client.get(path)
-            assert body.status_code == 503, path
-            assert body.json()["status"] == "degraded"
-            assert body.json()["database"] is False
-            assert body.json()["detail"]
+        body = client.get("/api/health/ready")
+        assert body.status_code == 503
+        assert body.json()["status"] == "degraded"
+        assert body.json()["database"] is False
+        # Readiness needs no session, and the driver's diagnostic names hosts
+        # and the configured secret path, so it is logged and never published.
+        assert "detail" not in body.json()
     db.close()
 
 
-def test_readiness_is_red_while_a_migration_is_pending(tmp_path, monkeypatch):
+def test_readiness_is_red_while_a_migration_is_pending(tmp_path, monkeypatch, caplog):
     """A reachable server missing its tables is not somewhere to send traffic."""
+    import logging
+
     from fastapi.testclient import TestClient
 
     from app import migrate
@@ -128,9 +137,13 @@ def test_readiness_is_red_while_a_migration_is_pending(tmp_path, monkeypatch):
             "CREATE TABLE example_later (id TEXT PRIMARY KEY);", encoding="utf-8"
         )
         monkeypatch.setattr(migrate, "MIGRATIONS_DIR", tmp_path)
-        body = client.get("/api/health/ready")
+        with caplog.at_level(logging.WARNING, logger="vcf_doctor"):
+            body = client.get("/api/health/ready")
         assert body.status_code == 503
-        assert "0002_example" in body.json()["detail"]
+        assert body.json()["database"] is False
+        assert "detail" not in body.json()
+        # The reason an operator needs is in the log, not in a body anyone can read.
+        assert "0002_example" in caplog.text
         # Liveness is unaffected: the process is fine, its schema is not.
         assert client.get("/api/health/live").status_code == 200
 
@@ -144,8 +157,42 @@ def test_trusted_proxies_trust_nobody_when_the_database_is_unreadable(monkeypatc
     monkeypatch.setattr(cfg, "db_password_file", "")
     monkeypatch.setattr(cfg, "db_pool_timeout", 0.5)
     db.close()
+    proxies.reset_cache()
     try:
         assert proxies.stored_value() == []
         assert proxies.networks() == []
     finally:
         db.close()
+        proxies.reset_cache()
+
+
+def test_a_failed_lookup_is_not_remembered_as_an_answer(monkeypatch):
+    """The trusted-proxies lookup is cached so it is not a database round trip
+    on the event loop per request, but a failure is not an answer: the list has
+    to come back with the database, not one cache lifetime later."""
+    from app import proxies
+
+    db.reset_for_tests()
+    proxies.set_stored(["10.42.0.0/16"])   # saving forgets the cached list
+
+    monkeypatch.setattr(cfg, "database_url", "postgresql://nobody@127.0.0.1:1/nothing")
+    monkeypatch.setattr(cfg, "db_password_file", "")
+    monkeypatch.setattr(cfg, "db_pool_timeout", 0.5)
+    db.close()
+    assert proxies.stored_value() == []
+
+    monkeypatch.undo()
+    db.close()
+    # Straight away, well inside CACHE_TTL: the empty answer was never stored.
+    assert proxies.stored_value() == ["10.42.0.0/16"]
+
+
+def test_a_saved_list_applies_without_waiting_for_the_cache(monkeypatch):
+    """An operator who saves Settings must not have to wait out the TTL."""
+    from app import proxies
+
+    db.reset_for_tests()
+    proxies.set_stored(["10.42.0.0/16"])
+    assert proxies.stored_value() == ["10.42.0.0/16"]
+    proxies.set_stored(["192.0.2.0/24"])
+    assert proxies.stored_value() == ["192.0.2.0/24"]

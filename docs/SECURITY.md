@@ -133,7 +133,7 @@ gates are the release discipline.
 ## What ships
 
 Base images are pinned by digest and `uv` by version. The container runs as
-uid 10001 and declares a `HEALTHCHECK` on `/api/health`. The published image
+uid 10001 and declares a `HEALTHCHECK` on `/api/health/live`. The published image
 index carries a max-mode SLSA provenance attestation and an SPDX SBOM, and
 the digest is signed keyless with cosign. See [Deployment](DEPLOYMENT.md)
 for the verification commands.
