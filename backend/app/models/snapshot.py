@@ -16,13 +16,12 @@ class RetentionPolicy(BaseModel):
     < daily_days: one per day; older: prune. Manual snapshots are never pruned.
 
     timezone is the IANA zone whose midnights are the day marks.
-    Empty means the server's own zone; browser display dates are independent.
     """
 
     recent_days: int = Field(ge=1)
     hourly_days: int = Field(ge=1)
     daily_days: int = Field(ge=1)
-    timezone: str = ""
+    timezone: str = "UTC"
 
     # Self, not RetentionPolicy: on Python 3.14.3 pydantic resolves a validator's
     # signature while the class body is still running, and the bare class name is
@@ -31,7 +30,7 @@ class RetentionPolicy(BaseModel):
     def _ordered(self) -> Self:
         if not self.recent_days <= self.hourly_days <= self.daily_days:
             raise ValueError("retention tiers must satisfy recent <= hourly <= daily days")
-        if not timezones.is_valid(self.timezone):
+        if not self.timezone or not timezones.is_valid(self.timezone):
             raise ValueError(f"unknown timezone {self.timezone!r}")
         return self
 

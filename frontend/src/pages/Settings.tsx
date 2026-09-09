@@ -90,11 +90,10 @@ function retentionProblem(p: RetentionPolicy): { field: keyof RetentionPolicy; m
   return null
 }
 
-function RetentionCard({ value, onChange, serverTimezone }: { value: RetentionPolicy; onChange: (p: RetentionPolicy) => void; serverTimezone: string }) {
+function RetentionCard({ value, onChange }: { value: RetentionPolicy; onChange: (p: RetentionPolicy) => void }) {
   const problem = retentionProblem(value)
   const set = (k: 'recent_days' | 'hourly_days' | 'daily_days') => (e: ChangeEvent<HTMLInputElement>) => onChange({ ...value, [k]: e.target.value === '' ? 0 : Math.floor(Number(e.target.value)) })
   const cls = (k: keyof RetentionPolicy) => problem?.field === k ? 'border-critical focus:border-critical focus:ring-critical/25' : undefined
-  const effective = value.timezone || serverTimezone || 'UTC'
   const zones = zoneOptions(value.timezone)
   return (
     <Card>
@@ -115,12 +114,11 @@ function RetentionCard({ value, onChange, serverTimezone }: { value: RetentionPo
         <div className="grid sm:grid-cols-2 gap-4">
           <Field label="Day marks in timezone" hint="Which midnight the daily tier keeps a snapshot nearest, so it lands on the day the Snapshots page files it under.">
             <Select className="w-full" value={value.timezone} onChange={e => onChange({ ...value, timezone: e.target.value })}>
-              <option value="">Server timezone ({serverTimezone || 'UTC'})</option>
               {zones.map(z => <option key={z} value={z}>{z}</option>)}
             </Select>
           </Field>
           <div className="text-xs text-faint sm:pt-6 space-y-1">
-            <p>Daily retention and Snapshots page groups use midnight {effective}.</p>
+            <p>Daily retention and Snapshots page groups use midnight {value.timezone}.</p>
           </div>
         </div>
         {problem ? <p className="text-sm text-critical bg-critical-bg rounded-md px-3 py-2" role="alert">{problem.message}</p>
@@ -223,7 +221,7 @@ export default function SettingsPage() {
 
       {!s.data ? <div className="space-y-5"><Skeleton className="h-40 rounded-xl" /><Skeleton className="h-72 rounded-xl" /></div> : (
         <div className="space-y-5">
-          <RetentionCard value={retention} onChange={setRetention} serverTimezone={s.data.server_timezone ?? ''} />
+          <RetentionCard value={retention} onChange={setRetention} />
           <EventsRetentionCard value={eventPolicy} onChange={setEventPolicy} settings={s.data} />
           <HealthScoreCard />
 

@@ -123,7 +123,7 @@ export interface EventMaintenanceStatus { migration_required: boolean; last_run:
 export interface IncompleteEventInterval { id: number; connection_id: string; since: string; until: string; attempts: number; last_error: string | null; updated_at: string }
 export interface EventCaptureStatus { task_history_unavailable: boolean; connection_id: string; last_complete_end: string | null; incomplete_intervals: IncompleteEventInterval[] }
 // changes_min_significance: lowest significance the Changes page and Overview show by default (low = everything).
-export interface Settings { retention_policy: RetentionPolicy; event_policy: EventPolicy; event_maintenance: EventMaintenanceStatus; assistant: AssistantSettings; changes_min_significance?: Significance; server_timezone?: string }
+export interface Settings { retention_policy: RetentionPolicy; event_policy: EventPolicy; event_maintenance: EventMaintenanceStatus; assistant: AssistantSettings; changes_min_significance?: Significance }
 // Trusted proxies: addresses allowed to set X-Forwarded-For / X-Forwarded-Proto (the ingress).
 export interface TrustedProxies {
   trusted_proxies: string[]; source: 'env' | 'settings'; stored: string[]; env_problem: string | null

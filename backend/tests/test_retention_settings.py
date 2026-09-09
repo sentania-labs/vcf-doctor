@@ -32,7 +32,6 @@ def test_defaults_come_from_config_and_old_count_is_ignored(client):
         "daily_days": 365,
         "timezone": default_timezone,
     }
-    assert body["server_timezone"]  # the GUI names the default it is offering
     assert body["event_policy"] == {"retention_hours": 48, "row_cap": 250000}
     assert body["event_maintenance"]["last_run"] is None
     assert db.get_setting("event_policy") == {"retention_hours": 48, "row_cap": 250000}
@@ -96,18 +95,14 @@ def test_event_policy_partial_update_persists_and_validates(client):
         assert client.put("/api/settings", json={"event_policy": bad}).status_code == 400
 
 
-def test_timezone_is_stored_and_shown_with_the_server_default(client):
-    """Issue #28: the day tier anchors at local midnight, and the zone is a
-    Settings value with a working default (empty: follow the server)."""
+def test_timezone_is_stored_with_an_explicit_default(client):
     r = _put(client, {"timezone": " America/Chicago "})
     assert r.status_code == 200, r.text
     assert r.json()["retention_policy"]["timezone"] == "America/Chicago"
     assert store.retention_policy().timezone == "America/Chicago"
-    # Back to the default, which is whatever the server itself is set to.
-    assert _put(client, {"timezone": ""}).json()["retention_policy"]["timezone"] == ""
     body = client.get("/api/settings").json()
-    assert body["server_timezone"] == timezones.server_timezone()
-    assert timezones.zone("") is timezones.zone(timezones.server_timezone())
+    assert "server_timezone" not in body
+    assert _put(client, {"timezone": ""}).status_code == 400
 
 
 def test_deployment_default_uses_tz_then_utc(monkeypatch):
@@ -123,7 +118,7 @@ def test_an_unknown_stored_timezone_does_not_break_a_retention_pass():
     rather than failing every scan's retention pass."""
     assert timezones.zone("Mars/Olympus") is UTC
     assert not timezones.is_valid("Mars/Olympus")
-    assert timezones.is_valid("")
+    assert not timezones.is_valid("")
 
 
 def test_an_unknown_environment_timezone_degrades_to_utc_instead_of_failing(client, monkeypatch):

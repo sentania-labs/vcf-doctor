@@ -71,16 +71,20 @@ def compute_findings(resources: list[Resource], previous: list[Resource] | None)
         return []
 
 
+class ChangeDiffError(RuntimeError):
+    pass
+
+
 def compute_changes(old: list[Resource], new: list[Resource]) -> list:
     try:
         from app.diff.engine import diff
-    except ImportError:
-        return []
+    except ImportError as exc:
+        raise ChangeDiffError("change diff engine unavailable") from exc
     try:
         return list(diff(old, new))
-    except Exception:
+    except Exception as exc:
         log.exception("diff failed")
-        return []
+        raise ChangeDiffError("change diff failed") from exc
 
 
 def _label(trigger: str, label: str | None) -> str:
@@ -122,6 +126,7 @@ def run_scan(connection_id: str, trigger: str = "manual", label: str | None = No
             collector = get_collector(conn)
             previous = store.latest_snapshot(connection_id)
             resources = collector.collect()
+            changes = compute_changes(previous.resources, resources) if previous is not None else []
             snapshot: Snapshot = store.save_snapshot(
                 connection_id, resources, _label(trigger, label), scheduled=trigger == "scheduled"
             )
@@ -141,7 +146,7 @@ def run_scan(connection_id: str, trigger: str = "manual", label: str | None = No
                     previous.id,
                     snapshot.id,
                     snapshot.created_at,
-                    compute_changes(previous.resources, resources),
+                    changes,
                 )
             store.apply_retention(connection_id)
             run = store.finish_run(run.id, "ok", snapshot_id=snapshot.id)

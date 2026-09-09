@@ -16,7 +16,7 @@ export function createSnapshot(connectionId: string, label: string): Promise<Sna
     const estate = mockEstate(connectionId)[0]
     if (!estate) return Promise.reject(new Error('Unknown connection'))
     const created_at = new Date().toISOString()
-    const timezone = mockState.settings.retention_policy.timezone || mockState.settings.server_timezone
+    const timezone = mockState.settings.retention_policy.timezone
     const snap: SnapshotSummary = {
       id: `snap-${connectionId}-${mockState.nextId++}`, created_at, label: label || 'Manual',
       connection_id: connectionId, scheduled: false, resource_count: estate.resources.length, tier: 'manual',

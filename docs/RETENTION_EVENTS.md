@@ -14,9 +14,8 @@ Applied per connection after every scan and at startup (idempotent):
 - age >= daily_days: prune.
 
 `timezone` is an IANA zone name, editable in Settings > Retention. New installs
-use the `TZ` environment value when set and UTC otherwise. Empty follows the
-server's own zone, reported as `server_timezone` by `GET /api/settings`.
-Deployment overrides are listed in
+use the `TZ` environment value when set and UTC otherwise. The policy always
+stores an explicit zone. Deployment overrides are listed in
 [Environment variables](DEPLOYMENT.md#environment-variables). Day marks and
 the Snapshots page day groups use this same zone, which the page names beside
 the groups. Two operators therefore see the same day boundaries. The survivor
@@ -42,7 +41,9 @@ Every scan computes `diff(previous, current)` and writes the rows to a
 `changes` table: id, connection_id, from_snapshot_id, to_snapshot_id,
 observed_at (to snapshot time), resource_id, resource_type, resource_name,
 change_type, significance, summary, property_changes (JSON). Retention of
-change rows: daily_days. Endpoints:
+change rows: daily_days. A scan persists its snapshot and coverage marker only
+after diffing succeeds, so a failed diff leaves the previous covered snapshot
+as the source for the next scan. Endpoints:
 
 - `GET /api/changes/log?connection_id=&since=&until=&min_significance=&resource_id=&limit=`
   returns the persisted rows newest first (default last 24 h, limit 500).
@@ -72,7 +73,7 @@ available snapshot history:
   the newest differing pair when retention has pruned one of those two
   (`"pre_log_differing_pair"`), and lists the logged rows about the finding's
   neighbourhood after that diff as a separate block, then caps the combined list.
-  A retained row for the exact bracketing snapshot pair is not repeated.
+  A retained row for the exact snapshot pair selected for recovery is not repeated.
   Genuinely later occurrences remain visible even when their summaries match
   the snapshot diff.
 - the Overview feed recovers the part of its 24 h window that predates the log

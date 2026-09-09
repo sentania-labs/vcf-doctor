@@ -438,7 +438,6 @@ export const mockState = {
   estates: [buildWorkloadDomain(), buildManagementDomain()] as MockEstate[],
   settings: {
     retention_policy: { recent_days: 14, hourly_days: 30, daily_days: 365, timezone: 'UTC' },
-    server_timezone: 'UTC',
     event_policy: { retention_hours: 48, row_cap: 250000 },
     event_maintenance: { migration_required: false, last_run: hoursAgo(1), last_error: null, pages_reclaimed: 36 },
     changes_min_significance: 'low',

@@ -22,9 +22,7 @@ export default function SnapshotsPage() {
   const [confirm, setConfirm] = useState<string | null>(null)
   const [q, setQ] = useState('')
   const connName = (id: string) => connections.find(c => c.id === id)?.name ?? id
-  const groupingTimezone = settings.data?.retention_policy.timezone
-    || settings.data?.server_timezone
-    || 'UTC'
+  const groupingTimezone = settings.data?.retention_policy.timezone || 'UTC'
 
   const capture = async () => {
     const conn = connectionId ?? target

@@ -3,6 +3,7 @@
 from datetime import timedelta
 
 from app import db, scheduler
+from app.diff import engine
 from app.events import store as events_store
 from app.models import ConnectionCreate
 from app.models.event import Event
@@ -46,6 +47,29 @@ def test_fixture_scans_write_fifteen_rows_a_to_b(tmp_path):
     # B -> B: a scan with no change adds no rows.
     assert scheduler.run_scan(conn.id, "scheduled").status == "ok"
     assert store.count_changes(conn.id) == 15
+
+
+def test_diff_failure_does_not_persist_a_snapshot_or_claim_coverage(tmp_path, monkeypatch):
+    db.reset_for_tests(str(tmp_path / "t.db"))
+    conn = _conn()
+    first = scheduler.run_scan(conn.id, "manual")
+    real_diff = engine.diff
+    monkeypatch.setattr(engine, "diff", lambda old, new: (_ for _ in ()).throw(RuntimeError()))
+
+    failed = scheduler.run_scan(conn.id, "scheduled")
+
+    assert failed.status == "error"
+    assert len(store.list_snapshots(conn.id)) == 1
+    assert store.log_since(conn.id) is None
+    assert store.count_changes(conn.id) == 0
+
+    monkeypatch.setattr(engine, "diff", real_diff)
+    recovered = scheduler.run_scan(conn.id, "scheduled")
+    assert recovered.status == "ok"
+    assert len(store.list_snapshots(conn.id)) == 2
+    rows = store.list_change_log(conn.id, limit=1000)
+    assert rows
+    assert {row.from_snapshot_id for row in rows} == {first.snapshot_id}
 
 
 def test_change_rows_outlive_pruned_snapshots_and_expire_with_daily_days(tmp_path):

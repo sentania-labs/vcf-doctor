@@ -12,7 +12,6 @@ export function updateSettings(body: SettingsUpdate): Promise<Settings> {
     const { api_key, ...rest } = body.assistant
     mockState.settings = {
       retention_policy: { ...body.retention_policy },
-      server_timezone: mockState.settings.server_timezone,
       event_policy: { ...body.event_policy },
       event_maintenance: mockState.settings.event_maintenance,
       changes_min_significance: body.changes_min_significance ?? mockState.settings.changes_min_significance ?? 'low',

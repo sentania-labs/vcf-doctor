@@ -184,7 +184,9 @@ def _logged(connection_id: str, since: datetime, near: list[str]) -> list:
     return list(unique.values())
 
 
-def _latest_differing_pair(connection_id: str) -> tuple[list, datetime | None, datetime | None]:
+def _latest_differing_pair(
+    connection_id: str,
+) -> tuple[list, datetime | None, datetime | None, tuple[str, str] | None]:
     """Fallback when nothing is logged: diff newest pairs until one differs."""
     summaries = store.list_snapshots(connection_id)[: MAX_PAIRS_BACK + 1]
     newer = store.get_snapshot(summaries[0].id) if summaries else None
@@ -194,9 +196,9 @@ def _latest_differing_pair(connection_id: str) -> tuple[list, datetime | None, d
             break
         diff = scheduler.compute_changes(older.resources, newer.resources)
         if diff:
-            return diff, older.created_at, newer.created_at
+            return diff, older.created_at, newer.created_at, (older.id, newer.id)
         newer = older
-    return [], None, None
+    return [], None, None, None
 
 
 def _bracketing_pair(first: FirstObserved) -> list | None:
@@ -267,7 +269,13 @@ def related_changes(connection_id: str, finding: Finding, resources: list[Resour
                 ]
             else:
                 basis = "pre_log_differing_pair"
-                diff, pair_since, pair_until = _latest_differing_pair(connection_id)
+                diff, pair_since, pair_until, pair_ids = _latest_differing_pair(connection_id)
+                if pair_ids is not None:
+                    rows = [
+                        row
+                        for row in rows
+                        if (row.from_snapshot_id, row.to_snapshot_id) != pair_ids
+                    ]
             changes = (_select(diff, near) + _select(rows, near))[:MAX_CHANGES]
             window = RelatedWindow(
                 basis=basis,
@@ -279,7 +287,7 @@ def related_changes(connection_id: str, finding: Finding, resources: list[Resour
                 log_starts_at=log_starts,
             )
     else:
-        diff, since, until = _latest_differing_pair(connection_id)
+        diff, since, until, _ = _latest_differing_pair(connection_id)
         window = RelatedWindow(
             basis="latest_differing_pair",
             since=since,

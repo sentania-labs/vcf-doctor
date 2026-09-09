@@ -746,7 +746,11 @@ def test_snapshot_diff_keeps_distinct_logged_disconnects(client, pruned):
         "connectionState connected -> disconnected",
     ]
     if pruned:
-        expected.insert(1, "connectionState connected -> disconnected")
+        expected = [
+            "connectionState connected -> disconnected",
+            "connectionState connected -> disconnected",
+            "connectionState disconnected -> connected",
+        ]
     assert [c["summary"] for c in body["changes"]] == expected
 
 

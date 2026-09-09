@@ -142,13 +142,29 @@ export function dayKey(iso: string, timeZone?: string): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso
   if (timeZone) {
-    const parts = new Intl.DateTimeFormat('en-US', {
-      timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
-    }).formatToParts(d)
-    const get = (type: 'year' | 'month' | 'day') => parts.find(p => p.type === type)?.value ?? ''
-    return `${get('year')}-${get('month')}-${get('day')}`
+    try {
+      const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
+      }).formatToParts(d)
+      const get = (type: 'year' | 'month' | 'day') => parts.find(p => p.type === type)?.value ?? ''
+      return `${get('year')}-${get('month')}-${get('day')}`
+    } catch (error) {
+      if (!(error instanceof RangeError)) throw error
+      return d.toISOString().slice(0, 10)
+    }
   }
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function supportsTimeZone(timeZone?: string): boolean {
+  if (!timeZone) return true
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone }).format()
+    return true
+  } catch (error) {
+    if (error instanceof RangeError) return false
+    throw error
+  }
 }
 
 // "Today", "Yesterday", else "Mon, Sep 1" (with the year once it differs from the current one).
@@ -173,6 +189,11 @@ export function groupByDayKey<T>(
 ): Array<DayGroup<T>> {
   const out: Array<DayGroup<T>> = []
   const idx = new Map<string, number>()
+  const relativeLabels = supportsTimeZone(timeZone)
+  const today = relativeLabels ? dayKey(new Date().toISOString(), timeZone) : null
+  const yesterday = today
+    ? new Date(new Date(`${today}T12:00:00Z`).getTime() - 86_400_000).toISOString().slice(0, 10)
+    : null
   for (const it of items) {
     const key = keyFor(it)
     let i = idx.get(key)
@@ -180,13 +201,11 @@ export function groupByDayKey<T>(
       i = out.length
       idx.set(key, i)
       const midday = `${key}T12:00:00Z`
-      const today = dayKey(new Date().toISOString(), timeZone)
-      const yesterday = new Date(`${today}T12:00:00Z`).getTime() - 86_400_000
       const label = key === today
         ? 'Today'
-        : key === new Date(yesterday).toISOString().slice(0, 10)
+        : key === yesterday
           ? 'Yesterday'
-          : new Date(midday).toLocaleDateString([], { timeZone: 'UTC', weekday: 'short', month: 'short', day: 'numeric', ...(key.slice(0, 4) === today.slice(0, 4) ? {} : { year: 'numeric' }) })
+          : new Date(midday).toLocaleDateString([], { timeZone: 'UTC', weekday: 'short', month: 'short', day: 'numeric', ...(today && key.slice(0, 4) === today.slice(0, 4) ? {} : { year: 'numeric' }) })
       out.push({ key, label, items: [] })
     }
     out[i].items.push(it)

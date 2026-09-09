@@ -19,7 +19,7 @@ export function triggerScan(connectionId?: string | null): Promise<ScanRun[]> {
       setTimeout(() => {
         run.status = 'ok'
         run.finished = new Date().toISOString()
-        const timezone = mockState.settings.retention_policy.timezone || mockState.settings.server_timezone
+        const timezone = mockState.settings.retention_policy.timezone
         const snap: SnapshotSummary = { id: `snap-${e.connection.id}-${mockState.nextId++}`, created_at: run.finished, label: 'Manual scan', connection_id: e.connection.id, scheduled: false, resource_count: e.resources.length, tier: 'manual', retention_day: dayKey(run.finished, timezone) }
         run.snapshot_id = snap.id
         e.snapshots.unshift(snap)

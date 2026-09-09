@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ValidationError
 
-from app import db, scheduler, timezones
+from app import db, scheduler
 from app.assistant import settings as assistant_settings
 from app.collectors.registry import CollectorUnavailable, get_collector
 from app.config import settings
@@ -515,9 +515,6 @@ def put_schedule(connection_id: str, body: ScheduleUpdate):
 
 class AppSettings(BaseModel):
     retention_policy: RetentionPolicy
-    # The zone an empty retention_policy.timezone follows, so the GUI can name
-    # the default it is offering.
-    server_timezone: str
     event_policy: EventPolicy
     event_maintenance: EventMaintenanceStatus
     min_interval_minutes: int
@@ -542,7 +539,6 @@ def get_settings():
 
     return AppSettings(
         retention_policy=scheduler.retention_policy(),
-        server_timezone=timezones.server_timezone(),
         event_policy=events_store.event_policy(),
         event_maintenance=events_store.maintenance_status(),
         min_interval_minutes=settings.min_interval_minutes,
