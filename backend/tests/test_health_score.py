@@ -104,14 +104,36 @@ def test_coverage_marks_previous_snapshot_checks_not_evaluated():
     assert cov["HOST_DISCONNECTED"] == 2
     assert cov["HOST_NTP_NOT_CONFIGURED"] == 1  # h2 did not report an NTP list
     assert cov["NETWORK_REMOVED"] == 0
-    assert cov["RESOURCE_REMOVED"] == 0
+    assert cov["RESOURCE_REMOVED"] == {}
     assert cov["CLUSTER_HOST_COUNT_CHANGE"] == 0
     assert cov["VM_POWERED_OFF"] == 0
     # With a previous snapshot the removed checks judge the previous objects.
     net = Resource(id="n1", type="network", name="n1", source="vc01")
     cov2 = coverage(hosts, [net, hosts[0], hosts[1]])
     assert cov2["NETWORK_REMOVED"] == 1
-    assert cov2["RESOURCE_REMOVED"] == 2
+    assert cov2["RESOURCE_REMOVED"] == {"host": 2}
+
+
+def test_resource_removed_deduction_uses_its_resource_type_population():
+    current = [Resource(id="d2", type="datastore", name="d2", source="vc01")]
+    previous = [
+        Resource(id="d1", type="datastore", name="d1", source="vc01"),
+        Resource(id="d2", type="datastore", name="d2", source="vc01"),
+    ]
+    small_findings = run_all(current, previous)
+    small = scoring.compute_health(small_findings, coverage(current, previous), W)
+
+    extra_hosts = [_host(f"h{i}") for i in range(100)]
+    large_findings = run_all(current + extra_hosts, previous + extra_hosts)
+    large = scoring.compute_health(
+        large_findings, coverage(current + extra_hosts, previous + extra_hosts), W
+    )
+
+    assert small["score"] == large["score"] == 92
+    small_removed = next(c for c in small["checks"] if c["check_id"] == "RESOURCE_REMOVED")
+    large_removed = next(c for c in large["checks"] if c["check_id"] == "RESOURCE_REMOVED")
+    assert small_removed["deduction"] == large_removed["deduction"] == 7.5
+    assert (small_removed["evaluated"], large_removed["evaluated"]) == (2, 2)
 
 
 def test_objects_without_the_inspected_property_are_not_counted():
@@ -151,7 +173,9 @@ def test_every_check_has_coverage_and_findings_never_exceed_it():
         for f in run_all(resources, prev):
             per_check[f.check_id] = per_check.get(f.check_id, 0) + 1
         for check_id, n in per_check.items():
-            assert n <= cov[check_id], check_id
+            evaluated = cov[check_id]
+            total = sum(evaluated.values()) if isinstance(evaluated, dict) else evaluated
+            assert n <= total, check_id
 
 
 @pytest.fixture

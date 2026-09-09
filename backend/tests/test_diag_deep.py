@@ -266,11 +266,21 @@ def test_version_mismatch_ignores_hosts_without_version_and_single_host_clusters
     graph = [
         cluster("wld01"),
         host("esx01", version="8.0.2", build="1"),
-        host("esx02"),  # older collector: nothing reported
+        host("esx02", build="2"),  # a build without a version is not enough to compare
         cluster("solo"),
         host("esx09", "solo", version="7.0.3", build="9"),
     ]
     assert HostVersionMismatch().evaluate(graph) == []
+    assert HostVersionMismatch().applicable(graph) == []
+
+
+def test_version_mismatch_is_applicable_with_two_reporting_member_hosts():
+    graph = [
+        cluster("wld01"),
+        host("esx01", version="8.0.2", build="1"),
+        host("esx02", version="8.0.2", build="1"),
+    ]
+    assert HostVersionMismatch().applicable(graph) == [graph[0]]
 
 
 def test_version_mismatch_uses_cluster_hosts_property_when_hosts_lack_parent():

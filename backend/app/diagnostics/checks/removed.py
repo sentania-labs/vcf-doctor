@@ -1,5 +1,7 @@
 """Checks that compare against the previous snapshot for removed resources."""
 
+from collections import Counter
+
 from app.diagnostics.base import DiagnosticCheck
 from app.diagnostics.checks._common import by_id, finding_id
 from app.models import Finding, Resource
@@ -84,6 +86,12 @@ class ResourceRemoved(DiagnosticCheck):
             r for r in previous
             if r.type not in NETWORK_TYPES and not (r.type == "vm" and r.name.startswith("vCLS"))
         ]
+
+    def applicable_by_type(
+        self, resources: list[Resource], previous: list[Resource] | None = None
+    ) -> dict[str, int]:
+        """Objects judged, grouped by the resource type used for scoring."""
+        return dict(Counter(r.type for r in self.applicable(resources, previous)))
 
     def evaluate(
         self, resources: list[Resource], previous: list[Resource] | None = None

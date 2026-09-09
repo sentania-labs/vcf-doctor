@@ -40,13 +40,10 @@ version of this file is in git history.
   numbers (#17, #36).
 - Python 3.14 base image, pip dropped from the runtime image (#52).
 - Build identity is available (#60); see the [deployment contract](docs/DEPLOYMENT.md#contract).
-- 526 backend tests pass (`make test`, 2026-09-08).
-
-## In progress
-
-- No merged PR records a successful scan against a live vCenter; #13
-  recorded a failing lab run, #16 fixed the property paths, a successful
-  live run is still owed.
+- Live lab operation against real vCenters is confirmed. Issue #58 records
+  1,194,962 event rows and a 393 MB events table collected over 4.6 days from
+  that deployment (evidence checked 2026-09-08).
+- 534 backend tests pass (`make test`, 2026-09-08).
 
 ## Broken
 

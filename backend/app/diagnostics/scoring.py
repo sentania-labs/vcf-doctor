@@ -3,6 +3,8 @@
 For each check: deduction = sum over its findings of weight(severity), divided
 by the number of objects the check evaluated (so one bad host out of four
 costs ten times what one out of forty does), capped at the largest weight.
+RESOURCE_REMOVED is divided within each resource type, so unrelated inventory
+does not dilute a removal.
 score = 100 minus the sum of deductions, floored at 0, rounded to an integer.
 
 Weights are operator-editable in Settings (settings KV key health_weights)
@@ -27,8 +29,10 @@ MAX_WEIGHT = 100
 FORMULA = (
     "Score = 100 minus, for each check, weight(severity) times the share of the "
     "objects that check evaluated which have a finding, summed and floored at 0. "
-    "A check with no applicable objects (or that needs a previous snapshot) counts "
-    "as not evaluated rather than passed."
+    "The Resource removed check groups objects by type, so a removed datastore is measured "
+    "against the previous datastores, a removed host against the previous hosts, "
+    "and so on. A check with no applicable objects (or that needs a previous "
+    "snapshot) counts as not evaluated rather than passed."
 )
 
 
@@ -115,38 +119,75 @@ def reset_weights() -> dict[str, int]:
 
 def compute_health(
     findings: list[Finding],
-    coverage: dict[str, int],
+    coverage: dict[str, int | dict[str, int]],
     weights: dict[str, int] | None = None,
 ) -> dict[str, Any]:
-    """coverage: check id -> objects evaluated (0 = not evaluated). Findings from
-    a check missing from coverage still count; its denominator becomes the
-    number of findings so the deduction is the full weight."""
+    """coverage: check id -> objects evaluated (0 = not evaluated). A mapping
+    value groups a check's denominator by resource type. Findings from a check
+    missing from coverage still count; its denominator becomes the number of
+    findings so the deduction is the full weight."""
     w = dict(DEFAULT_WEIGHTS)
     w.update(weights if weights is not None else get_weights())
     cap = max(w.values()) if w else 0
     per_check: dict[str, dict[str, Any]] = {}
-    for check_id, n in coverage.items():
+    for check_id, count in coverage.items():
+        denominators = count if isinstance(count, dict) else None
+        n = sum(count.values()) if denominators is not None else count
         per_check[check_id] = {
-            "check_id": check_id, "evaluated": n, "findings": 0, "deduction": 0.0
+            "check_id": check_id,
+            "evaluated": n,
+            "findings": 0,
+            "deduction": 0.0,
+            "_denominators": denominators,
+            "_groups": {},
         }
     for f in findings:
-        blank = {"check_id": f.check_id, "evaluated": 0, "findings": 0, "deduction": 0.0}
+        blank = {
+            "check_id": f.check_id,
+            "evaluated": 0,
+            "findings": 0,
+            "deduction": 0.0,
+            "_denominators": None,
+            "_groups": {},
+        }
         entry = per_check.setdefault(f.check_id, blank)
         entry["findings"] += 1
-        entry["deduction"] += float(w.get(f.severity, 0))
+        denominators = entry["_denominators"]
+        if denominators is None:
+            entry["deduction"] += float(w.get(f.severity, 0))
+        else:
+            resource_type = f.resource_type or "unknown"
+            group = entry["_groups"].setdefault(resource_type, {"findings": 0, "weight": 0.0})
+            group["findings"] += 1
+            group["weight"] += float(w.get(f.severity, 0))
     total = 0.0
     passed = with_findings = not_evaluated = 0
     for entry in per_check.values():
         n = max(entry["evaluated"], entry["findings"])
         entry["evaluated"] = n
         if entry["findings"] > 0:
-            entry["deduction"] = round(min(cap, entry["deduction"] / n), 2)
+            denominators = entry["_denominators"]
+            if denominators is None:
+                deduction = entry["deduction"] / n
+            else:
+                deduction = sum(
+                    group["weight"]
+                    / max(denominators.get(resource_type, 0), group["findings"])
+                    for resource_type, group in entry["_groups"].items()
+                )
+                entry["evaluated"] = sum(
+                    max(denominators.get(resource_type, 0), group["findings"])
+                    for resource_type, group in entry["_groups"].items()
+                )
+            entry["deduction"] = round(min(cap, deduction), 2)
             with_findings += 1
         elif n == 0:
             not_evaluated += 1
         else:
             passed += 1
         total += entry["deduction"]
+        del entry["_denominators"]
+        del entry["_groups"]
     score = int(round(max(0.0, 100.0 - total)))
     # What the operator sees as "lost" must add up to the score shown next to it.
     lost = 100 - score
