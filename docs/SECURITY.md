@@ -63,8 +63,9 @@ again.
 
 Those two are the only rotation procedures. The interface never accepts,
 shows or transmits an encryption key: the only rotation it can start uses a
-key already on the volume, and the rekey endpoint is not a password check. A rotation rewrites only secrets the previous key opens;
-secrets under other keys stay untouched and are reported as unreadable. All
+key already on the volume. A rotation rewrites only secrets the previous key
+opens; secrets under other keys stay untouched and are reported as
+unreadable. All
 recoverable secrets and the outcome commit in one transaction, so an
 interrupted rotation cannot leave only some of its rewrites behind. A key
 that opens nothing leaves stored credentials unchanged and records a failed
