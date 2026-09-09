@@ -4,6 +4,7 @@ The advisory lock is what makes that true across workers and pods, so these
 tests exercise losing it and taking it back rather than the APScheduler wiring.
 """
 
+import psycopg
 import pytest
 
 from app import db, scheduler
@@ -168,7 +169,8 @@ def test_startup_failures_are_isolated_and_do_not_stop_scheduled_scans(monkeypat
         scheduler, "disable_stale_fixture_schedules", record("fixture_schedules")
     )
     monkeypatch.setattr(store, "apply_retention", apply_retention)
-    monkeypatch.setattr(scheduler, "_scheduler", _FakeScheduler())
+    fake_scheduler = _FakeScheduler()
+    monkeypatch.setattr(scheduler, "_scheduler", fake_scheduler)
     scheduler._begin_startup()
 
     scheduler._maintenance_job()
@@ -189,6 +191,7 @@ def test_startup_failures_are_isolated_and_do_not_stop_scheduled_scans(monkeypat
     ):
         assert calls[name] == 1
     assert retention_calls == {failed_retention.id: 2, retained.id: 1}
+    assert fake_scheduler.maintenance_intervals == [60.0, 60.0]
     assert scheduler._leader is True
     assert set(scheduler._scheduled_state) == {failed_retention.id, retained.id}
 
@@ -206,12 +209,51 @@ def test_startup_failures_are_isolated_and_do_not_stop_scheduled_scans(monkeypat
         assert client.get("/api/health/live").status_code == 200
 
 
+def test_startup_names_server_errors_but_not_connection_failures(monkeypatch):
+    from app import vault
+
+    def connection_lost():
+        raise psycopg.OperationalError("connection lost")
+
+    def disk_full():
+        raise psycopg.errors.DiskFull("disk full")
+
+    monkeypatch.setattr(vault, "rekey_at_startup", connection_lost)
+    monkeypatch.setattr(vault, "migrate_plaintext", disk_full)
+    monkeypatch.setattr(scheduler, "scheduler_enabled", lambda: False)
+    fake_scheduler = _FakeScheduler()
+    monkeypatch.setattr(scheduler, "_scheduler", fake_scheduler)
+    scheduler._begin_startup()
+
+    scheduler._maintenance_job()
+
+    assert scheduler.startup_status() == (False, ("vault_plaintext",))
+    assert fake_scheduler.maintenance_intervals == [5.0]
+
+
+def test_pass_level_failure_is_logged_without_a_public_step(monkeypatch):
+    def pass_failure():
+        raise RuntimeError("pass failed")
+
+    monkeypatch.setattr(scheduler, "startup_maintenance", pass_failure)
+    monkeypatch.setattr(scheduler, "scheduler_enabled", lambda: False)
+    fake_scheduler = _FakeScheduler()
+    monkeypatch.setattr(scheduler, "_scheduler", fake_scheduler)
+    scheduler._begin_startup()
+
+    scheduler._maintenance_job()
+
+    assert scheduler.startup_status() == (False, ())
+    assert fake_scheduler.maintenance_intervals == [60.0]
+
+
 class _FakeScheduler:
     """Enough of APScheduler for the leadership logic. The suite never starts a
     real one (_background_jobs_enabled() is false under pytest)."""
 
     def __init__(self):
         self.jobs = {}
+        self.maintenance_intervals = []
 
     def get_job(self, job_id):
         return self.jobs.get(job_id)
@@ -223,6 +265,10 @@ class _FakeScheduler:
         job = _FakeJob(id)
         self.jobs[id] = job
         return job
+
+    def reschedule_job(self, job_id, *, trigger):
+        self.maintenance_intervals.append(trigger.interval.total_seconds())
+        return self.jobs.get(job_id)
 
     def shutdown(self, wait=False):
         self.jobs.clear()

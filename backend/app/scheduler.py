@@ -7,11 +7,11 @@ manual scan on one worker and a scheduled scan on another cannot overlap.
 Every worker serves the API, but only one runs scheduled scans: the one holding
 the scheduler advisory lock. Every worker runs a background job that tries to
 take that lock, checks it is still held, and re-reads the stored schedules. It
-runs more often while startup work is pending, then once a minute. That one loop
-covers three things: a schedule edited on another worker reaches the worker that
-owns the jobs, a database restart that ended the lock session is noticed and the
-lock retaken, and a leader that goes away is replaced by another worker or pod
-within a minute.
+runs every five seconds while startup work is blocked by the database, and once
+a minute otherwise. That one loop covers three things: a schedule edited on
+another worker reaches the worker that owns the jobs, a database restart that
+ended the lock session is noticed and the lock retaken, and a leader that goes
+away is replaced by another worker or pod within a minute.
 """
 
 import logging
@@ -157,7 +157,7 @@ _STARTUP_STEPS = (
 )
 
 
-def startup_maintenance() -> None:
+def startup_maintenance() -> bool:
     """Catch up persisted state after downtime before this worker becomes ready.
 
     Runs on every worker. Everything it does is idempotent, so N workers
@@ -191,6 +191,7 @@ def startup_maintenance() -> None:
     _startup_failures = tuple(sorted(failures))
     if blocked:
         log.info("deferred startup work is waiting for the database")
+    return blocked
 
 
 def _begin_startup() -> None:
@@ -423,9 +424,10 @@ def _drop_scan_jobs() -> None:
 def take_leadership() -> None:
     """Hold the scheduler lock if it is free, and keep the jobs in step with it.
 
-    Runs on every worker once a minute. A leader whose lock session ended (a
-    restarted or failed-over database) drops its jobs and competes for the lock
-    again, so scheduled scans resume instead of stopping silently.
+    Runs every five seconds while startup work is blocked by the database, and
+    once a minute otherwise. A leader whose lock session ended (a restarted or
+    failed-over database) drops its jobs and competes for the lock again, so
+    scheduled scans resume instead of stopping silently.
     """
     global _leader
     if _leader and not db.scheduler_lock_alive():
@@ -458,24 +460,27 @@ def _leadership_job() -> None:
 def _maintenance_job() -> None:
     global _startup_failures
     if _startup_pending:
+        blocked = False
         try:
-            startup_maintenance()
+            blocked = startup_maintenance()
         except Exception as exc:
+            # Last resort for a pass-level failure, which is logged rather than published.
+            _startup_failures = ()
             if db.is_connection_unavailable(exc):
-                _startup_failures = ()
+                blocked = True
                 log.info("deferred startup work is waiting for the database")
             else:
-                _startup_failures = ("maintenance_pass",)
                 log.exception("deferred startup maintenance pass failed; retrying next interval")
         if not _startup_pending:
             log.info("deferred startup work completed")
-            if _scheduler is not None:
-                from apscheduler.triggers.interval import IntervalTrigger
+        if _scheduler is not None:
+            from apscheduler.triggers.interval import IntervalTrigger
 
-                _scheduler.reschedule_job(
-                    "scheduler-maintenance",
-                    trigger=IntervalTrigger(seconds=RECONCILE_SECONDS),
-                )
+            interval = STARTUP_RETRY_SECONDS if blocked else RECONCILE_SECONDS
+            _scheduler.reschedule_job(
+                "scheduler-maintenance",
+                trigger=IntervalTrigger(seconds=interval),
+            )
     if scheduler_enabled():
         _leadership_job()
 

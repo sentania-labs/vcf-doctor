@@ -27,7 +27,7 @@ from typing import Any
 import psycopg
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 from psycopg.rows import dict_row
-from psycopg_pool import ConnectionPool
+from psycopg_pool import ConnectionPool, PoolTimeout
 
 from app import config
 from app.config import settings as cfg
@@ -75,7 +75,16 @@ def conninfo() -> str:
 
 
 def is_connection_unavailable(exc: BaseException) -> bool:
-    return isinstance(exc, (psycopg.OperationalError, psycopg.InterfaceError))
+    if isinstance(exc, (psycopg.InterfaceError, PoolTimeout)):
+        return True
+    if not isinstance(exc, psycopg.OperationalError):
+        return False
+    sqlstate = exc.sqlstate
+    return (
+        sqlstate is None
+        or sqlstate.startswith("08")
+        or sqlstate in {"57P01", "57P02", "57P03"}
+    )
 
 
 def _new_pool() -> ConnectionPool:
