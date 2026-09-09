@@ -16,6 +16,11 @@ if [ -z "$RELEASE" ]; then
   exit 1
 fi
 read -r VERSION DIGEST <<< "$RELEASE"
+VERSION_DIGEST="sha256:$(skopeo inspect --raw "docker://$IMAGE:$VERSION" | sha256sum | cut -d ' ' -f 1)"
+if [ "$VERSION_DIGEST" != "$DIGEST" ]; then
+  echo "$IMAGE:$VERSION serves $VERSION_DIGEST, completed release records $DIGEST" >&2
+  exit 1
+fi
 skopeo copy --all --preserve-digests "docker://$IMAGE@$DIGEST" "docker://$IMAGE:latest"
 PUBLISHED="sha256:$(skopeo inspect --raw "docker://$IMAGE:latest" | sha256sum | cut -d ' ' -f 1)"
 if [ "$PUBLISHED" != "$DIGEST" ]; then

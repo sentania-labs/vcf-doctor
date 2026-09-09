@@ -34,6 +34,9 @@ copies the verified and signed digest recorded in its release notes to `latest`,
 and verifies that alias while holding the promotion lock. Registry tags without
 a completed release are ineligible, as are draft and prerelease records. Older release retries cannot roll it backwards;
 queued promotions can be replaced because each reconciles all completed releases.
+Full reruns verify and reuse an existing completed release digest before any
+version-tag write, even if the rebuilt image has a different build date. A
+version tag that disagrees with its release record fails publication and promotion.
 Only alias promotion shares a concurrency group; builds and releases stay per-ref.
 
 `make image` uses `dev`, the current checkout SHA, and the current UTC time. A backend run directly from a checkout reports `dev`, its

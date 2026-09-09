@@ -28,10 +28,14 @@ if os.environ.get("FAIL") == args[0]:
 if args[0] == "inspect":
     sys.stdout.write(state[args[-1].rsplit(":", 1)[1]])
 elif args[0] == "copy":
-    digest = args[-2].split("@sha256:")[1]
-    manifest = next(value for value in state.values()
-                    if hashlib.sha256(value.encode()).hexdigest() == digest)
-    state["latest"] = "corrupt" if os.environ.get("CORRUPT") else manifest
+    if args[-2].startswith("oci-archive:"):
+        manifest = Path(args[-2].removeprefix("oci-archive:")).read_text()
+    else:
+        digest = args[-2].split("@sha256:")[1]
+        manifest = next(value for value in state.values()
+                        if hashlib.sha256(value.encode()).hexdigest() == digest)
+    tag = args[-1].rsplit(":", 1)[1]
+    state[tag] = "corrupt" if os.environ.get("CORRUPT") else manifest
     path.write_text(json.dumps(state))
 else:
     sys.exit(2)
@@ -192,15 +196,16 @@ def test_incomplete_higher_release_cannot_be_promoted(registry, incomplete):
     assert json.loads(state.read_text())["latest"] == "unsigned"
 
 
-def test_retry_uses_recorded_digest_when_version_tag_is_overwritten(registry):
+def test_promotion_rejects_overwritten_version_tag(registry):
     state, _ = registry
     state.write_text(json.dumps({"v1.3.0": "unsigned retry", "retained": "signed original"}))
     _complete(registry, "v1.3.0", "signed original")
 
     result = _promote(registry)
 
-    assert result.returncode == 0, result.stderr
-    assert json.loads(state.read_text())["latest"] == "signed original"
+    assert result.returncode != 0
+    assert "completed release records" in result.stderr
+    assert "latest" not in json.loads(state.read_text())
 
 
 def test_paginated_release_records_preserve_version_order(registry):
@@ -226,3 +231,78 @@ def test_registry_verification_failure_fails_promotion(registry):
     result = _promote(registry, FAIL="inspect")
 
     assert result.returncode != 0
+
+
+def _publish(registry, **environment):
+    state, env = registry
+    archive = state.parent / "image.tar"
+    archive.write_text("rebuilt with new BUILD_DATE")
+    output = state.parent / "output"
+    output.write_text("")
+    result = subprocess.run(
+        ["bash", str(SCRIPT.with_name("publish-tested-image.sh"))],
+        env={
+            **env,
+            "GITHUB_REF": "refs/tags/v1.3.0",
+            "GITHUB_SHA": "abcdef0123456789",
+            "VERSION": "v1.3.0",
+            "TESTED": "sha256:" + hashlib.sha256(archive.read_bytes()).hexdigest(),
+            "GITHUB_OUTPUT": str(output),
+            "RUNNER_TEMP": str(state.parent),
+            **environment,
+        },
+        capture_output=True,
+        text=True,
+    )
+    return result, dict(line.split("=", 1) for line in output.read_text().splitlines())
+
+
+def test_full_rerun_preserves_completed_version_and_promotes_same_digest(registry):
+    state, _ = registry
+    state.write_text(json.dumps({"v1.3.0": "signed original"}))
+    _complete(registry, "v1.3.0", "signed original")
+
+    for _ in range(2):
+        result, output = _publish(registry)
+        assert result.returncode == 0, result.stderr
+        assert output == {
+            "reused": "true",
+            "digest": "sha256:" + hashlib.sha256(b"signed original").hexdigest(),
+        }
+        assert json.loads(state.read_text())["v1.3.0"] == "signed original"
+        promotion = _promote(registry)
+        assert promotion.returncode == 0, promotion.stderr
+        assert json.loads(state.read_text())["latest"] == "signed original"
+
+
+@pytest.mark.parametrize("failure", ["releases", "inspect", "mismatch", "missing_digest"])
+def test_completed_release_failure_blocks_version_write(registry, failure):
+    state, _ = registry
+    original = {"v1.3.0": "original"}
+    state.write_text(json.dumps(original))
+    manifest = "different" if failure == "mismatch" else "original"
+    fields = {"body": "No digest"} if failure == "missing_digest" else {}
+    _complete(registry, "v1.3.0", manifest, **fields)
+
+    result, output = _publish(registry, FAIL=failure)
+
+    assert result.returncode != 0
+    assert output == {}
+    assert json.loads(state.read_text()) == original
+
+
+@pytest.mark.parametrize("ref,tag", [
+    ("refs/tags/v1.3.0", "v1.3.0"),
+    ("refs/heads/main", "sha-abcdef0"),
+])
+def test_unreleased_build_publishes_tested_artifact(registry, ref, tag):
+    state, _ = registry
+
+    result, output = _publish(registry, GITHUB_REF=ref)
+
+    assert result.returncode == 0, result.stderr
+    assert output["reused"] == "false"
+    assert json.loads(state.read_text()) == {tag: "rebuilt with new BUILD_DATE"}
+    assert output["digest"] == "sha256:" + hashlib.sha256(
+        b"rebuilt with new BUILD_DATE"
+    ).hexdigest()
