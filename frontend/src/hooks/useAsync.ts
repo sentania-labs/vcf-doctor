@@ -32,7 +32,7 @@ export function useAsync<T>(loader: () => Promise<T>, deps: DependencyList, enab
   }, [...deps, tick, enabled])
 
   const reload = useCallback(() => setTick(t => t + 1), [])
-  const set = useCallback((d: T) => { setData(d); setError(null) }, [])
+  const set = useCallback((d: T) => { ++seq.current; setData(d); setError(null); setLoading(false) }, [])
   return { data, error, loading, reload, set }
 }
 
