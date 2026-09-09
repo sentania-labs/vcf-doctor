@@ -81,6 +81,20 @@ gaps expire when their end precedes the retention cutoff. Before retry selection
 surviving gaps are trimmed to that cutoff so a prolonged outage does not trigger
 queries for expired history.
 
+A vCenter newer than the installed pyVmomi can reference a managed object
+type pyVmomi does not define (vCenter 9.1 returns `ContentLibrary` entities;
+pyVmomi 9.1.0.0 has no such type). pyVmomi fails the whole page on one such
+reference, which used to fail the capture for that connection. The collector
+registers a placeholder type for the name pyVmomi reports, logs a warning
+naming the read (`ReadNextEvents` or `ReadNextTasks`), the type and the
+pyVmomi version, rewinds and reads the window again. Known names in
+[KNOWN_MISSING_TYPES](../backend/app/collectors/vsphere/events.py) are
+registered before the first fetch. Rows for such an entity keep the
+lower-cased type as `resource_type` (for example `contentlibrary`) and are not
+joined to a snapshot resource. Hitting the vCenter item limit in the smallest
+query window, or a failed task query, is logged as a warning as well as being
+recorded as an incomplete interval.
+
 Pruning is followed by bounded `incremental_vacuum` maintenance. Settings shows
 its last run, reclaimed page count, and last error. A scan never runs a full
 database vacuum. For existing databases, see the

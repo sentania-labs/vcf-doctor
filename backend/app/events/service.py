@@ -61,12 +61,27 @@ def _fetch_window(
         events_store.set_task_history_unavailable(connection_id, unavailable)
     error = getattr(raw, "error", None)
     if error:
+        log.warning(
+            "events %s: %s in window %s..%s; interval kept for retry on a later scan",
+            connection_id,
+            error,
+            since.isoformat(timespec="seconds"),
+            until.isoformat(timespec="seconds"),
+        )
         events_store.record_incomplete_interval(connection_id, since, until, error)
         return rows, False
     if complete:
         events_store.resolve_incomplete_range(connection_id, since, until)
         return rows, True
     if until - since <= MIN_WINDOW:
+        log.warning(
+            "events %s: capture limit of %d reached in the minimum window %s..%s; "
+            "the newest rows in it are not stored and the interval is kept for retry",
+            connection_id,
+            MAX_ITEMS,
+            since.isoformat(timespec="seconds"),
+            until.isoformat(timespec="seconds"),
+        )
         events_store.record_incomplete_interval(
             connection_id,
             since,
@@ -74,6 +89,13 @@ def _fetch_window(
             f"capture limit of {MAX_ITEMS} reached in minimum window",
         )
         return rows, False
+    log.info(
+        "events %s: capture limit of %d reached in window %s..%s; splitting it",
+        connection_id,
+        MAX_ITEMS,
+        since.isoformat(timespec="seconds"),
+        until.isoformat(timespec="seconds"),
+    )
     midpoint = since + (until - since) / 2
     left, left_complete = _fetch_window(connection_id, collect, since, midpoint)
     right, right_complete = _fetch_window(connection_id, collect, midpoint, until)

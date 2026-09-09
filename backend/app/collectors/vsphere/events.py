@@ -28,8 +28,12 @@ Mapping rules
 from __future__ import annotations
 
 import logging
+import re
+import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as package_version
 from typing import Any
 
 from app.models.event import Event
@@ -38,6 +42,19 @@ log = logging.getLogger(__name__)
 
 PAGE_SIZE = 1000
 MAX_ITEMS = 20_000  # safety cap per window per kind
+
+# Managed object types a vCenter can reference from event or task history
+# that the installed pyVmomi does not define. vCenter 9.1 returns
+# ContentLibrary entities and pyVmomi 9.1.0.0 has no such type, so one
+# reference failed the whole page and with it the whole capture for that
+# connection (issue #65). These are registered as placeholder types before
+# the first fetch; any other unknown type met at read time is registered on
+# the fly by _drain, which logs which read expected it.
+KNOWN_MISSING_TYPES: tuple[str, ...] = ("ContentLibrary",)
+MAX_PLACEHOLDER_TYPES = 8  # distinct registrations per drain before giving up
+_TYPE_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
+_placeholder_lock = threading.Lock()
+_placeholders: set[str] = set()
 
 # (attribute on the event, attribute on the EventArgument holding the moref)
 ENTITY_ARGS: tuple[tuple[str, str], ...] = (
@@ -223,6 +240,74 @@ def map_task(task: Any, namespace: str) -> Event:
     )
 
 
+# ---- unknown managed object types -------------------------------------------------
+
+
+def pyvmomi_version() -> str:
+    try:
+        return package_version("pyvmomi")
+    except PackageNotFoundError:  # pragma: no cover  (always installed with the app)
+        return "unknown"
+
+
+def unknown_type_name(exc: BaseException) -> str | None:
+    """The managed object type a pyVmomi KeyError names, or None.
+
+    While deserializing a response pyVmomi raises KeyError(name) from
+    GuessWsdlType, or KeyError("<namespace> <name>") from GetWsdlType, when
+    the response references a type it cannot load. Any other KeyError is
+    somebody else's bug and is left alone.
+    """
+    if not isinstance(exc, KeyError) or not exc.args or not isinstance(exc.args[0], str):
+        return None
+    name = exc.args[0].strip().rsplit(" ", 1)[-1]
+    return name if _TYPE_NAME.match(name) else None
+
+
+def register_placeholder_type(name: str) -> bool:
+    """Teach pyVmomi a managed object type it does not define.
+
+    The placeholder derives from vim.ManagedEntity because that is what event
+    arguments and TaskInfo.entity are declared as; a plain ManagedObject would
+    fail pyVmomi's field type check. The deserialized reference carries the
+    _wsdlName and _moId that map_event and map_task already read, so the row
+    is kept with resource_type set to the lower-cased type name. Returns True
+    when the type is served by a placeholder (registered now or earlier) and
+    False when pyVmomi defines it natively.
+    """
+    from pyVmomi import VmomiSupport
+
+    with _placeholder_lock:
+        if name in _placeholders:
+            return True
+        try:
+            VmomiSupport.GuessWsdlType(name)
+            return False
+        except KeyError:
+            pass
+        VmomiSupport.CreateManagedType(
+            f"vim.{name}", name, "vim.ManagedEntity", "vim.version.version1", [], []
+        )
+        _placeholders.add(name)
+        log.info(
+            "registered placeholder managed object type %r; pyVmomi %s does not define it",
+            name,
+            pyvmomi_version(),
+        )
+        return True
+
+
+def placeholder_types() -> frozenset[str]:
+    """Types currently served by a placeholder (for tests and diagnostics)."""
+    return frozenset(_placeholders)
+
+
+def ensure_known_types() -> None:
+    """Register every KNOWN_MISSING_TYPES entry pyVmomi still lacks."""
+    for name in KNOWN_MISSING_TYPES:
+        register_placeholder_type(name)
+
+
 # ---- live fetch ------------------------------------------------------------------
 
 
@@ -240,24 +325,59 @@ class CaptureBatch:
     error: str | None = None
 
 
-def _drain(collector: Any, reader: str) -> FetchBatch:
-    """Rewind a history collector and page through it."""
+def _read_pages(collector: Any, reader: str) -> FetchBatch:
+    """Rewind a history collector and page through it up to MAX_ITEMS."""
     out: list[Any] = []
     complete = False
+    collector.RewindCollector()
+    while len(out) < MAX_ITEMS:
+        page = list(getattr(collector, reader)(min(PAGE_SIZE, MAX_ITEMS - len(out))) or [])
+        if not page:
+            complete = True
+            break
+        out.extend(page)
+    return FetchBatch(items=out[:MAX_ITEMS], complete=complete and len(out) < MAX_ITEMS)
+
+
+def _drain(collector: Any, reader: str) -> FetchBatch:
+    """Read a whole history collector, surviving managed object types pyVmomi
+    does not know.
+
+    A vCenter newer than the installed pyVmomi can hand back a reference to a
+    type pyVmomi cannot deserialize. pyVmomi raises KeyError naming the type
+    and the whole page is lost with it, which used to fail the capture for the
+    connection. Register a placeholder for that type, log which read expected
+    it, rewind and read the window again. Bounded: the same name twice, more
+    than MAX_PLACEHOLDER_TYPES names, a KeyError that names no type, or a type
+    pyVmomi already defines all re-raise the original error.
+    """
+    registered: list[str] = []
     try:
-        collector.RewindCollector()
-        while len(out) < MAX_ITEMS:
-            page = list(getattr(collector, reader)(min(PAGE_SIZE, MAX_ITEMS - len(out))) or [])
-            if not page:
-                complete = True
-                break
-            out.extend(page)
+        while True:
+            try:
+                return _read_pages(collector, reader)
+            except KeyError as exc:
+                name = unknown_type_name(exc)
+                if (
+                    name is None
+                    or name in registered
+                    or len(registered) >= MAX_PLACEHOLDER_TYPES
+                    or not register_placeholder_type(name)
+                ):
+                    raise
+                registered.append(name)
+                log.warning(
+                    "%s returned managed object type %r that pyVmomi %s does not define; "
+                    "registered a placeholder and re-reading the window",
+                    reader,
+                    name,
+                    pyvmomi_version(),
+                )
     finally:
         try:
             collector.DestroyCollector()
         except Exception:  # noqa: BLE001  best effort teardown
             pass
-    return FetchBatch(items=out[:MAX_ITEMS], complete=complete and len(out) < MAX_ITEMS)
 
 
 def fetch_events(si: Any, begin: datetime, end: datetime) -> FetchBatch:
@@ -286,6 +406,7 @@ def collect_events(si: Any, namespace: str, begin: datetime, end: datetime) -> C
     """Events plus tasks for the window, with explicit cap completeness."""
     from pyVmomi import vim, vmodl
 
+    ensure_known_types()
     out: list[Event] = []
     event_batch = fetch_events(si, begin, end)
     for raw in event_batch.items:
