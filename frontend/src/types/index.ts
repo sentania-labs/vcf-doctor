@@ -29,11 +29,14 @@ export interface SnapshotSummary {
 export type ChangeLogEntry = Change & { id: string; observed_at: string; from_snapshot_id: string; to_snapshot_id: string }
 // GET /findings/{id}/related: changes around a finding since it was first observed (issue #5).
 // first_observed: the change log since the finding first appeared. latest_differing_pair: no change log on this
-// database, so the newest pair of snapshots that differ. no_snapshots: nothing to compare yet.
-export type RelatedWindowBasis = 'first_observed' | 'latest_differing_pair' | 'no_snapshots'
+// database, so the newest pair of snapshots that differ. pre_log_differing_pair: the log starts after the finding
+// did, so it cannot hold the cause and the pair diff is shown instead (issue #41). no_snapshots: nothing to compare.
+export type RelatedWindowBasis = 'first_observed' | 'latest_differing_pair' | 'pre_log_differing_pair' | 'no_snapshots'
 export interface RelatedWindow {
   basis: RelatedWindowBasis; since: string | null; until: string | null; first_observed: string | null
   scans_present: number; capped: boolean
+  // Set only when the finding predates the change log: where the log begins.
+  log_starts_at: string | null
 }
 export interface FindingRelated { finding_id: string; connection_id: string; resource_ids: string[]; window: RelatedWindow; changes: Change[] }
 // vCenter event or task, normalised by the collector and stored per connection.
@@ -105,13 +108,14 @@ export interface Overview {
 }
 export interface ConnectionTestResult { ok: boolean; message: string; version?: string | null; build?: string | null }
 // Snapshot retention in days per tier; changes follow daily_days.
-export interface RetentionPolicy { recent_days: number; hourly_days: number; daily_days: number }
+// timezone: IANA zone whose midnights are the daily tier's day marks; empty follows the server (issue #28).
+export interface RetentionPolicy { recent_days: number; hourly_days: number; daily_days: number; timezone: string }
 export interface EventPolicy { retention_hours: number; row_cap: number }
 export interface EventMaintenanceStatus { migration_required: boolean; last_run: string | null; last_error: string | null; pages_reclaimed: number }
 export interface IncompleteEventInterval { id: number; connection_id: string; since: string; until: string; attempts: number; last_error: string | null; updated_at: string }
 export interface EventCaptureStatus { task_history_unavailable: boolean; connection_id: string; last_complete_end: string | null; incomplete_intervals: IncompleteEventInterval[] }
 // changes_min_significance: lowest significance the Changes page and Overview show by default (low = everything).
-export interface Settings { retention_policy: RetentionPolicy; event_policy: EventPolicy; event_maintenance: EventMaintenanceStatus; assistant: AssistantSettings; changes_min_significance?: Significance }
+export interface Settings { retention_policy: RetentionPolicy; event_policy: EventPolicy; event_maintenance: EventMaintenanceStatus; assistant: AssistantSettings; changes_min_significance?: Significance; server_timezone?: string }
 // Trusted proxies: addresses allowed to set X-Forwarded-For / X-Forwarded-Proto (the ingress).
 export interface TrustedProxies {
   trusted_proxies: string[]; source: 'env' | 'settings'; stored: string[]; env_problem: string | null

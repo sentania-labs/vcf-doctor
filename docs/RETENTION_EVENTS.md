@@ -3,15 +3,24 @@
 ## Retention policy (settings KV `retention_policy`, GUI on Settings)
 
 ```json
-{"recent_days": 14, "hourly_days": 30, "daily_days": 365}
+{"recent_days": 14, "hourly_days": 30, "daily_days": 365, "timezone": ""}
 ```
 
 Applied per connection after every scan and at startup (idempotent):
 
 - age < recent_days: keep every scheduled snapshot;
 - recent_days <= age < hourly_days: keep the one nearest each hour mark, prune the rest;
-- hourly_days <= age < daily_days: keep the one nearest each day mark (00:00 UTC);
+- hourly_days <= age < daily_days: keep the one nearest each day mark, which is
+  midnight in the policy's `timezone`;
 - age >= daily_days: prune.
+
+`timezone` is an IANA zone name, editable in Settings > Retention. Empty (the
+default) follows the server's own zone, reported as `server_timezone` by
+`GET /api/settings`, and `VCF_DOCTOR_RETENTION_TIMEZONE` sets the default for a
+fresh install. Day marks are local midnights so the daily survivor lands under
+the day the Snapshots page groups it by; hour marks stay on the UTC hour, which
+is the same instant in every whole-hour zone. A zone this machine does not know
+falls back to UTC with a warning rather than failing the retention pass.
 
 Manual snapshots (`scheduled = 0`) are never pruned; scheduled snapshots
 follow the tiers whether or not they carry a label. `SnapshotSummary.tier` is
@@ -33,6 +42,20 @@ change rows: daily_days. Endpoints:
 - `GET /api/changes/log?connection_id=&since=&until=&min_significance=&resource_id=&limit=`
   returns the persisted rows newest first (default last 24 h, limit 500).
 - `GET /api/changes` (on-demand diff between two snapshots) is unchanged.
+- `since` and `until` accept any ISO 8601 datetime, with or without an offset;
+  a naive value is read as UTC. An unencoded `+HH:MM` offset (which arrives as
+  a space) is still understood.
+
+A database upgraded to the change-log release mid-life has snapshots older than
+its first logged row, and the log cannot describe that era. Both readers say so
+rather than showing an empty window:
+
+- `GET /api/findings/{id}/related` sets `window.log_starts_at` when the finding
+  was first observed before the log begins, and falls through to the differing
+  snapshot pair (`window.basis = "pre_log_differing_pair"`) when the log holds
+  nothing about the finding's own object.
+- the Overview feed recovers the part of its 24 h window that predates the log
+  by diffing the snapshots that do cover it, newest first and bounded.
 
 Diff additions: `bootTime` tracked (host medium, vm low, summary
 "rebooted <old> -> <new>").
@@ -108,10 +131,13 @@ database vacuum. For existing databases, see the
 
 - Snapshots page: grouped by tier with date headers; FROM/TO pickers grouped
   the same way with a text filter; tier badge.
-- Settings: "Retention" card with the three day counts; explanatory text that
-  manual snapshots are never pruned.
+- Settings: "Retention" card with the three day counts and the day-mark
+  timezone; explanatory text that manual snapshots are never pruned, and a note
+  when the chosen zone differs from the browser's.
 - New Events page (nav after Changes): time range presets (1 h, 24 h, 7 d),
   category and text filter, connection scoped, virtualized list or paging.
+- Finding drawer: the window line names where the change log begins when the
+  finding is older than it, instead of showing an empty window.
 - Finding drawer: "Events in this window" section (events between the
   previous and current snapshot for the finding's resource, then the rest of
   the connection), passed into the assistant context.

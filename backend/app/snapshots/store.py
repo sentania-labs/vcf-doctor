@@ -11,11 +11,11 @@ import gzip
 import json
 import logging
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta, tzinfo
 
 from pydantic import ValidationError
 
-from app import db, vault
+from app import db, timezones, vault
 from app.config import settings as cfg
 from app.events import store as events_store
 from app.models import (
@@ -323,6 +323,7 @@ def default_retention_policy() -> RetentionPolicy:
         recent_days=cfg.retention_recent_days,
         hourly_days=cfg.retention_hourly_days,
         daily_days=cfg.retention_daily_days,
+        timezone=cfg.retention_timezone,
     )
 
 
@@ -574,10 +575,24 @@ def delete_snapshots(snapshot_ids: list[str]) -> int:
 
 
 def _nearest_mark(t: datetime, period: timedelta) -> datetime:
-    """The hour or day (00:00 UTC) mark closest to t; a half-way tie rounds up."""
+    """The hour mark closest to t; a half-way tie rounds up."""
     whole, rem = divmod(t - _EPOCH, period)
     mark = _EPOCH + whole * period
     return mark + period if rem * 2 >= period else mark
+
+
+def _nearest_day_mark(t: datetime, tz: tzinfo) -> datetime:
+    """The local midnight closest to t; a half-way tie rounds up.
+
+    Midnights are taken in the retention timezone, so the daily survivor falls
+    on the same calendar day the Snapshots page groups it under (issue #28).
+    Days are not all 24 hours long under DST, hence date arithmetic rather than
+    an epoch offset.
+    """
+    local = t.astimezone(tz)
+    start = datetime.combine(local.date(), time.min, tzinfo=tz)
+    nxt = datetime.combine(local.date() + DAY, time.min, tzinfo=tz)
+    return nxt if (t - start) * 2 >= (nxt - start) else start
 
 
 def select_retention_victims(
@@ -587,11 +602,13 @@ def select_retention_victims(
 
     age < recent_days: keep all. recent <= age < hourly: group by nearest hour
     mark, keep the snapshot closest to the mark (ties: oldest, then id).
-    hourly <= age < daily: same with day marks (00:00 UTC). age >= daily: prune.
+    hourly <= age < daily: same with day marks, which are midnights in the
+    policy's timezone. age >= daily: prune.
     """
     recent = timedelta(days=policy.recent_days)
     hourly = timedelta(days=policy.hourly_days)
     daily = timedelta(days=policy.daily_days)
+    tz = timezones.zone(policy.timezone)
     best: dict[tuple[timedelta, datetime], tuple[timedelta, datetime, str]] = {}
     victims: list[str] = []
     for sid, created in rows:
@@ -602,7 +619,7 @@ def select_retention_victims(
             victims.append(sid)
             continue
         period = HOUR if age < hourly else DAY
-        mark = _nearest_mark(created, period)
+        mark = _nearest_mark(created, HOUR) if period is HOUR else _nearest_day_mark(created, tz)
         candidate = (abs(created - mark), created, sid)
         current = best.get((period, mark))
         if current is None:
@@ -763,6 +780,19 @@ def count_changes_by_significance(
     return out
 
 
+def oldest_change(connection_id: str) -> ChangeRecord | None:
+    """The first row the change log ever recorded for a connection.
+
+    A database upgraded to the change-log release mid-life has snapshots older
+    than this row, and no log at all for that era (issue #41).
+    """
+    row = db.fetchone(
+        "SELECT * FROM changes WHERE connection_id = ? ORDER BY observed_at ASC LIMIT 1",
+        (connection_id,),
+    )
+    return _row_to_change(row) if row is not None else None
+
+
 def count_changes(connection_id: str) -> int:
     row = db.fetchone("SELECT COUNT(*) AS n FROM changes WHERE connection_id = ?", (connection_id,))
     return int(row["n"])
@@ -793,6 +823,31 @@ def save_findings(snapshot_id: str, findings: list[Finding]) -> None:
 def findings_cached(snapshot_id: str) -> bool:
     """True when a findings row exists for the snapshot (an empty list still counts)."""
     return db.fetchone("SELECT 1 FROM findings WHERE snapshot_id = ?", (snapshot_id,)) is not None
+
+
+def _like_literal(value: str) -> str:
+    """Escape LIKE wildcards; finding ids are full of underscores."""
+    for ch in ("\\", "%", "_"):
+        value = value.replace(ch, "\\" + ch)
+    return value
+
+
+def snapshot_ids_with_finding(connection_id: str, finding_id: str) -> set[str]:
+    """Snapshots of this connection whose cached findings hold this finding id.
+
+    One query instead of decoding every snapshot's findings blob in Python
+    (issue #40). The blobs are json.dumps of a list of findings, so the id
+    appears verbatim as `"id": "<finding id>"`; the closing quote keeps one id
+    from matching a longer one.
+    """
+    pattern = f'%"id": "{_like_literal(finding_id)}"%'
+    rows = db.fetchall(
+        "SELECT f.snapshot_id AS snapshot_id FROM findings f "
+        "JOIN snapshots s ON s.id = f.snapshot_id "
+        "WHERE s.connection_id = ? AND f.findings LIKE ? ESCAPE '\\'",
+        (connection_id, pattern),
+    )
+    return {r["snapshot_id"] for r in rows}
 
 
 def get_findings(snapshot_id: str) -> list[Finding]:

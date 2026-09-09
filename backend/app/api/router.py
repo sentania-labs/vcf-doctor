@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ValidationError
 
-from app import db, scheduler
+from app import db, scheduler, timezones
 from app.assistant import settings as assistant_settings
 from app.collectors.registry import CollectorUnavailable, get_collector
 from app.config import settings
@@ -108,6 +108,7 @@ def _latest_findings(connection_id: str | None) -> list[Finding]:
 
 SIGNIFICANCE_LEVELS = ("low", "medium", "high")
 CHANGES_MIN_SIGNIFICANCE_KEY = "changes_min_significance"
+MAX_PRE_LOG_PAIRS = 8  # snapshot pairs the Overview diffs to cover a window older than the log
 
 
 def changes_min_significance() -> str:
@@ -145,13 +146,18 @@ def _recent_changes(connection_id: str | None, min_significance: str | None) -> 
     """Overview feed: the persisted log (last 24 h, or the newest observation
     when the last scan is older than that) for each connection that has one;
     the on-demand diff of the latest pair for connections that do not
-    (databases predating the log). Sorted high significance first, then newest."""
+    (databases predating the log). When the log itself starts inside the window
+    (a database upgraded to the change log mid-life, issue #41) the earlier part
+    of the window is recovered by diffing the snapshots that do cover it.
+    Sorted high significance first, then newest."""
     floor = _resolve_min_significance(min_significance)
     since = store.now() - timedelta(hours=24)
     out: list = []
     for conn in _target_connections(connection_id):
-        if store.count_changes(conn.id):
+        oldest = store.oldest_change(conn.id)
+        if oldest is not None:
             out.extend(_logged_changes(conn.id, since, floor))
+            out.extend(_at_least(_pre_log_changes(conn.id, oldest, since), floor))
             continue
         pair = store.latest_snapshots(conn.id, 2)
         if len(pair) == 2:
@@ -181,6 +187,34 @@ def _logged_changes(connection_id: str, since: datetime, floor: str) -> list:
     return store.list_change_log(
         connection_id, since=observed, until=observed, min_significance=floor
     )
+
+
+def _pre_log_changes(connection_id: str, oldest, since: datetime) -> list:
+    """Diffs for the part of the feed window that predates the change log.
+
+    The first logged row covers the interval ending at its own stamp, so the
+    log says nothing about anything before the snapshot it diffed from. On a
+    database upgraded mid-life those older snapshots still exist; diff the
+    consecutive pairs between `since` and that boundary, newest first and
+    capped, so the Overview does not silently drop that part of the window.
+    """
+    boundary = store.snapshot_summary_at(connection_id, before=oldest.observed_at)
+    if boundary is None or boundary.created_at <= since:
+        return []
+    summaries = [
+        s
+        for s in store.list_snapshots(connection_id)  # newest first
+        if s.created_at <= boundary.created_at
+    ][: MAX_PRE_LOG_PAIRS + 1]
+    out: list = []
+    for newer, older in zip(summaries, summaries[1:], strict=False):
+        if newer.created_at < since:
+            break
+        new_snap, old_snap = store.get_snapshot(newer.id), store.get_snapshot(older.id)
+        if new_snap is None or old_snap is None:
+            break
+        out.extend(scheduler.compute_changes(old_snap.resources, new_snap.resources))
+    return out
 
 
 def _all_changes(connection_id: str | None, from_id: str | None, to_id: str | None) -> list:
@@ -300,12 +334,17 @@ def get_changes(
 def _parse_time(value: str | None, name: str) -> datetime | None:
     if value is None or value == "":
         return None
-    # An unencoded "+HH:MM" offset reaches us as " HH:MM"; put the plus back.
-    text = re.sub(r" (\d{2}:\d{2})$", r"+\1", value.strip().replace("Z", "+00:00"))
+    text = value.strip().replace("Z", "+00:00")
     try:
         parsed = datetime.fromisoformat(text)
-    except ValueError as exc:
-        raise HTTPException(400, f"{name} must be an ISO 8601 timestamp") from exc
+    except ValueError:
+        # An unencoded "+HH:MM" offset reaches us as " HH:MM"; put the plus back.
+        # Only after the plain parse has failed, so a hand-typed local time such
+        # as "2026-01-01 10:00" is still accepted (issue #28).
+        try:
+            parsed = datetime.fromisoformat(re.sub(r" (\d{2}:\d{2})$", r"+\1", text))
+        except ValueError as exc:
+            raise HTTPException(400, f"{name} must be an ISO 8601 timestamp") from exc
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
@@ -470,6 +509,9 @@ def put_schedule(connection_id: str, body: ScheduleUpdate):
 
 class AppSettings(BaseModel):
     retention_policy: RetentionPolicy
+    # The zone an empty retention_policy.timezone follows, so the GUI can name
+    # the default it is offering.
+    server_timezone: str
     event_policy: EventPolicy
     event_maintenance: EventMaintenanceStatus
     min_interval_minutes: int
@@ -494,6 +536,7 @@ def get_settings():
 
     return AppSettings(
         retention_policy=scheduler.retention_policy(),
+        server_timezone=timezones.server_timezone(),
         event_policy=events_store.event_policy(),
         event_maintenance=events_store.maintenance_status(),
         min_interval_minutes=settings.min_interval_minutes,
@@ -511,7 +554,7 @@ def run_compaction_migration():
     return events_store.bounded_maintenance()
 
 
-_TIER_KEYS = ("recent_days", "hourly_days", "daily_days")
+_TIER_KEYS = ("recent_days", "hourly_days", "daily_days", "timezone")
 
 
 def _merge_retention_policy(update: dict[str, Any]) -> RetentionPolicy:
@@ -520,6 +563,11 @@ def _merge_retention_policy(update: dict[str, Any]) -> RetentionPolicy:
         raise HTTPException(400, f"unknown retention_policy keys: {', '.join(sorted(unknown))}")
     merged = scheduler.retention_policy().model_dump()
     for key, value in update.items():
+        if key == "timezone":
+            if not isinstance(value, str):
+                raise HTTPException(400, "retention_policy.timezone must be an IANA zone name")
+            merged[key] = value.strip()
+            continue
         if isinstance(value, bool) or not isinstance(value, int):
             raise HTTPException(400, f"retention_policy.{key} must be an integer number of days")
         merged[key] = value

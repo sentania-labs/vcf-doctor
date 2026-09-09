@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     retention_recent_days: int = 14
     retention_hourly_days: int = 30
     retention_daily_days: int = 365
+    # IANA zone whose midnights are the daily tier's day marks. Empty (the
+    # default) follows the server's own timezone; the GUI can pin a zone.
+    retention_timezone: str = ""
     # Event history is intentionally independent from snapshot history. The
     # effective values live in the settings table and are editable in the GUI.
     event_retention_hours: int = 48

@@ -2,6 +2,7 @@
 
 import gzip
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from app import db
 from app.models import ConnectionCreate
@@ -9,6 +10,9 @@ from app.models.snapshot import RetentionPolicy
 from app.snapshots import store
 
 AT = datetime(2026, 1, 21, 0, 0, tzinfo=UTC)  # midnight UTC keeps the day marks obvious
+# Day marks are local midnights in the policy's timezone (issue #28), so tests
+# that assert on them pin the zone instead of inheriting the machine's.
+UTC_ZONE = "UTC"
 EMPTY = gzip.compress(b"[]")
 
 
@@ -49,7 +53,9 @@ def test_twenty_days_of_five_minute_snapshots(tmp_path):
     stamps = [AT - timedelta(minutes=5 * k) for k in range(20 * 288)]
     _bulk_insert(conn.id, stamps)
     manual = _bulk_insert(conn.id, [AT - timedelta(days=19), AT - timedelta(days=2)], False)
-    policy = RetentionPolicy(recent_days=14, hourly_days=30, daily_days=365)
+    policy = RetentionPolicy(
+        recent_days=14, hourly_days=30, daily_days=365, timezone=UTC_ZONE
+    )
 
     deleted = store.apply_retention(conn.id, policy, at=AT)
 
@@ -76,7 +82,7 @@ def test_daily_tier_and_expiry(tmp_path):
     db.reset_for_tests(str(tmp_path / "t.db"))
     conn = _conn()
     _bulk_insert(conn.id, [AT - timedelta(hours=k) for k in range(20 * 24)])
-    policy = RetentionPolicy(recent_days=1, hourly_days=3, daily_days=10)
+    policy = RetentionPolicy(recent_days=1, hourly_days=3, daily_days=10, timezone=UTC_ZONE)
 
     store.apply_retention(conn.id, policy, at=AT)
 
@@ -111,7 +117,7 @@ def test_nearest_to_mark_wins_deterministically(tmp_path):
 
 
 def test_tie_breaks_prefer_the_older_snapshot():
-    policy = RetentionPolicy(recent_days=1, hourly_days=30, daily_days=365)
+    policy = RetentionPolicy(recent_days=1, hourly_days=30, daily_days=365, timezone=UTC_ZONE)
     mark = AT - timedelta(days=5)
     rows = [("younger", mark + timedelta(minutes=10)), ("older", mark - timedelta(minutes=10))]
     assert store.select_retention_victims(rows, policy, AT) == ["younger"]
@@ -141,3 +147,73 @@ def test_manual_snapshots_never_pruned_even_when_ancient(tmp_path):
     assert store.apply_retention(conn.id, at=AT) == 1
     survivors = {r["id"] for r in db.fetchall("SELECT id FROM snapshots")}
     assert survivors == set(manual) and not survivors & set(sched)
+
+
+def _kept(connection_id: str) -> list[datetime]:
+    return sorted(
+        store._dt(r["created_at"])
+        for r in db.fetchall(
+            "SELECT created_at FROM snapshots WHERE connection_id = ?", (connection_id,)
+        )
+    )
+
+
+def test_day_marks_follow_the_policy_timezone(tmp_path):
+    """The daily tier keeps the snapshot nearest local midnight, not 00:00 UTC.
+
+    US operators saw the kept daily snapshot filed under the previous day on the
+    Snapshots page, which groups by local calendar day (issue #28). Chicago is
+    UTC-6 in January, so each day's survivor sits at 06:00 UTC. The newest
+    snapshot belongs to the next day's mark, the same boundary the hourly tier
+    has, so it is excluded from the comparison.
+    """
+    db.reset_for_tests(str(tmp_path / "t.db"))
+    conn = _conn()
+    # Three days of hourly snapshots inside the daily band of a 1/1/30 policy.
+    stamps = [AT - timedelta(days=4) + timedelta(hours=k) for k in range(72)]
+    _bulk_insert(conn.id, stamps)
+
+    store.apply_retention(
+        conn.id,
+        RetentionPolicy(recent_days=1, hourly_days=1, daily_days=30, timezone="America/Chicago"),
+        at=AT,
+    )
+
+    chicago = _kept(conn.id)
+    assert [t.hour for t in chicago[:-1]] == [6, 6, 6]
+    assert all(t.astimezone(ZoneInfo("America/Chicago")).hour == 0 for t in chicago[:-1])
+
+    # The same estate under UTC keeps midnight UTC instead: the old behaviour.
+    db.reset_for_tests(str(tmp_path / "u.db"))
+    conn = _conn()
+    _bulk_insert(conn.id, stamps)
+    store.apply_retention(
+        conn.id,
+        RetentionPolicy(recent_days=1, hourly_days=1, daily_days=30, timezone=UTC_ZONE),
+        at=AT,
+    )
+    assert [t.hour for t in _kept(conn.id)[:-1]] == [0, 0, 0]
+
+
+def test_day_marks_survive_a_dst_change(tmp_path):
+    """A 23-hour local day (spring forward) still keeps one snapshot per local day."""
+    db.reset_for_tests(str(tmp_path / "t.db"))
+    conn = _conn()
+    at = datetime(2026, 4, 1, 0, 0, tzinfo=UTC)
+    tz = ZoneInfo("America/Chicago")
+    # 2026-03-08 is the US spring-forward day; cover the days around it hourly.
+    start = datetime(2026, 3, 6, 0, 0, tzinfo=UTC)
+    _bulk_insert(conn.id, [start + timedelta(hours=k) for k in range(24 * 5)])
+
+    store.apply_retention(
+        conn.id,
+        RetentionPolicy(recent_days=1, hourly_days=1, daily_days=90, timezone="America/Chicago"),
+        at=at,
+    )
+
+    # Every survivor but the newest (which belongs to the following day's mark)
+    # sits exactly on a local midnight, one per local calendar day.
+    kept = _kept(conn.id)
+    local = [t.astimezone(tz) for t in kept[:-1]]
+    assert all((t.hour, t.minute) == (0, 0) for t in local), local
+    assert len({t.date() for t in local}) == len(local) >= 4
