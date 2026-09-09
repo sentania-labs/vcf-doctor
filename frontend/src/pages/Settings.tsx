@@ -2,8 +2,10 @@ import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react'
 import { AlertTriangle, CheckCircle2, Database, KeyRound, ShieldCheck } from 'lucide-react'
 import type { AssistantSettings, EventPolicy, RetentionPolicy, Settings, Significance } from '@/types'
 import { getSettings, runCompactionMigration, updateSettings, getAssistantStatus, changePassword, getAssistantModels, type AssistantModel } from '@/api'
+import { ApiError } from '@/api/client'
 import { useAuth } from '@/state/AuthState'
 import { useAsync } from '@/hooks/useAsync'
+import { withRefreshedKeyState } from './settingsForm'
 import { Badge, Button, Card, CardHeader, ErrorState, Field, Input, PageHeader, Select, Skeleton, Toggle } from '@/components/ui'
 import HealthScoreCard from '@/components/settings/HealthScoreCard'
 import EncryptionCard from '@/components/settings/EncryptionCard'
@@ -18,12 +20,28 @@ function AccessCard() {
   const [busy, setBusy] = useState(false)
   const [done, setDone] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  // Backoff from the backend (429): the current-password check shares the login
+  // limiter, so too many wrong tries here refuse both until this time.
+  const [lockUntil, setLockUntil] = useState<number | null>(null)
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (lockUntil === null) return
+    const id = setInterval(() => {
+      const time = Date.now()
+      if (time >= lockUntil) setLockUntil(null)
+      setNow(time)
+    }, 250)
+    return () => clearInterval(id)
+  }, [lockUntil])
+  const waitSeconds = lockUntil === null ? 0 : Math.max(0, Math.ceil((lockUntil - now) / 1000))
+  const locked = waitSeconds > 0
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
     setErr(null); setDone(false)
     if (next.length < 8) { setErr('New password must be at least 8 characters.'); return }
     if (next !== confirm) { setErr('New passwords do not match.'); return }
+    if (locked) return
     setBusy(true)
     try {
       await changePassword(current, next)
@@ -31,7 +49,8 @@ function AccessCard() {
       setDone(true); setTimeout(() => setDone(false), 3000)
     } catch (e2) {
       const msg = e2 instanceof Error ? e2.message : String(e2)
-      setErr(msg === 'invalid password' ? 'Current password is incorrect.' : msg)
+      if (e2 instanceof ApiError && e2.status === 429) { setLockUntil(Date.now() + (e2.retryAfter ?? 30) * 1000); setNow(Date.now()); setErr(null) }
+      else setErr(/password is incorrect|invalid password/i.test(msg) ? 'Current password is incorrect.' : msg)
     } finally { setBusy(false) }
   }
 
@@ -55,9 +74,9 @@ function AccessCard() {
                 <Input type="password" value={confirm} onChange={e => setConfirm(e.target.value)} autoComplete="new-password" name="confirm_password" disabled={busy} />
               </Field>
             </div>
-            {err ? <p className="text-sm text-critical bg-critical-bg rounded-md px-3 py-2" role="alert">{err}</p> : null}
+            {locked ? <p className="text-sm text-critical bg-critical-bg rounded-md px-3 py-2" role="alert">Too many incorrect current passwords. Try again in {waitSeconds}s. Signing in is paused for the same period.</p> : err ? <p className="text-sm text-critical bg-critical-bg rounded-md px-3 py-2" role="alert">{err}</p> : null}
             <div className="flex items-center gap-3">
-              <Button type="submit" loading={busy} disabled={!current || !next || !confirm}><ShieldCheck size={15} /> Change password</Button>
+              <Button type="submit" loading={busy} disabled={locked || !current || !next || !confirm}><ShieldCheck size={15} /> {locked ? `Locked (${waitSeconds}s)` : 'Change password'}</Button>
               {done ? <span className="text-sm text-ok inline-flex items-center gap-1.5"><CheckCircle2 size={15} /> Password changed</span> : null}
             </div>
           </form>
@@ -212,6 +231,16 @@ export default function SettingsPage() {
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)) } finally { setSaving(false) }
   }
 
+  // A rotation may have made the stored API key readable again. Refresh only
+  // that, so unsaved edits elsewhere on the page are never thrown away.
+  const refreshKeyState = async () => {
+    status.reload()
+    try {
+      const fresh = await getSettings()
+      setAssistant(a => withRefreshedKeyState(a, fresh.assistant))
+    } catch { /* the encryption card reports its own status */ }
+  }
+
   if (s.error && !s.data) return <div className="anim-fade-up"><PageHeader title="Settings" /><Card><ErrorState title="Settings unavailable" error={s.error} onRetry={s.reload} /></Card></div>
 
   return (
@@ -270,7 +299,7 @@ export default function SettingsPage() {
             </div>
           </Card>
 
-          <EncryptionCard reloadKey={`${assistant.api_key_set}:${assistant.api_key_unreadable ?? false}`} />
+          <EncryptionCard reloadKey={`${assistant.api_key_set}:${assistant.api_key_unreadable ?? false}`} onRotated={() => void refreshKeyState()} />
           <AccessCard />
           <TrustedProxiesCard />
           <AboutCard />

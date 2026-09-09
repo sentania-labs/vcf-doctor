@@ -5,6 +5,8 @@ export interface AsyncState<T> {
   error: Error | null
   loading: boolean
   reload: () => void
+  // Accept data a mutation already returned, instead of fetching it again.
+  set: (data: T) => void
 }
 
 // Runs an async loader whenever deps change. Keeps the previous data visible during reloads.
@@ -30,7 +32,8 @@ export function useAsync<T>(loader: () => Promise<T>, deps: DependencyList, enab
   }, [...deps, tick, enabled])
 
   const reload = useCallback(() => setTick(t => t + 1), [])
-  return { data, error, loading, reload }
+  const set = useCallback((d: T) => { ++seq.current; setData(d); setError(null); setLoading(false) }, [])
+  return { data, error, loading, reload, set }
 }
 
 export function useInterval(fn: () => void, ms: number | null) {

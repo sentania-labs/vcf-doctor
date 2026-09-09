@@ -57,6 +57,7 @@ them.
 |---|---|---|
 | `VCF_DOCTOR_DB_PATH` | `/data/vcf-doctor.db` | SQLite location |
 | `VCF_DOCTOR_SECRET_KEY` | unset | Key for encrypting vCenter passwords and the Anthropic key at rest. Unset: a key file is generated next to the database. See [Security](SECURITY.md). |
+| `VCF_DOCTOR_SECRET_KEY_PREVIOUS` | unset | Previous encryption key for startup rotation. See [rotating the encryption key](#rotating-the-encryption-key) for the procedure in each deployment shape. |
 | `ANTHROPIC_API_KEY` | unset | Enables the Claude assistant. A key entered in Settings takes precedence. |
 | `VCF_DOCTOR_AUTH` | `on` | `off` disables the login page (use only behind ingress authentication) |
 | `VCF_DOCTOR_ADMIN_PASSWORD` | unset | Seeds the operator password on first boot; otherwise the UI asks on first visit |
@@ -80,6 +81,119 @@ vCenter. Never set them on a real deployment. When `VCF_DOCTOR_TEST_FIXTURES`
 is off, startup pauses enabled schedules on leftover fixture connections
 and logs a warning if any were paused. The connections remain visible on
 Connections for the operator to remove; live vCenter schedules are unaffected.
+
+## Rotating the encryption key
+
+`VCF_DOCTOR_SECRET_KEY` and `VCF_DOCTOR_SECRET_KEY_PREVIOUS` are ordinary
+environment variables, so rotation belongs to no particular deployment tool
+and the procedure is the same in every shape below: supply the previous key
+beside the new one in the environment, restart, and the app re-encrypts every
+stored secret under the new key on startup in a single transaction and
+reports the outcome on the Settings encryption card. Check that card after
+the restart before going any further, then remove the previous key on the
+next pass. Nothing is re-entered by hand, and no key is ever typed into the
+interface.
+
+**docker run**
+
+```bash
+docker run -d -v vcf-doctor:/data -p 8000:8000 \
+  -e VCF_DOCTOR_SECRET_KEY="$NEW_KEY" \
+  -e VCF_DOCTOR_SECRET_KEY_PREVIOUS="$OLD_KEY" \
+  ghcr.io/sentania-labs/vcf-doctor:<tag>
+```
+
+**docker compose**
+
+```yaml
+services:
+  vcf-doctor:
+    image: ghcr.io/sentania-labs/vcf-doctor:<tag>
+    environment:
+      VCF_DOCTOR_SECRET_KEY: ${NEW_KEY}
+      VCF_DOCTOR_SECRET_KEY_PREVIOUS: ${OLD_KEY}
+```
+
+**Kubernetes manifest**
+
+```yaml
+        env:
+          - name: VCF_DOCTOR_SECRET_KEY
+            valueFrom:
+              secretKeyRef: { name: vcf-doctor-secrets, key: secret-key }
+          - name: VCF_DOCTOR_SECRET_KEY_PREVIOUS
+            valueFrom:
+              secretKeyRef: { name: vcf-doctor-secrets, key: secret-key-previous }
+```
+
+**Argo CD with a sealed secret**
+
+The deployment's `env` block is the Kubernetes one above, unchanged. What
+Argo renders is the Secret behind it, so the previous key arrives as a second
+sealed value feeding that same variable.
+
+```yaml
+spec:
+  encryptedData:
+    secret-key: AgB...<new key, sealed>
+    secret-key-previous: AgB...<old key, sealed>
+```
+
+Unlike the other three shapes, this one does not restart anything on its own.
+Where the `env` entries already exist, replacing the sealed values leaves the
+Deployment spec byte-identical, so Argo syncs green with no rollout, and
+`secretKeyRef` values are read once at container start: the running pod keeps
+the old key and never sees the previous one. Make the restart explicit
+(`kubectl rollout restart deploy/vcf-doctor`) or have the sync mutate the pod
+template itself, with a checksum annotation over the Secret or a
+name-suffixed generated Secret.
+
+### Confirm it ran
+
+Whatever the shape, open Settings > Encryption at rest after the restart and
+read the last rotation line. Both of these must hold, and nothing else clears
+the rotation:
+
+1. The time on the line is the restart you just performed. A record from an
+   earlier cycle stays on the card indefinitely, so "a rotation is reported"
+   proves nothing on its own.
+2. The line reports success. It begins "Last rotation" and says either how
+   many secrets it re-encrypted or that there was nothing to do because every
+   stored secret already opens with the current key. A startup handed the
+   previous key always records an outcome, so either wording proves it ran
+   with that key in hand.
+
+A line beginning "Rotation attempted" is the failure wording, and a fresh
+timestamp does not redeem it. It means at least one stored secret was not
+opened by the value in `VCF_DOCTOR_SECRET_KEY_PREVIOUS`, and the line reports
+both how many moved and how many were left, so a partial result is visible.
+Two different things produce it. The supplied value may be wrong. Or it may be
+correct while an older key is still in play, which happens when a credential
+was never re-entered after an earlier rotation and so never came forward onto
+the key you are rotating away from. The connections and Assistant key still
+flagged on the page name which secrets are affected. Correct what is wrong, or
+re-enter those credentials, and restart until a rotation is reported with
+nothing left untouched.
+
+No line at all, or a time from an earlier cycle, means the app never saw the
+previous key on this restart. In the Argo shape that is usually the missing
+rollout described above, because replacing the sealed Secret does not by
+itself restart the pod.
+
+In every one of those cases `VCF_DOCTOR_SECRET_KEY_PREVIOUS` stays exactly
+where it is. Even after a partial rotation, it is still the only supplied key
+that opened anything, and removing it before a clean run leaves whatever it
+covers unreadable for good.
+
+Whether credentials are flagged on the page (a connection showing "Needs
+password", or an Assistant key asking to be re-entered) is worth reading, but
+it never clears the rotation on its own. A pod that never restarted still
+holds the old key, opens every secret with it, and flags nothing.
+
+Only once both conditions hold, drop `VCF_DOCTOR_SECRET_KEY_PREVIOUS` (and the
+sealed `secret-key-previous` entry, where one is used) on the next pass and
+restart again. Leaving it set is not dangerous, it only keeps the old key
+present longer than it needs to be.
 
 ## Verifying a pulled image
 
@@ -106,6 +220,8 @@ laptop use. It is not a deployment artifact.
 - **Lost encryption key, volume intact**: history is intact; re-enter each
   vCenter password (flagged "Needs password" on Connections) and the
   Anthropic key. See [Security](SECURITY.md).
+- **Rotated encryption key, previous key still available**: no re-entry is
+  needed; follow [rotation and recovery](SECURITY.md#secrets-at-rest).
 - **Bad release**: re-pin the previous digest or tag and file an issue. The
   database schema is migrated forward on startup; going back a release is
   not guaranteed to be safe once a newer release has written to the volume,

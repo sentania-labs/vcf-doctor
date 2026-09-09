@@ -9,9 +9,11 @@ A single shared operator password gates the UI and API (session cookie, 7
 days, PBKDF2 hash, signing secret rotated on password change). Failed
 sign-ins are counted per client address: five, then an exponential wait
 capped at a minute, reported back as `Retry-After` and counted down on the
-login page. A process-wide ceiling (30 failures a minute across every
-address) backstops guessing from many addresses. The client address is the
-TCP peer unless that peer is a trusted proxy (Settings, or
+login page. The Settings password change re-checks the current password, so
+it shares that one counter and a wrong guess in one place pauses the other.
+A process-wide ceiling (30 failures a minute across every address)
+backstops guessing from many addresses. The client address is the TCP peer
+unless that peer is a trusted proxy (Settings, or
 `VCF_DOCTOR_TRUSTED_PROXIES`), in which case the rightmost untrusted
 `X-Forwarded-For` hop is used. Nothing is trusted by default, so behind an
 ingress every visitor shares the ingress's address and one lockout; trust
@@ -36,8 +38,36 @@ the next startup. Settings shows which key source is active, never the key.
 
 Losing the key means re-entering the vCenter passwords and the API key,
 nothing worse: affected connections are flagged "Needs password" on the
-Connections page until you do. Rotate the same way: set the new key,
-restart, re-enter.
+Connections page until you do.
+
+Rotating does not cost a re-entry when the previous key is still available.
+Set the new `VCF_DOCTOR_SECRET_KEY` and, for that one restart, the old value
+in `VCF_DOCTOR_SECRET_KEY_PREVIOUS`: at startup every stored secret still
+encrypted under the old key is rewritten under the new one in a single
+transaction, and Settings > Encryption at rest reports what moved. Drop
+`VCF_DOCTOR_SECRET_KEY_PREVIOUS` on the next pass. Both are ordinary
+environment variables, so the procedure is the same under docker run, docker
+compose, a Kubernetes manifest or an Argo rendered sealed secret; see
+[rotating the encryption key](DEPLOYMENT.md#rotating-the-encryption-key) for
+each shape.
+
+When the deployment has just moved from the generated key file to
+`VCF_DOCTOR_SECRET_KEY`, the file is still on the volume, so the previous key
+is already on the machine. Settings > Encryption at rest offers a one-click
+rotation from it under **Rotate the encryption key**, with no key material in
+the browser. That move is never automatic on purpose: an environment key set
+by mistake stays recoverable by unsetting it, which a silent re-encryption
+would prevent. Delete the key file once the console reads its credentials
+again.
+
+Those two are the only rotation procedures. The interface never accepts,
+shows or transmits an encryption key: the only rotation it can start uses a
+key already on the volume. A rotation rewrites only secrets the previous
+key opens; secrets under other keys stay untouched and are reported as
+unreadable. All recoverable secrets and the outcome commit in one
+transaction, so an interrupted rotation cannot leave only some of its
+rewrites behind. A key that opens nothing leaves stored credentials
+unchanged and records a failed outcome.
 
 ## Browser headers
 
@@ -59,7 +89,7 @@ command:
 
 | Gate | Target | Blocks a PR / publish on |
 |---|---|---|
-| Lint and tests | `make lint`, `make test` | ruff or TypeScript errors; any failing backend test |
+| Lint and tests | `make lint`, `make test` | ruff or TypeScript errors; any failing backend or frontend test |
 | Dependency audit | `make scan-deps` | any known CVE in the backend environment (pip-audit); HIGH+ in frontend runtime dependencies (npm audit) |
 | Secret scan | `make scan-secrets` | any secret anywhere in git history (gitleaks) |
 | Repo scan | `make scan-fs` | HIGH/CRITICAL fixable CVE in `uv.lock` / `package-lock.json`; Dockerfile misconfiguration (trivy) |

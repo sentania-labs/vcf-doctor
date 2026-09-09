@@ -38,7 +38,12 @@ version of this file is in git history.
   Inventory, Snapshots, Assistant, Connections, Settings.
 - Shared operator password with first-run setup, per-client login lockout
   and a trusted proxies setting (#4, #47); vCenter passwords and the
-  Anthropic key encrypted at rest (#46).
+  Anthropic key encrypted at rest (#46). The Settings password change shares
+  the login lockout (#37).
+- Encryption key rotation in place with the previous key at startup, plus a
+  one-click migration off the generated key file; no key is ever entered in
+  the interface (#48). See
+  [rotation and recovery](docs/SECURITY.md#secrets-at-rest).
 - Security gates in CI (lint, tests, dependency and secret scan, repo scan,
   image scan, smoke test, CodeQL); the image is signed with provenance and
   SBOM, and CI publishes the exact digest it tested with one-by-one release
@@ -52,7 +57,7 @@ version of this file is in git history.
   bounded compaction, and capture checkpoints that retry gaps (#27).
 - Event capture tolerates managed object types the installed pyVmomi does
   not define, such as `ContentLibrary` on vCenter 9.1 (#65).
-- 584 backend tests pass (`make test`, 2026-09-09).
+- 630 backend tests and 5 frontend tests pass (`make test`, 2026-09-09).
 
 ## Broken
 

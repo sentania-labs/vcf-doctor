@@ -19,6 +19,7 @@ import time
 from collections import OrderedDict, deque
 
 from fastapi import HTTPException, Request
+from fastapi.responses import JSONResponse
 
 from app import db
 from app.config import settings
@@ -138,8 +139,9 @@ def requires_auth(path: str) -> bool:
 # ---- login backoff --------------------------------------------------------
 #
 # Keyed per client address (see app/proxies.py for what "client" means behind
-# an ingress). Five free failures per address, then an exponential wait
-# capped at a minute. On top of that a process-wide ceiling: more than
+# an ingress) and shared by every endpoint that checks a password: /auth/login
+# and /auth/change. Five free failures per address, then
+# an exponential wait capped at a minute. On top of that a process-wide ceiling: more than
 # GLOBAL_LIMIT failures across every address inside GLOBAL_WINDOW seconds
 # pauses logins for everyone, so a guesser rotating addresses still gets no
 # more throughput than that. Everything is in memory; the deployment is a
@@ -203,6 +205,15 @@ def _count_failure(ip: str, now: float) -> None:
         _per_ip.popitem(last=False)
 
 
+def too_many_response(wait: int) -> JSONResponse:
+    """The 429 every password check returns when the limiter refuses a client."""
+    return JSONResponse(
+        {"detail": f"too many failed attempts; try again in {wait}s", "retry_after": wait},
+        status_code=429,
+        headers={"Retry-After": str(wait)},
+    )
+
+
 def login_blocked(ip: str) -> int:
     """Seconds this client must wait before another attempt, 0 if allowed."""
     now = time.time()
@@ -240,7 +251,8 @@ def finish_attempt(ip: str, stamp: float, success: bool) -> None:
 
 def record_login(ip: str, success: bool) -> None:
     """One-shot: count a known outcome. begin/finish_attempt is what the
-    login endpoint uses; this stays for callers that already know the result."""
+    login and password-change endpoints use; this stays for callers that
+    already know the result."""
     now = time.time()
     with _fail_lock:
         if success:

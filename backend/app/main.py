@@ -28,6 +28,12 @@ log = logging.getLogger("vcf_doctor")
 async def lifespan(application: FastAPI):
     db.connect()
     try:
+        # Rotation first: a secret still under the previous key must move to
+        # the current one before migrate_plaintext can judge what is plaintext.
+        vault.rekey_at_startup()
+    except Exception:
+        log.exception("startup: encryption key rotation failed; stored secrets are unchanged")
+    try:
         vault.migrate_plaintext()
     except Exception:
         log.exception("startup: secret migration failed; plaintext rows are still readable")

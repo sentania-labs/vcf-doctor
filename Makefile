@@ -13,6 +13,7 @@ lint:
 
 test:
 	cd backend && uv run pytest -q
+	cd frontend && npm test
 
 build-frontend:
 	cd frontend && npm run build

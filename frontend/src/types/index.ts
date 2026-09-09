@@ -159,7 +159,18 @@ export interface EnvironmentChanges {
   totals: EnvironmentTotals; connections: EnvironmentConnection[]
 }
 // Secrets at rest (Settings > Encryption). Never carries the key itself.
+export interface RekeyOutcome {
+  at: string; source: string; rewritten: number; unreadable: number; error?: string | null
+  message: string  // composed by the backend; a partial rotation names both counts
+}
+
 export interface EncryptionStatus {
-  enabled: boolean; key_source: 'env' | 'file'; key_env_var: string; key_file: string | null; key_error?: string | null
+  enabled: boolean; key_source: 'env' | 'file'; key_env_var: string; key_previous_env_var: string; key_file: string | null; previous_key_file?: string | null; key_error?: string | null
   unreadable_connections: string[]; assistant_key_unreadable: boolean; assistant_env_fallback?: boolean
+  last_rekey?: RekeyOutcome | null
+}
+
+// POST /settings/encryption/rekey: re-encrypt stored secrets under the current key.
+export interface RekeyResult {
+  ok: boolean; message: string; rewritten: number; unreadable: number; status: EncryptionStatus
 }
