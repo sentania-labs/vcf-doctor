@@ -1,10 +1,6 @@
-"""The timezone the product calls "local".
+"""Resolve retention timezones independently of the browser's display timezone.
 
-Retention thins old snapshots down to one per day, and the Snapshots page
-groups snapshots under the operator's local calendar day. Those two have to
-agree, or the kept daily snapshot shows up under the wrong header (issue #28).
-The retention policy therefore carries a timezone; empty means "whatever the
-server is set to", which is what a fresh install runs with.
+Operator guidance lives in docs/RETENTION_EVENTS.md.
 """
 
 import logging

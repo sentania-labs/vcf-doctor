@@ -26,10 +26,10 @@ version of this file is in git history.
 - Environment Changes page: estate-wide roll-up of what changed between two
   points in time across every connection (#38).
 - Finding drawer shows evidence, related changes (walking back past
-  identical snapshots, #39) and events in the same window. A finding older
-  than the change log says where the log begins and falls back to the
-  differing snapshot pair, and locating first observation is one query rather
-  than a findings decode per snapshot (#41, #40).
+  identical snapshots, #39) and events in the same window. Historical recovery
+  follows the [change-log contract](docs/RETENTION_EVENTS.md#change-log-persisted)
+  (#41); first-observation lookup uses the SQL membership query in
+  `snapshot_ids_with_finding` (#40).
 - Assistant: Anthropic streaming with Explain, Investigate and Generate
   Script; scripts labelled READ ONLY or MODIFIES ENVIRONMENT and never
   executed. The mock provider is an explicit Settings choice, not an

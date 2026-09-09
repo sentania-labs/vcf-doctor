@@ -2,9 +2,8 @@
 
 ## Retention policy (settings KV `retention_policy`, GUI on Settings)
 
-```json
-{"recent_days": 14, "hourly_days": 30, "daily_days": 365, "timezone": ""}
-```
+Fields and validation are defined by [RetentionPolicy](../backend/app/models/snapshot.py);
+deployment defaults come from [backend configuration](../backend/app/config.py).
 
 Applied per connection after every scan and at startup (idempotent):
 
@@ -16,11 +15,15 @@ Applied per connection after every scan and at startup (idempotent):
 
 `timezone` is an IANA zone name, editable in Settings > Retention. Empty (the
 default) follows the server's own zone, reported as `server_timezone` by
-`GET /api/settings`, and `VCF_DOCTOR_RETENTION_TIMEZONE` sets the default for a
-fresh install. Day marks are local midnights so the daily survivor lands under
-the day the Snapshots page groups it by; hour marks stay on the UTC hour, which
-is the same instant in every whole-hour zone. A zone this machine does not know
-falls back to UTC with a warning rather than failing the retention pass.
+`GET /api/settings`. Deployment overrides are listed in
+[Environment variables](DEPLOYMENT.md#environment-variables). Day marks use
+the chosen zone, while the Snapshots page groups by the browser's local date.
+Choose the browser's zone to align those timezones; Settings warns when they
+differ. The survivor is nearest midnight and can be on either side of it, so
+its displayed date can still be the preceding day. Hour marks stay on the UTC
+hour. Unknown zones are rejected by the Settings API. An invalid stored policy
+falls back to deployment defaults; an invalid environment timezone falls back
+to the server's zone.
 
 Manual snapshots (`scheduled = 0`) are never pruned; scheduled snapshots
 follow the tiers whether or not they carry a label. `SnapshotSummary.tier` is
@@ -54,11 +57,12 @@ oldest surviving row for that same connection, using its source snapshot when
 available and its observation time otherwise. This is an internal marker, and
 it is not configurable or part of `GET /api/settings`. A database upgraded to the change-log
 release mid-life has snapshots older than that stamp, and the log cannot
-describe that era. Both readers say so rather than showing an empty window:
+describe that era. Readers recover available snapshot history:
 
-- `GET /api/findings/{id}/related` sets `window.log_starts_at` when the finding
-  was first observed before the log begins. It then diffs the two snapshots
-  around first observation (`window.basis = "pre_log_bracketing_pair"`), or
+- `GET /api/findings/{id}/related` sets `window.log_starts_at` when the finding's
+  first-observation interval starts before its connection's log begins. It then
+  diffs the two snapshots around first observation
+  (`window.basis = "pre_log_bracketing_pair"`), or
   the newest differing pair when retention has pruned one of those two
   (`"pre_log_differing_pair"`), and lists the logged rows about the finding's
   neighbourhood after that diff as a separate block, then caps the combined list.

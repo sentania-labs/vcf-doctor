@@ -15,9 +15,8 @@ class RetentionPolicy(BaseModel):
     age < recent_days: keep everything; < hourly_days: one per hour;
     < daily_days: one per day; older: prune. Manual snapshots are never pruned.
 
-    timezone is the IANA zone whose midnights are the day marks, so the kept
-    daily snapshot lands under the day the Snapshots page files it under
-    (issue #28). Empty means the server's own zone.
+    timezone is the IANA zone whose midnights are the day marks.
+    Empty means the server's own zone; browser display dates are independent.
     """
 
     recent_days: int = Field(ge=1)

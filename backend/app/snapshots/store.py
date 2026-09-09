@@ -594,8 +594,7 @@ def _nearest_mark(t: datetime, period: timedelta) -> datetime:
 def _nearest_day_mark(t: datetime, tz: tzinfo) -> datetime:
     """The local midnight closest to t; a half-way tie rounds up.
 
-    Midnights are taken in the retention timezone, so the daily survivor falls
-    on the same calendar day the Snapshots page groups it under (issue #28).
+    Midnights use the retention timezone, independent of browser display dates.
     Days are not all 24 hours long under DST, hence date arithmetic rather than
     an epoch offset, and the day length is measured in elapsed UTC time
     (subtracting two datetimes in the same zone compares wall clocks).
