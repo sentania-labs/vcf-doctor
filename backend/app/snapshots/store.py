@@ -287,10 +287,9 @@ def finish_run(
 def reconcile_interrupted_runs() -> int:
     """Mark runs left in 'running' by a crash or restart as errors.
 
-    Called at startup by every worker, so "still running" has to be told from
-    "abandoned". A scan in flight holds its connection's scan lock; a row whose
-    connection lock is free belongs to a process that is gone. Returns how many
-    were reconciled.
+    A scan in flight holds its connection's scan lock; a row whose connection
+    lock is free belongs to a process that is gone. Returns how many were
+    reconciled.
     """
     reconciled = 0
     stuck = db.fetchall("SELECT DISTINCT connection_id FROM scan_runs WHERE status = 'running'")

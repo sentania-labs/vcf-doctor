@@ -107,6 +107,22 @@ def test_a_schedule_saved_on_another_worker_is_picked_up(monkeypatch):
     assert conn.id not in scheduler._scheduled_state
 
 
+def test_leader_revisits_an_interrupted_run_after_a_live_scan_finishes(monkeypatch):
+    conn = _conn()
+    run = store.create_run(conn.id, "manual")
+    monkeypatch.setattr(scheduler, "_scheduler", _FakeScheduler())
+
+    with db.try_advisory_lock(db.SCAN_LOCK, conn.id) as held:
+        assert held is True
+        scheduler.take_leadership()
+        assert store.get_run(run.id).status == "running"
+
+    scheduler.take_leadership()
+    assert store.get_run(run.id).status == "error"
+    scheduler.take_leadership()
+    assert store.get_run(run.id).status == "error"
+
+
 class _FakeScheduler:
     """Enough of APScheduler for the leadership logic. The suite never starts a
     real one (_background_jobs_enabled() is false under pytest)."""

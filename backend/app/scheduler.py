@@ -331,6 +331,9 @@ def take_leadership() -> None:
         _leader = True
         _scheduled_state.clear()
         log.info("holding the scheduler lock; scheduled scans run in this worker")
+    interrupted = store.reconcile_interrupted_runs()
+    if interrupted:
+        log.warning("marked %d interrupted scan run(s) as error", interrupted)
     reconcile_jobs()
 
 

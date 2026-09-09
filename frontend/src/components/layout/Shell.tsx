@@ -75,7 +75,13 @@ export function Shell() {
       </aside>
       <div className="flex-1 min-w-0 flex flex-col">
         <TopBar />
-        {backend === 'down' ? (
+        {backend === 'starting' ? (
+          <div className="bg-warning-bg border-b border-warning/40 px-6 py-2.5 text-sm flex items-center gap-2.5 text-fg">
+            <span className="h-2 w-2 rounded-full bg-warning anim-pulse" />
+            <span className="font-medium">This console is still starting.</span>
+            <span className="text-muted">Background maintenance is finishing. Retrying every 5 seconds.</span>
+          </div>
+        ) : backend === 'down' ? (
           <div className="bg-critical-bg border-b border-critical/40 px-6 py-2.5 text-sm flex items-center gap-2.5 text-fg">
             <span className="h-2 w-2 rounded-full bg-critical anim-pulse" />
             <span className="font-medium">This console cannot serve.</span>

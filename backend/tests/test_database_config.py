@@ -319,7 +319,14 @@ def test_readiness_is_red_while_deferred_startup_is_pending(monkeypatch, caplog)
         assert body.status_code == 503
         assert body.json()["status"] == "degraded"
         assert body.json()["database"] is True
-        assert set(body.json()) == {"status", "version", "scheduler", "database"}
+        assert body.json()["startup_complete"] is False
+        assert set(body.json()) == {
+            "status",
+            "version",
+            "scheduler",
+            "database",
+            "startup_complete",
+        }
         assert "encryption rotation retry pending" in caplog.text
 
 

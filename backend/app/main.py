@@ -157,6 +157,7 @@ def _readiness() -> tuple[dict, int]:
         "version": app.version,
         "scheduler": scheduler.running(),
         "database": database,
+        "startup_complete": startup_complete,
     }
     return body, 200 if ready else 503
 

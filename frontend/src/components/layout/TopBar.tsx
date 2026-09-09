@@ -19,6 +19,8 @@ export function TopBar() {
   let dot: 'ok' | 'error' | 'running' | 'none' = 'none'
   let statusLabel = 'Not scanned yet'
   if (backend === 'down') { dot = 'error'; statusLabel = 'Console unavailable' }
+  else if (backend === 'starting') { dot = 'running'; statusLabel = 'Console starting' }
+  else if (backend === 'checking') { dot = 'running'; statusLabel = 'Checking console' }
   else if (relevant.some(s => s.status === 'running')) { dot = 'running'; statusLabel = 'Scanning' }
   else if (relevant.length && relevant.every(s => s.status === 'ok')) { dot = 'ok'; statusLabel = 'Connected' }
   else if (relevant.some(s => s.status === 'error')) { dot = 'error'; statusLabel = selectedId === ALL ? 'A connection is failing' : 'Last scan failed' }
@@ -44,7 +46,7 @@ export function TopBar() {
         </span>
         {scanError ? <span className="text-xs text-critical max-w-[240px] truncate" title={scanError}>{scanError}</span> : null}
         <Button variant="ghost" size="md" onClick={() => openDrawer()} title="Open assistant"><Bot size={16} /> Assistant</Button>
-        <Button variant="primary" onClick={() => void scanNow()} loading={scanning} disabled={backend === 'down' || connections.length === 0}>
+        <Button variant="primary" onClick={() => void scanNow()} loading={scanning} disabled={backend !== 'up' || connections.length === 0}>
           {!scanning ? <RefreshCw size={15} /> : null}{scanning ? 'Scanning' : 'Scan Now'}
         </Button>
       </div>

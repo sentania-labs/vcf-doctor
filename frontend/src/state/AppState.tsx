@@ -3,11 +3,12 @@ import type { ConnectionPublic, ScanRun } from '@/types'
 import { getConnections, getReadiness, getScans, triggerScan } from '@/api'
 import { BACKEND_UNREACHABLE_EVENT } from '@/api/client'
 import { useInterval } from '@/hooks/useAsync'
+import { classifyReadiness, type BackendStatus } from './backendHealth'
 
 const STORAGE_KEY = 'vcfdoctor.connection'
 export const ALL = 'all'
 
-export type BackendStatus = 'checking' | 'up' | 'down'
+export type { BackendStatus } from './backendHealth'
 
 interface AppState {
   connections: ConnectionPublic[]
@@ -60,10 +61,10 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const checkBackend = useCallback(async () => {
     try {
       const readiness = await getReadiness()
-      const ready = readiness.status === 'ok'
-      setBackend(ready ? 'up' : 'down')
-      setBackendError(ready ? null : '503 Service Unavailable')
-      setDatabaseHealthy(readiness.database)
+      const health = classifyReadiness(readiness)
+      setBackend(health.backend)
+      setBackendError(health.backendError)
+      setDatabaseHealthy(health.databaseHealthy)
     } catch (e) {
       setBackend('down'); setBackendError(e instanceof Error ? e.message : String(e)); setDatabaseHealthy(null)
     }
@@ -88,8 +89,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   useEffect(() => { void checkBackend(); void reloadConnections() }, [checkBackend, reloadConnections])
   useEffect(() => { void reloadScans() }, [reloadScans, refreshKey])
 
-  // Backend heartbeat; faster while down so recovery is noticed quickly.
-  useInterval(() => { void checkBackend() }, backend === 'down' ? 5000 : 20000)
+  // Backend heartbeat; faster while unavailable or starting so recovery is noticed quickly.
+  useInterval(() => { void checkBackend() }, backend === 'up' ? 20000 : 5000)
   // Any API call that fails at the network level triggers an immediate check so the banner shows within a second.
   useEffect(() => {
     let last = 0

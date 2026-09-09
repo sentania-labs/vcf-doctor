@@ -69,16 +69,8 @@ def test_concurrent_first_run_setup_has_one_winner(tmp_path, monkeypatch):
             second_checks.wait(timeout=2)
         return result
 
-    class Unlocked:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            return False
-
     with _client(tmp_path, monkeypatch) as first, TestClient(main.app) as second:
         monkeypatch.setattr(auth, "configured", synchronized_configured)
-        monkeypatch.setattr(auth, "setup_lock", Unlocked(), raising=False)
         passwords = ("first password", "second password")
         with ThreadPoolExecutor(max_workers=2) as executor:
             responses = list(
