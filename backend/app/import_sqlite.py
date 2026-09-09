@@ -206,7 +206,7 @@ def _snapshot_blob(row: sqlite3.Row, present: set[str]) -> bytes | None:
     return gzip.compress(text.encode("utf-8"), compresslevel=6)
 
 
-def import_table(source: sqlite3.Connection, table: str) -> int:
+def import_table(source: sqlite3.Connection, target, table: str) -> int:
     present = _sqlite_columns(source, table)
     columns = _target_columns(table, present)
     placeholders = ",".join(["%s"] * len(columns))
@@ -244,21 +244,19 @@ def import_table(source: sqlite3.Connection, table: str) -> int:
             payload.append(tuple(_value(table, column, row) for column in columns))
         if not payload:
             continue
-        with db.transaction() as c:
-            c.executemany(sql, payload)
+        target.executemany(sql, payload)
         moved += len(payload)
         log.info("%s: %d rows", table, moved)
     return moved
 
 
-def _resync_identity() -> None:
+def _resync_identity(target) -> None:
     """Move the incomplete-intervals identity past the ids that were imported,
     so the next generated id does not collide with one that came across."""
-    with db.transaction() as c:
-        c.execute(
-            "SELECT setval(pg_get_serial_sequence('event_incomplete_intervals', 'id'), "
-            "COALESCE((SELECT MAX(id) FROM event_incomplete_intervals), 0) + 1, false)"
-        )
+    target.execute(
+        "SELECT setval(pg_get_serial_sequence('event_incomplete_intervals', 'id'), "
+        "COALESCE((SELECT MAX(id) FROM event_incomplete_intervals), 0) + 1, false)"
+    )
 
 
 def run(path: Path) -> dict[str, int]:
@@ -278,15 +276,16 @@ def run(path: Path) -> dict[str, int]:
     try:
         available = _sqlite_tables(source)
         moved = {}
-        for table in TABLES:
-            if table not in available:
-                log.info("%s: not present in the SQLite database, skipped", table)
-                moved[table] = 0
-                continue
-            moved[table] = import_table(source, table)
+        with db.transaction() as target:
+            for table in TABLES:
+                if table not in available:
+                    log.info("%s: not present in the SQLite database, skipped", table)
+                    moved[table] = 0
+                    continue
+                moved[table] = import_table(source, target, table)
+            _resync_identity(target)
     finally:
         source.close()
-    _resync_identity()
     return moved
 
 

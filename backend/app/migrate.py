@@ -73,11 +73,10 @@ def current() -> str | None:
 def upgrade() -> list[str]:
     """Apply every pending migration. Returns the revisions applied here."""
     done: list[str] = []
-    with db.pool().connection() as lock_conn:
+    with psycopg.connect(db.conninfo(), autocommit=True) as lock_conn:
         # Blocking, not try: a second worker waits for the first to finish
         # rather than racing it or starting against a half-built schema.
         lock_conn.execute("SELECT pg_advisory_lock(%s, %s)", (LOCK_CLASS, LOCK_OBJ))
-        lock_conn.commit()
         try:
             # Under the lock: CREATE TABLE IF NOT EXISTS is not concurrency-safe
             # in PostgreSQL, and two workers starting together is the normal case.

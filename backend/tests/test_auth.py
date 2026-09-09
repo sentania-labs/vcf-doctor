@@ -47,6 +47,58 @@ def test_first_run_setup_login_logout_change(tmp_path, monkeypatch):
         assert c.post("/api/auth/login", json={"password": "new password"}).status_code == 200
 
 
+def test_concurrent_first_run_setup_has_one_winner(tmp_path, monkeypatch):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    import app.main as main
+    from app import auth
+
+    first_checks = threading.Barrier(2)
+    second_checks = threading.Barrier(2)
+    local = threading.local()
+    configured = auth.configured
+
+    def synchronized_configured():
+        result = configured()
+        count = getattr(local, "configured_checks", 0) + 1
+        local.configured_checks = count
+        if count == 1:
+            first_checks.wait(timeout=2)
+        elif count == 2:
+            second_checks.wait(timeout=2)
+        return result
+
+    class Unlocked:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    with _client(tmp_path, monkeypatch) as first, TestClient(main.app) as second:
+        monkeypatch.setattr(auth, "configured", synchronized_configured)
+        monkeypatch.setattr(auth, "setup_lock", Unlocked(), raising=False)
+        passwords = ("first password", "second password")
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            responses = list(
+                executor.map(
+                    lambda pair: (
+                        pair[0],
+                        pair[1].post("/api/auth/setup", json={"password": pair[0]}),
+                    ),
+                    zip(passwords, (first, second), strict=True),
+                )
+            )
+
+    assert sorted(response.status_code for _, response in responses) == [200, 409]
+    accepted, winner = next(pair for pair in responses if pair[1].status_code == 200)
+    rejected = next(password for password, response in responses if response.status_code == 409)
+    assert auth.verify_password(accepted) is True
+    assert auth.verify_password(rejected) is False
+    assert auth.token_valid(winner.cookies.get(auth.COOKIE)) is True
+
+
 def test_forged_cookie_is_rejected(tmp_path, monkeypatch):
     with _client(tmp_path, monkeypatch) as c:
         c.post("/api/auth/setup", json={"password": "correct horse"})

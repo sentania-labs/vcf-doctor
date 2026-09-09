@@ -28,6 +28,19 @@ def test_upgrade_is_idempotent():
     assert migrate.current() == "0001_initial"
 
 
+def test_upgrade_works_with_a_single_pool_connection(monkeypatch):
+    from app.config import settings
+
+    _drop_schema()
+    db.close()
+    monkeypatch.setattr(settings, "db_pool_min_size", 1)
+    monkeypatch.setattr(settings, "db_pool_max_size", 1)
+    monkeypatch.setattr(settings, "db_pool_timeout", 0.2)
+
+    assert migrate.upgrade() == ["0001_initial"]
+    assert migrate.current() == "0001_initial"
+
+
 def test_every_table_the_app_writes_exists():
     rows = db.fetchall(
         "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"

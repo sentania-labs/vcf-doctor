@@ -29,6 +29,12 @@ If you already run a PostgreSQL, point the published image at it instead:
 
 ```bash
 # Quickstarts track latest. Deployments should pin an exact vX.Y.Z release.
+docker run --rm \
+  -v /path/to/secrets:/run/secrets:ro \
+  -e VCF_DOCTOR_DATABASE_URL=postgresql://vcf_doctor@db.example:5432/vcf_doctor \
+  ghcr.io/sentania-labs/vcf-doctor:latest \
+  python3 -m app.migrate upgrade
+
 docker run -d --name vcf-doctor \
   -p 8000:8000 \
   -v vcf-doctor-data:/data \
@@ -36,6 +42,9 @@ docker run -d --name vcf-doctor \
   -e VCF_DOCTOR_DATABASE_URL=postgresql://vcf_doctor@db.example:5432/vcf_doctor \
   ghcr.io/sentania-labs/vcf-doctor:latest
 ```
+
+The first container applies every pending migration and exits. Start the
+long-running console only after that command succeeds.
 
 The password is read from a file, never from the URL or any other environment
 variable; `/run/secrets/vcf-doctor-db-password` is the default path. The `/data`

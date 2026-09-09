@@ -292,8 +292,31 @@ def get_setting(key: str, default: Any = None, timeout: float | None = None) -> 
 
 
 def set_setting(key: str, value: Any) -> None:
+    set_settings({key: value})
+
+
+def set_settings(values: dict[str, Any]) -> None:
     with transaction() as c:
-        c.execute(SETTING_UPSERT, (key, json.dumps(value)))
+        c.executemany(SETTING_UPSERT, [(key, json.dumps(value)) for key, value in values.items()])
+
+
+def initialize_settings(guard_key: str, values: dict[str, Any]) -> bool:
+    if guard_key not in values:
+        raise ValueError("guard key must be included in values")
+    with transaction() as c:
+        inserted = c.execute(
+            "INSERT INTO settings(key, value) VALUES(%s, %s) "
+            "ON CONFLICT DO NOTHING RETURNING key",
+            (guard_key, json.dumps(values[guard_key])),
+        ).fetchone()
+        if inserted is None:
+            return False
+        remaining = [
+            (key, json.dumps(value)) for key, value in values.items() if key != guard_key
+        ]
+        if remaining:
+            c.executemany(SETTING_UPSERT, remaining)
+    return True
 
 
 # --- test support ---------------------------------------------------------

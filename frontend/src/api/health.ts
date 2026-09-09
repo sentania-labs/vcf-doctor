@@ -11,9 +11,9 @@ import { USE_MOCKS, delay } from './mocks'
 // is down. That one exists for container and orchestrator liveness probes,
 // where the right response to a missing database is to leave the process
 // alone, and the UI has no use for it.
-export interface ReadinessResponse { status: string; version: string; scheduler?: boolean; database?: boolean }
+export interface ReadinessResponse { status: string; version: string; scheduler: boolean; database: boolean }
 
 export function getReadiness(): Promise<ReadinessResponse> {
   if (USE_MOCKS) return delay({ status: 'ok', version: 'dev', scheduler: true, database: true }, 80)
-  return apiGet<ReadinessResponse>('/health/ready')
+  return apiGet<ReadinessResponse>('/health/ready', [503])
 }

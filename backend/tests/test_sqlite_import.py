@@ -7,6 +7,7 @@ import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import psycopg
 import pytest
 
 from app import db, import_sqlite
@@ -187,6 +188,30 @@ def test_import_refuses_a_target_that_already_holds_history(tmp_path):
     assert "already holds history" in str(refused.value)
     assert "database that has none" in str(refused.value)
     assert db.fetchone("SELECT COUNT(*) AS n FROM connections")["n"] == 1
+
+
+def test_failed_import_leaves_an_empty_retryable_target(tmp_path):
+    path = tmp_path / "vcf-doctor.db"
+    _legacy_db(path)
+    source = sqlite3.connect(path)
+    source.execute(
+        "INSERT INTO schedules(connection_id, interval_minutes, enabled) "
+        "VALUES('missing-connection', 15, 1)"
+    )
+    source.commit()
+    source.close()
+
+    with pytest.raises(psycopg.errors.ForeignKeyViolation):
+        import_sqlite.run(path)
+
+    assert all(count == 0 for count in import_sqlite.target_row_counts().values())
+    assert db.get_setting("retention_policy") is None
+
+    source = sqlite3.connect(path)
+    source.execute("DELETE FROM schedules WHERE connection_id = 'missing-connection'")
+    source.commit()
+    source.close()
+    assert import_sqlite.run(path)["connections"] == 1
 
 
 def test_imported_intervals_do_not_collide_with_the_next_generated_id(tmp_path):

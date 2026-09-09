@@ -48,13 +48,23 @@ def _hash(password: str, salt: bytes) -> str:
     return f"pbkdf2${base64.b64encode(salt).decode()}${base64.b64encode(dk).decode()}"
 
 
+def _password_settings(password: str) -> dict[str, str]:
+    if len(password) < MIN_PASSWORD:
+        raise HTTPException(400, f"password must be at least {MIN_PASSWORD} characters")
+    return {
+        _HASH_KEY: _hash(password, secrets.token_bytes(16)),
+        _SECRET_KEY: secrets.token_hex(32),
+    }
+
+
 def set_password(password: str) -> None:
     """Store the password and rotate the signing secret so every existing
     session (including one on a lost laptop) stops working."""
-    if len(password) < MIN_PASSWORD:
-        raise HTTPException(400, f"password must be at least {MIN_PASSWORD} characters")
-    db.set_setting(_HASH_KEY, _hash(password, secrets.token_bytes(16)))
-    db.set_setting(_SECRET_KEY, secrets.token_hex(32))
+    db.set_settings(_password_settings(password))
+
+
+def set_initial_password(password: str) -> bool:
+    return db.initialize_settings(_HASH_KEY, _password_settings(password))
 
 
 def verify_password(password: str) -> bool:
@@ -83,7 +93,7 @@ def bootstrap_from_env() -> None:
             MIN_PASSWORD,
         )
     elif seed:
-        set_password(seed)
+        set_initial_password(seed)
         return
     log.warning(
         "no operator password set; the first visitor to the UI will be asked to set one. "
@@ -149,7 +159,6 @@ def requires_auth(path: str) -> bool:
 # before the backoff bites. A restart simply forgives everyone.
 
 _fail_lock = threading.Lock()
-setup_lock = threading.Lock()
 _BACKOFF_AFTER = 5
 _BACKOFF_MAX = 60
 # Bounded store: at most MAX_TRACKED addresses, oldest evicted first, and an

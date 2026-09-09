@@ -32,8 +32,8 @@ export class ApiError extends Error {
   }
 }
 
-async function parse<T>(r: Response, path: string): Promise<T> {
-  if (!r.ok) {
+async function parse<T>(r: Response, path: string, acceptedStatuses: number[] = []): Promise<T> {
+  if (!r.ok && !acceptedStatuses.includes(r.status)) {
     if (r.status === 401 && !path.startsWith('/auth/')) {
       window.dispatchEvent(new CustomEvent(UNAUTHENTICATED_EVENT))
     }
@@ -55,9 +55,9 @@ async function parse<T>(r: Response, path: string): Promise<T> {
   return JSON.parse(text) as T
 }
 
-export async function apiGet<T>(path: string): Promise<T> {
+export async function apiGet<T>(path: string, acceptedStatuses: number[] = []): Promise<T> {
   const r = await request(path)
-  return parse<T>(r, path)
+  return parse<T>(r, path, acceptedStatuses)
 }
 
 export async function apiSend<T>(method: string, path: string, body?: unknown): Promise<T> {
