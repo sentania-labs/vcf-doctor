@@ -152,18 +152,20 @@ class HostVersionMismatch(DiagnosticCheck):
     def applicable(
         self, resources: list[Resource], previous: list[Resource] | None = None
     ) -> list[Resource]:
-        # A cluster is judged when at least one member host reports a version or build.
+        # A mismatch needs at least two member hosts that report a version.
         hosts = by_id(by_type(resources, "host"))
         members = cluster_members(resources)
         out: list[Resource] = []
         for cluster in by_type(resources, "cluster"):
+            reporting = 0
             for hid in members.get(cluster.id, set()):
                 h = hosts.get(hid)
                 if h is None:
                     continue
-                if h.properties.get("version") is not None or h.properties.get("build") is not None:
-                    out.append(cluster)
-                    break
+                if h.properties.get("version") is not None:
+                    reporting += 1
+            if reporting >= 2:
+                out.append(cluster)
         return out
 
     def evaluate(
@@ -180,7 +182,7 @@ class HostVersionMismatch(DiagnosticCheck):
                     continue
                 version = h.properties.get("version")
                 build = h.properties.get("build")
-                if version is None and build is None:
+                if version is None:
                     continue  # not reported by this collector; cannot judge
                 per_host[h.name] = f"{version or 'unknown'} build {build or 'unknown'}"
             distinct = sorted(set(per_host.values()))

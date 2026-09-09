@@ -74,7 +74,7 @@ export interface AssistantStatus { available: boolean; provider: string; model: 
 // ---- Frontend-added types (Agent D). Shapes assumed from the API notes; field names above are frozen.
 export interface OverviewCounts { critical: number; warning: number; info: number; passed: number }
 export interface OverviewResources { total: number; by_type: Record<string, number> }
-// Health score breakdown. weights: per-severity maximum deduction when every evaluated object fails a check.
+// Health score breakdown; scoring semantics are owned by backend/app/diagnostics/scoring.py.
 export type HealthSeverity = 'critical' | 'warning' | 'info'
 export type HealthWeights = Record<HealthSeverity, number>
 export interface HealthCheckLine { check_id: string; evaluated: number; findings: number; deduction: number }

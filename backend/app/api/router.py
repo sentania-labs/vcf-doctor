@@ -62,18 +62,19 @@ def _latest_resources(connection_id: str | None) -> list[Resource]:
 
 def _health_inputs(
     connection_id: str | None,
-) -> tuple[list[Resource], list[Finding], dict[str, int]]:
+) -> tuple[list[Resource], list[Finding], dict[str, int | dict[str, int]]]:
     """Latest resources, their cached findings, and the objects each check
     evaluated (summed across connections), from one snapshot read per
     connection. Checks that compare against the previous snapshot count the
-    previous snapshot's objects, and zero when there is none."""
+    previous snapshot's objects. Count shapes and empty-population semantics
+    follow diagnostics.registry.coverage; type groups are summed separately."""
     from app.diagnostics.registry import coverage, get_checks
 
     resources: list[Resource] = []
     findings: list[Finding] = []
     # Every check starts at zero so a connection with no snapshot yet reports
     # all checks as not evaluated rather than silently passed.
-    cov: dict[str, int] = {c.id: 0 for c in get_checks()}
+    cov: dict[str, int | dict[str, int]] = {c.id: 0 for c in get_checks()}
     for conn in _target_connections(connection_id):
         snaps = store.latest_snapshots(conn.id, 2)
         if not snaps:
@@ -82,7 +83,15 @@ def _health_inputs(
         findings.extend(store.get_findings(snaps[0].id))
         previous = snaps[1].resources if len(snaps) > 1 else None
         for check_id, n in coverage(snaps[0].resources, previous).items():
-            cov[check_id] = cov.get(check_id, 0) + n
+            if isinstance(n, dict):
+                current = cov.get(check_id)
+                grouped = current if isinstance(current, dict) else {}
+                for resource_type, count in n.items():
+                    grouped[resource_type] = grouped.get(resource_type, 0) + count
+                cov[check_id] = grouped
+            else:
+                current = cov.get(check_id, 0)
+                cov[check_id] = (current if isinstance(current, int) else sum(current.values())) + n
     findings.sort(key=lambda f: SEVERITY_RANK.get(f.severity, 9))
     return resources, findings, cov
 

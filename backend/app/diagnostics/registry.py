@@ -4,6 +4,7 @@ import logging
 
 from app.diagnostics.base import DiagnosticCheck
 from app.diagnostics.checks import ALL_CHECKS
+from app.diagnostics.checks.removed import ResourceRemoved
 from app.models import Finding, Resource
 
 log = logging.getLogger(__name__)
@@ -19,15 +20,26 @@ def list_checks() -> list[dict]:
     return [{"id": c.id, "name": c.name, "description": c.description} for c in get_checks()]
 
 
-def coverage(resources: list[Resource], previous: list[Resource] | None = None) -> dict[str, int]:
-    """check id -> number of objects that check judged on this snapshot. Zero
-    means the check did not evaluate anything (the health score treats it as
-    not evaluated). A check whose applicable() raises is reported as zero so
-    one bad check cannot poison the score."""
-    out: dict[str, int] = {}
+CoverageCount = int | dict[str, int]
+
+
+def coverage(
+    resources: list[Resource], previous: list[Resource] | None = None
+) -> dict[str, CoverageCount]:
+    """Check id -> applicable count, grouped by type for RESOURCE_REMOVED.
+
+    Grouped counts retain all applicable types, including those without
+    findings. Zero or an empty mapping means not evaluated. A check whose
+    applicability calculation raises is reported as zero so one bad check
+    cannot poison the score.
+    """
+    out: dict[str, CoverageCount] = {}
     for check in get_checks():
         try:
-            out[check.id] = len(check.applicable(resources, previous))
+            if isinstance(check, ResourceRemoved):
+                out[check.id] = check.applicable_by_type(resources, previous)
+            else:
+                out[check.id] = len(check.applicable(resources, previous))
         except Exception:  # noqa: BLE001 - mirror run_all: never sink the overview
             log.exception("check %s applicable() failed; counting as not evaluated", check.id)
             out[check.id] = 0
