@@ -19,7 +19,7 @@ version of this file is in git history.
   editable in Settings (#42).
 - Retention in tiered days (every scan 14 days, hourly to 30, daily to 365,
   editable in Settings), with the daily tier's day marks anchored at midnight
-  in a Settings timezone that defaults to the server's (#28),
+  in a Settings timezone seeded from `TZ` or UTC (#28),
   gzip-compressed snapshots, a persisted change log,
   and vCenter events and tasks captured per scan (#31). The old snapshot
   count setting is gone.
