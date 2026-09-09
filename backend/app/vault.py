@@ -361,8 +361,8 @@ def rekey(previous_key: str, source: str) -> RekeyOutcome:
             noun = "secret is" if unreadable == 1 else "secrets are"
             error = (
                 f"{unreadable} stored {noun} encrypted with a key that was not supplied, "
-                "so they were left untouched. Try the previous key they were stored "
-                "under, or re-enter those credentials."
+                "so they were left untouched. Restart with that key in "
+                f"{ENV_PREVIOUS_KEY}, or re-enter those credentials."
             )
         outcome = RekeyOutcome(
             at=datetime.now(UTC).isoformat(timespec="seconds"),

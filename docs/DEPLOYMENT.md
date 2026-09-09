@@ -57,7 +57,7 @@ them.
 |---|---|---|
 | `VCF_DOCTOR_DB_PATH` | `/data/vcf-doctor.db` | SQLite location |
 | `VCF_DOCTOR_SECRET_KEY` | unset | Key for encrypting vCenter passwords and the Anthropic key at rest. Unset: a key file is generated next to the database. See [Security](SECURITY.md). |
-| `VCF_DOCTOR_SECRET_KEY_PREVIOUS` | unset | Previous encryption key for startup rotation. See [rotation and recovery](SECURITY.md#secrets-at-rest) for the procedure. |
+| `VCF_DOCTOR_SECRET_KEY_PREVIOUS` | unset | Previous encryption key for startup rotation. See [rotating the encryption key](#rotating-the-encryption-key) for the procedure in each deployment shape. |
 | `ANTHROPIC_API_KEY` | unset | Enables the Claude assistant. A key entered in Settings takes precedence. |
 | `VCF_DOCTOR_AUTH` | `on` | `off` disables the login page (use only behind ingress authentication) |
 | `VCF_DOCTOR_ADMIN_PASSWORD` | unset | Seeds the operator password on first boot; otherwise the UI asks on first visit |
@@ -77,6 +77,69 @@ them.
 at a different sample set) exist for the test suite and the CI smoke test
 only: they allow a connection backed by bundled sample data instead of a
 vCenter. Never set them on a real deployment.
+
+## Rotating the encryption key
+
+`VCF_DOCTOR_SECRET_KEY` and `VCF_DOCTOR_SECRET_KEY_PREVIOUS` are ordinary
+environment variables, so rotation belongs to no particular deployment tool
+and the procedure is the same in every shape below: supply the previous key
+beside the new one in the environment, restart, and the app re-encrypts every
+stored secret under the new key on startup in a single transaction and
+reports the outcome on the Settings encryption card. Remove the previous key
+on the next pass. Nothing is re-entered by hand, and no key is ever typed
+into the interface.
+
+**docker run**
+
+```bash
+docker run -d -v vcf-doctor:/data -p 8000:8000 \
+  -e VCF_DOCTOR_SECRET_KEY="$NEW_KEY" \
+  -e VCF_DOCTOR_SECRET_KEY_PREVIOUS="$OLD_KEY" \
+  ghcr.io/sentania-labs/vcf-doctor:<tag>
+```
+
+**docker compose**
+
+```yaml
+services:
+  vcf-doctor:
+    image: ghcr.io/sentania-labs/vcf-doctor:<tag>
+    environment:
+      VCF_DOCTOR_SECRET_KEY: ${NEW_KEY}
+      VCF_DOCTOR_SECRET_KEY_PREVIOUS: ${OLD_KEY}
+```
+
+**Kubernetes manifest**
+
+```yaml
+        env:
+          - name: VCF_DOCTOR_SECRET_KEY
+            valueFrom:
+              secretKeyRef: { name: vcf-doctor-secrets, key: secret-key }
+          - name: VCF_DOCTOR_SECRET_KEY_PREVIOUS
+            valueFrom:
+              secretKeyRef: { name: vcf-doctor-secrets, key: secret-key-previous }
+```
+
+**Argo CD with a sealed secret**
+
+The deployment's `env` block is the Kubernetes one above, unchanged. What
+Argo renders is the Secret behind it, so the previous key arrives as a second
+sealed value feeding that same variable, and the sync that replaces the
+Secret is what restarts the pod.
+
+```yaml
+spec:
+  encryptedData:
+    secret-key: AgB...<new key, sealed>
+    secret-key-previous: AgB...<old key, sealed>
+```
+
+On the next pass drop `VCF_DOCTOR_SECRET_KEY_PREVIOUS` (and the sealed
+`secret-key-previous` entry, where one is used) and restart again. Leaving it
+set is not dangerous, it only keeps the old key present longer than it needs
+to be. Settings > Encryption at rest keeps reporting the last rotation either
+way.
 
 ## Verifying a pulled image
 

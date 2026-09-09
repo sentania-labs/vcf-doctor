@@ -46,7 +46,11 @@ Set the new `VCF_DOCTOR_SECRET_KEY` and, for that one restart, the old value
 in `VCF_DOCTOR_SECRET_KEY_PREVIOUS`: at startup every stored secret still
 encrypted under the old key is rewritten under the new one in a single
 transaction, and Settings > Encryption at rest reports what moved. Drop
-`VCF_DOCTOR_SECRET_KEY_PREVIOUS` on the next deploy.
+`VCF_DOCTOR_SECRET_KEY_PREVIOUS` on the next pass. Both are ordinary
+environment variables, so the procedure is the same under docker run, docker
+compose, a Kubernetes manifest or an Argo rendered sealed secret; see
+[rotating the encryption key](DEPLOYMENT.md#rotating-the-encryption-key) for
+each shape.
 
 When the deployment has just moved from the generated key file to
 `VCF_DOCTOR_SECRET_KEY`, the file is still on the volume, so the previous key
@@ -57,10 +61,9 @@ by mistake stays recoverable by unsetting it, which a silent re-encryption
 would prevent. Delete the key file once the console reads its credentials
 again.
 
-Those two are the only rotation procedures. The interface never accepts an
-encryption key: rotation is a deployment action, so nothing in the browser
-can supply, guess or trigger key material, and the rekey endpoint is not a
-password check. A rotation rewrites only secrets the previous key opens;
+Those two are the only rotation procedures. The interface never accepts,
+shows or transmits an encryption key: the only rotation it can start uses a
+key already on the volume, and the rekey endpoint is not a password check. A rotation rewrites only secrets the previous key opens;
 secrets under other keys stay untouched and are reported as unreadable. All
 recoverable secrets and the outcome commit in one transaction, so an
 interrupted rotation cannot leave only some of its rewrites behind. A key
