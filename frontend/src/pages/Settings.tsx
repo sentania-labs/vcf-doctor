@@ -5,6 +5,7 @@ import { getSettings, runCompactionMigration, updateSettings, getAssistantStatus
 import { ApiError } from '@/api/client'
 import { useAuth } from '@/state/AuthState'
 import { useAsync } from '@/hooks/useAsync'
+import { withRefreshedKeyState } from './settingsForm'
 import { Badge, Button, Card, CardHeader, ErrorState, Field, Input, PageHeader, Select, Skeleton, Toggle } from '@/components/ui'
 import HealthScoreCard from '@/components/settings/HealthScoreCard'
 import EncryptionCard from '@/components/settings/EncryptionCard'
@@ -206,6 +207,16 @@ export default function SettingsPage() {
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)) } finally { setSaving(false) }
   }
 
+  // A rotation may have made the stored API key readable again. Refresh only
+  // that, so unsaved edits elsewhere on the page are never thrown away.
+  const refreshKeyState = async () => {
+    status.reload()
+    try {
+      const fresh = await getSettings()
+      setAssistant(a => withRefreshedKeyState(a, fresh.assistant))
+    } catch { /* the encryption card reports its own status */ }
+  }
+
   if (s.error && !s.data) return <div className="anim-fade-up"><PageHeader title="Settings" /><Card><ErrorState title="Settings unavailable" error={s.error} onRetry={s.reload} /></Card></div>
 
   return (
@@ -264,7 +275,7 @@ export default function SettingsPage() {
             </div>
           </Card>
 
-          <EncryptionCard reloadKey={`${assistant.api_key_set}:${assistant.api_key_unreadable ?? false}`} onRotated={s.reload} />
+          <EncryptionCard reloadKey={`${assistant.api_key_set}:${assistant.api_key_unreadable ?? false}`} onRotated={() => void refreshKeyState()} />
           <AccessCard />
           <TrustedProxiesCard />
           <AboutCard />
