@@ -217,3 +217,16 @@ def test_day_marks_survive_a_dst_change(tmp_path):
     local = [t.astimezone(tz) for t in kept[:-1]]
     assert all((t.hour, t.minute) == (0, 0) for t in local), local
     assert len({t.date() for t in local}) == len(local) >= 4
+
+
+def test_day_mark_midpoint_uses_the_real_day_length_under_dst():
+    """New York's fall-back day is 25 hours long, so its midpoint is 12:30 after
+    local midnight: a snapshot at 12:20 rounds down and one at 12:40 rounds up."""
+    tz = ZoneInfo("America/New_York")
+    midnight = datetime(2026, 11, 1, tzinfo=tz)
+    next_midnight = datetime(2026, 11, 2, tzinfo=tz)
+    assert next_midnight.astimezone(UTC) - midnight.astimezone(UTC) == timedelta(hours=25)
+    before = (midnight.astimezone(UTC) + timedelta(hours=12, minutes=20)).astimezone(UTC)
+    after = (midnight.astimezone(UTC) + timedelta(hours=12, minutes=40)).astimezone(UTC)
+    assert store._nearest_day_mark(before, tz) == midnight
+    assert store._nearest_day_mark(after, tz) == next_midnight

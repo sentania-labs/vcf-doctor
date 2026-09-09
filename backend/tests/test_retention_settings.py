@@ -114,3 +114,18 @@ def test_an_unknown_stored_timezone_does_not_break_a_retention_pass():
     assert timezones.zone("Mars/Olympus") is UTC
     assert not timezones.is_valid("Mars/Olympus")
     assert timezones.is_valid("")
+
+
+def test_an_unknown_environment_timezone_degrades_to_utc_instead_of_failing(client, monkeypatch):
+    """A typo in VCF_DOCTOR_RETENTION_TIMEZONE on a fresh install must not turn
+    every snapshot listing and retention pass into a validation error."""
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "retention_timezone", "Amercia/Chicago")
+    db.set_setting(store.RETENTION_POLICY_KEY, None)
+
+    policy = store.retention_policy()
+
+    assert policy.timezone == ""
+    assert client.get("/api/settings").status_code == 200
+    assert client.get("/api/snapshots").status_code == 200

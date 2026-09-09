@@ -51,9 +51,11 @@ its first logged row, and the log cannot describe that era. Both readers say so
 rather than showing an empty window:
 
 - `GET /api/findings/{id}/related` sets `window.log_starts_at` when the finding
-  was first observed before the log begins, and falls through to the differing
-  snapshot pair (`window.basis = "pre_log_differing_pair"`) when the log holds
-  nothing about the finding's own object.
+  was first observed before the log begins, and, when the log holds nothing
+  about the finding's own object, diffs the two snapshots around first
+  observation instead (`window.basis = "pre_log_bracketing_pair"`), or the
+  newest differing pair when retention has pruned one of those two
+  (`"pre_log_differing_pair"`).
 - the Overview feed recovers the part of its 24 h window that predates the log
   by diffing the snapshots that do cover it, newest first and bounded.
 

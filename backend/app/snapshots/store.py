@@ -319,11 +319,15 @@ def latest_run(connection_id: str | None = None) -> ScanRun | None:
 
 
 def default_retention_policy() -> RetentionPolicy:
+    tz = cfg.retention_timezone
+    if not timezones.is_valid(tz):
+        log.warning("unknown retention timezone %r in the environment, using UTC", tz)
+        tz = ""
     return RetentionPolicy(
         recent_days=cfg.retention_recent_days,
         hourly_days=cfg.retention_hourly_days,
         daily_days=cfg.retention_daily_days,
-        timezone=cfg.retention_timezone,
+        timezone=tz,
     )
 
 
@@ -587,12 +591,14 @@ def _nearest_day_mark(t: datetime, tz: tzinfo) -> datetime:
     Midnights are taken in the retention timezone, so the daily survivor falls
     on the same calendar day the Snapshots page groups it under (issue #28).
     Days are not all 24 hours long under DST, hence date arithmetic rather than
-    an epoch offset.
+    an epoch offset, and the day length is measured in elapsed UTC time
+    (subtracting two datetimes in the same zone compares wall clocks).
     """
     local = t.astimezone(tz)
     start = datetime.combine(local.date(), time.min, tzinfo=tz)
     nxt = datetime.combine(local.date() + DAY, time.min, tzinfo=tz)
-    return nxt if (t - start) * 2 >= (nxt - start) else start
+    day_length = nxt.astimezone(UTC) - start.astimezone(UTC)
+    return nxt if (t - start) * 2 >= day_length else start
 
 
 def select_retention_victims(

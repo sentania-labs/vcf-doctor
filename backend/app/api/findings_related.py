@@ -11,9 +11,11 @@ one scan older (issue #5). This walks back instead:
    related objects, plus any high-significance row on the connection.
 3. Databases predating the change log have no rows at all; then fall back to
    diffing the newest pair of snapshots that actually differ. A database
-   upgraded to the change log mid-life gets the same fallback for a finding
-   older than the first logged row, because no query over the log can reach
-   the change that caused it (issue #41). The window says which case it is.
+   upgraded to the change log mid-life has a finding older than the first
+   logged row, and no query over the log can reach the change that caused it
+   (issue #41): diff the two snapshots bracketing first observation instead,
+   or the newest differing pair when retention has pruned one of those two.
+   The window says which case it is.
 
 The window is capped (MAX_WINDOW, MAX_SCANS_BACK) and the response says which
 window it shows, so the drawer can print it.
@@ -42,6 +44,7 @@ SIGNIFICANCE_RANK = {"high": 0, "medium": 1, "low": 2}
 WindowBasis = Literal[
     "first_observed",
     "latest_differing_pair",
+    "pre_log_bracketing_pair",
     "pre_log_differing_pair",
     "no_snapshots",
 ]
@@ -106,40 +109,29 @@ def neighbourhood(finding: Finding, resources: list[Resource]) -> list[str]:
 
 class FirstObserved(BaseModel):
     seen_at: datetime | None = None  # oldest consecutive snapshot holding the finding
+    seen_id: str | None = None
     interval_start: datetime | None = None  # the snapshot before that one, else seen_at
+    interval_start_id: str | None = None  # None when no older snapshot survives
     count: int = 0  # how many consecutive snapshots hold it
     capped: bool = False  # MAX_SCANS_BACK stopped the walk
     all_surviving: bool = False  # present in every snapshot retention has kept
 
 
-def _holders(connection_id: str, finding_id: str, snaps: list) -> set[str] | None:
-    """Snapshot ids holding the finding, from one SQL query (issue #40).
-
-    None means "ask the decoder": the query found nothing for the newest
-    snapshot, which the caller has just seen hold the finding, so the stored
-    format is not what the prefilter expects and the honest answer is the
-    slower walk.
-    """
-    ids = store.snapshot_ids_with_finding(connection_id, finding_id)
-    if snaps and snaps[0].id not in ids:
-        return None
-    return ids
-
-
 def first_observed(connection_id: str, finding_id: str) -> FirstObserved:
     snaps = store.list_snapshots(connection_id)  # newest first
-    holders = _holders(connection_id, finding_id, snaps)
+    holders = store.snapshot_ids_with_finding(connection_id, finding_id)
     out = FirstObserved()
     for i, summary in enumerate(snaps[:MAX_SCANS_BACK]):
-        present = (
-            summary.id in holders
-            if holders is not None
-            else any(f.id == finding_id for f in store.get_findings(summary.id))
-        )
-        if not present:
+        if summary.id not in holders:
             break
         out.seen_at = summary.created_at
-        out.interval_start = snaps[i + 1].created_at if i + 1 < len(snaps) else summary.created_at
+        out.seen_id = summary.id
+        if i + 1 < len(snaps):
+            out.interval_start = snaps[i + 1].created_at
+            out.interval_start_id = snaps[i + 1].id
+        else:
+            out.interval_start = summary.created_at
+            out.interval_start_id = None
         out.count = i + 1
     else:
         out.capped = len(snaps) > MAX_SCANS_BACK
@@ -219,6 +211,19 @@ def _latest_differing_pair(connection_id: str) -> tuple[list, datetime | None, d
     return [], None, None
 
 
+def _bracketing_pair(first: FirstObserved) -> list | None:
+    """Diff of the snapshot before first observation against the first one
+    holding the finding: the interval in which the cause happened. None when
+    retention has pruned either side (or none older survives)."""
+    if first.interval_start_id is None or first.seen_id is None:
+        return None
+    older = store.get_snapshot(first.interval_start_id)
+    newer = store.get_snapshot(first.seen_id)
+    if older is None or newer is None:
+        return None
+    return scheduler.compute_changes(older.resources, newer.resources)
+
+
 def related_changes(connection_id: str, finding: Finding, resources: list[Resource]):
     near = neighbourhood(finding, resources)
     first = first_observed(connection_id, finding.id)
@@ -261,12 +266,21 @@ def related_changes(connection_id: str, finding: Finding, resources: list[Resour
             log_starts_at=coverage_start if pre_log else None,
         )
         if pre_log and not any(c.resource_id in near_set for c in changes):
-            diff, pair_since, pair_until = _latest_differing_pair(connection_id)
+            diff = _bracketing_pair(first)
+            if diff is not None:
+                basis, pair_since, pair_until = (
+                    "pre_log_bracketing_pair",
+                    first.interval_start,
+                    seen_at,
+                )
+            else:
+                basis = "pre_log_differing_pair"
+                diff, pair_since, pair_until = _latest_differing_pair(connection_id)
             fallback = _select(diff, near)
             if fallback:
                 changes = fallback
                 window = RelatedWindow(
-                    basis="pre_log_differing_pair",
+                    basis=basis,
                     since=pair_since,
                     until=pair_until,
                     first_observed=seen_at,

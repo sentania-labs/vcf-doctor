@@ -87,10 +87,11 @@ function describeScope(scope: RelatedWindow): string {
       ? `Since ${formatDateTime(scope.since)} (first seen ${formatDateTime(scope.first_observed)}, ${scans}${capped})${late}`
       : `Since the first snapshot ${formatDateTime(scope.since)} (${scans}${capped})${late}`
   }
-  if (scope.basis === 'pre_log_differing_pair') {
+  if (scope.basis === 'pre_log_bracketing_pair' || scope.basis === 'pre_log_differing_pair') {
     const from = scope.log_starts_at ? `The change log only starts ${formatDateTime(scope.log_starts_at)}, after this finding appeared` : 'The change log starts after this finding appeared'
+    const pair = scope.basis === 'pre_log_bracketing_pair' ? 'the snapshots around first observation' : 'newest snapshots that differ'
     return scope.since && scope.until
-      ? `${from}: newest snapshots that differ, ${formatDateTime(scope.since)} to ${formatTime(scope.until)}`
+      ? `${from}: ${pair}, ${formatDateTime(scope.since)} to ${formatTime(scope.until)}`
       : from
   }
   if (scope.basis === 'latest_differing_pair') {

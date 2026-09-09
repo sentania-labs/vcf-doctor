@@ -5,7 +5,7 @@ from datetime import timedelta
 import pytest
 from fastapi.testclient import TestClient
 
-from app import db
+from app import db, scheduler
 from app.api import findings_related as fr
 from app.main import app
 from app.models import Resource
@@ -288,13 +288,32 @@ def test_first_observed_walks_back_with_store(client):
     assert fr.first_observed(cid, "nope") == fr.FirstObserved()
 
 
+def _scan_with_another_host_powered_off(cid: str) -> None:
+    """A fourth snapshot that differs from the newest by a high-significance
+    change on an object unrelated to the disconnected host, so the newest pair
+    is no longer identical and the change log has a real row to start from."""
+    latest = store.latest_snapshot(cid)
+    resources = [r.model_copy(deep=True) for r in latest.resources]
+    other = next(
+        r for r in resources if r.type == "host" and r.properties.get("connectionState") == "connected"
+    )
+    other.properties["powerState"] = "poweredOff"
+    snap = store.save_snapshot(cid, resources, "power event", scheduled=True)
+    store.save_findings(snap.id, store.get_findings(latest.id))
+    diff = scheduler.compute_changes(latest.resources, resources)
+    assert any(c.significance == "high" and c.resource_id == other.id for c in diff)
+    store.save_changes(cid, latest.id, snap.id, snap.created_at, diff)
+
+
 def _restart_log_at_the_newest_interval(client, cid: str) -> dict:
     """Make the database look like one upgraded to the change log mid-life:
     every row before the newest scan interval is gone, so the log starts long
-    after the finding did."""
-    snaps = store.list_snapshots(cid)  # newest first
+    after the finding did. The newest pair differs, as it does on a live
+    estate, so the log's own interval is not where the cause hides."""
     with db.transaction() as c:
         c.execute("DELETE FROM changes WHERE connection_id = ?", (cid,))
+    _scan_with_another_host_powered_off(cid)
+    snaps = store.list_snapshots(cid)  # newest first
     unrelated = Change(
         change_type="modified",
         resource_id=f"datastore:{cid}:datastore-99",
@@ -309,8 +328,11 @@ def _restart_log_at_the_newest_interval(client, cid: str) -> dict:
 
 def test_finding_older_than_the_change_log_gets_a_window_that_can_hold_the_cause(client):
     """Issue #41: a log that starts after the finding did cannot contain the
-    cause, so the drawer falls through to the differing snapshot pair and says
-    where the log begins instead of showing an empty change-log window."""
+    cause, so the drawer diffs the two snapshots around first observation and
+    says where the log begins instead of showing an empty change-log window.
+    Scans go A, B, B, C: the finding appeared in the A to B interval, and the
+    newest pair (B to C) differs, so the newest differing pair is the wrong
+    answer here."""
     cid = _connection(client, 3)
     _restart_log_at_the_newest_interval(client, cid)
     stamps = [s["created_at"] for s in client.get(f"/api/snapshots?connection_id={cid}").json()]
@@ -318,14 +340,40 @@ def test_finding_older_than_the_change_log_gets_a_window_that_can_hold_the_cause
 
     body = client.get(f"/api/findings/{finding['id']}/related?connection_id={cid}").json()
 
-    assert body["window"]["basis"] == "pre_log_differing_pair"
+    assert body["window"]["basis"] == "pre_log_bracketing_pair"
     assert body["window"]["log_starts_at"] == stamps[1]
-    assert body["window"]["since"] == stamps[2]
-    assert body["window"]["until"] == stamps[1]
+    assert body["window"]["first_observed"] == stamps[2]
+    assert body["window"]["since"] == stamps[3]
+    assert body["window"]["until"] == stamps[2]
     assert body["changes"][0]["resource_id"] == finding["resource_id"]
     assert body["changes"][0]["summary"] == "connectionState connected -> disconnected"
-    # The unrelated logged row is not passed off as the cause.
-    assert "usage 40.0% -> 41.0%" not in [c["summary"] for c in body["changes"]]
+    summaries = [c["summary"] for c in body["changes"]]
+    # Neither the logged row nor the newest pair's own diff is passed off as the cause.
+    assert "usage 40.0% -> 41.0%" not in summaries
+    assert not any("poweredOff" in s for s in summaries)
+
+
+def test_pre_log_fallback_uses_the_newest_differing_pair_once_the_bracketing_pair_is_pruned(
+    client,
+):
+    """When retention has removed the snapshot before first observation, the
+    bracketing pair cannot be diffed; the newest differing pair is shown and
+    the window says so rather than claiming to bracket the finding."""
+    cid = _connection(client, 3)
+    _restart_log_at_the_newest_interval(client, cid)
+    snaps = store.list_snapshots(cid)
+    assert store.delete_snapshots([snaps[3].id]) == 1
+    stamps = [s["created_at"] for s in client.get(f"/api/snapshots?connection_id={cid}").json()]
+    finding = _finding(client, cid, "HOST_DISCONNECTED")
+
+    body = client.get(f"/api/findings/{finding['id']}/related?connection_id={cid}").json()
+
+    assert body["window"]["basis"] == "pre_log_differing_pair"
+    assert body["window"]["log_starts_at"] == stamps[1]
+    assert body["window"]["since"] == stamps[1]
+    assert body["window"]["until"] == stamps[0]
+    assert body["changes"] and all(c["significance"] == "high" for c in body["changes"])
+    assert any("poweredOff" in c["summary"] for c in body["changes"])
 
 
 def test_a_complete_change_log_is_never_reported_as_starting_late(client):
@@ -391,23 +439,6 @@ def test_locating_first_observation_does_not_decode_every_snapshot(client, monke
     # the finding itself). Before the prefilter this was one decode per snapshot.
     assert body["window"]["scans_present"] == 17
     assert len(decodes) == 1, decodes
-
-
-def test_first_observation_falls_back_to_decoding_when_the_prefilter_misses(client, monkeypatch):
-    """The prefilter is a shortcut, not the source of truth: if it cannot see the
-    finding in the newest snapshot, which the caller just read it from, the walk
-    decodes as it used to rather than reporting a shorter history."""
-    cid = _connection(client, 3)
-    finding = _finding(client, cid, "HOST_DISCONNECTED")
-    monkeypatch.setattr(store, "snapshot_ids_with_finding", lambda *_: set())
-    decodes: list[str] = []
-    real = store.get_findings
-    monkeypatch.setattr(store, "get_findings", lambda sid: (decodes.append(sid), real(sid))[1])
-
-    first = fr.first_observed(cid, finding["id"])
-
-    assert first.count == 2
-    assert len(decodes) == 3  # walked and decoded until the finding was absent
 
 
 def test_prefilter_matches_the_finding_id_exactly(client):
