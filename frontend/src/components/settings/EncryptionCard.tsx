@@ -8,7 +8,7 @@ import { useAppState } from '@/state/AppState'
 import { Badge, Button, Card, CardHeader, Field, Input, Skeleton } from '@/components/ui'
 
 // Settings > Encryption: what protects stored secrets and whether anything needs re-entering.
-export default function EncryptionCard({ reloadKey }: { reloadKey?: unknown }) {
+export default function EncryptionCard({ reloadKey, onRotated }: { reloadKey?: unknown; onRotated?: () => void }) {
   const st = useAsync(() => getEncryptionStatus(), [reloadKey])
   const { connections, reloadConnections } = useAppState()
   const d = st.data
@@ -55,7 +55,7 @@ export default function EncryptionCard({ reloadKey }: { reloadKey?: unknown }) {
                 </ul>
               </div>
             ) : null}
-            <RotateForm status={d} onRotated={() => { st.reload(); void reloadConnections() }} />
+            <RotateForm status={d} onRotated={() => { st.reload(); void reloadConnections(); onRotated?.() }} />
           </>
         )}
       </div>

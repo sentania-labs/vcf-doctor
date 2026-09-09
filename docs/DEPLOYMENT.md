@@ -106,8 +106,9 @@ laptop use. It is not a deployment artifact.
 - **Rotated encryption key, previous key still available**: no re-entry
   needed. Restart once with the old value in
   `VCF_DOCTOR_SECRET_KEY_PREVIOUS`, or rotate from Settings > Encryption at
-  rest. A key that opens nothing changes nothing, so a wrong guess is safe to
-  retry. See [Security](SECURITY.md).
+  rest. A key that opens nothing changes nothing, though wrong guesses count
+  against the login backoff like a wrong password. See
+  [Security](SECURITY.md).
 - **Bad release**: re-pin the previous digest or tag and file an issue. The
   database schema is migrated forward on startup; going back a release is
   not guaranteed to be safe once a newer release has written to the volume,

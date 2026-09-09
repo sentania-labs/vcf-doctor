@@ -264,7 +264,7 @@ export default function SettingsPage() {
             </div>
           </Card>
 
-          <EncryptionCard reloadKey={`${assistant.api_key_set}:${assistant.api_key_unreadable ?? false}`} />
+          <EncryptionCard reloadKey={`${assistant.api_key_set}:${assistant.api_key_unreadable ?? false}`} onRotated={s.reload} />
           <AccessCard />
           <TrustedProxiesCard />
           <AboutCard />
