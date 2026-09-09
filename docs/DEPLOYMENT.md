@@ -229,6 +229,11 @@ All optional. Anything an operator would change day to day has a GUI
 control in Settings; these only set deployment-time defaults or override
 them.
 
+Unless the database URL sets them, connections use a 5-second connect timeout,
+a 60-second TCP user timeout, and TCP keepalives after 20 idle seconds at
+10-second intervals for 3 attempts. This abandons a dead database socket in
+about a minute. Explicit libpq URL parameters override each default.
+
 | Variable | Default | Purpose |
 |---|---|---|
 | `VCF_DOCTOR_DATABASE_URL` | `postgresql://vcf_doctor@postgres:5432/vcf_doctor` | PostgreSQL connection, without a password. `DATABASE_URL` is read when this is unset. A URL carrying a password is refused. |

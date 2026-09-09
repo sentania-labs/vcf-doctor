@@ -33,18 +33,6 @@ _leader = False
 # What the leader has jobs for: connection id -> (interval_minutes, enabled).
 # Compared against the stored schedules by reconcile_jobs().
 _scheduled_state: dict[str, tuple[int, bool]] = {}
-_STARTUP_STEPS = frozenset(
-    {
-        "auth_bootstrap",
-        "change_log_backfill",
-        "event_defaults",
-        "fixture_schedules",
-        "retention",
-        "scan_reconciliation",
-        "vault_plaintext",
-        "vault_rekey",
-    }
-)
 _startup_pending: frozenset[str] = frozenset()
 _startup_failures: tuple[str, ...] = ()
 _retention_completed: set[str] = set()
@@ -82,72 +70,101 @@ def disable_stale_fixture_schedules() -> list[str]:
     return paused
 
 
+def _startup_vault_rekey() -> None:
+    from app import vault
+
+    vault.rekey_at_startup()
+
+
+def _startup_vault_plaintext() -> None:
+    from app import vault
+
+    vault.migrate_plaintext()
+
+
+def _startup_event_defaults() -> None:
+    from app.events import store as events_store
+
+    events_store.seed_defaults()
+
+
+def _startup_change_log_backfill() -> None:
+    for cid, start in store.backfill_log_since().items():
+        log.info("change log coverage for %s starts %s", cid, start.isoformat())
+
+
+def _startup_scan_reconciliation() -> None:
+    interrupted = store.reconcile_interrupted_runs()
+    if interrupted:
+        log.warning("marked %d interrupted scan run(s) as error", interrupted)
+
+
+def _startup_auth_bootstrap() -> None:
+    from app import auth
+
+    auth.bootstrap_from_env()
+
+
+def _startup_fixture_schedules() -> None:
+    disable_stale_fixture_schedules()
+
+
+def _startup_retention() -> bool:
+    connections = store.list_connections()
+    policy = retention_policy()
+    complete = True
+    for conn in connections:
+        if conn.id in _retention_completed:
+            continue
+        try:
+            store.apply_retention(conn.id, policy)
+        except Exception:
+            complete = False
+            log.exception(
+                "deferred startup step retention failed for connection %s; "
+                "retrying next interval",
+                conn.id,
+            )
+        else:
+            _retention_completed.add(conn.id)
+    return complete
+
+
+_STARTUP_STEPS = (
+    ("vault_rekey", _startup_vault_rekey),
+    ("vault_plaintext", _startup_vault_plaintext),
+    ("event_defaults", _startup_event_defaults),
+    ("change_log_backfill", _startup_change_log_backfill),
+    ("scan_reconciliation", _startup_scan_reconciliation),
+    ("auth_bootstrap", _startup_auth_bootstrap),
+    ("fixture_schedules", _startup_fixture_schedules),
+    ("retention", _startup_retention),
+)
+
+
 def startup_maintenance() -> None:
     """Catch up persisted state after downtime before this worker becomes ready.
 
     Runs on every worker. Everything it does is idempotent, so N workers
     starting together repeat work rather than corrupt any.
     """
-    from app import auth, vault
-    from app.events import store as events_store
-
     global _startup_pending, _startup_failures
 
-    def backfill_change_log() -> None:
-        for cid, start in store.backfill_log_since().items():
-            log.info("change log coverage for %s starts %s", cid, start.isoformat())
-
-    def reconcile_scans() -> None:
-        interrupted = store.reconcile_interrupted_runs()
-        if interrupted:
-            log.warning("marked %d interrupted scan run(s) as error", interrupted)
-
-    steps = (
-        ("vault_rekey", vault.rekey_at_startup),
-        ("vault_plaintext", vault.migrate_plaintext),
-        ("event_defaults", events_store.seed_defaults),
-        ("change_log_backfill", backfill_change_log),
-        ("scan_reconciliation", reconcile_scans),
-        ("auth_bootstrap", auth.bootstrap_from_env),
-        ("fixture_schedules", disable_stale_fixture_schedules),
-    )
     pending = set(_startup_pending)
     failures: set[str] = set()
-    for identifier, action in steps:
+    for identifier, action in _STARTUP_STEPS:
         if identifier not in pending:
             continue
         try:
-            action()
+            complete = action()
         except Exception:
             failures.add(identifier)
             log.exception("deferred startup step %s failed; retrying next interval", identifier)
         else:
-            pending.remove(identifier)
-
-    if "retention" in pending:
-        try:
-            connections = store.list_connections()
-            policy = retention_policy()
-        except Exception:
-            failures.add("retention")
-            log.exception("deferred startup step retention failed; retrying next interval")
-        else:
-            for conn in connections:
-                if conn.id in _retention_completed:
-                    continue
-                try:
-                    store.apply_retention(conn.id, policy)
-                except Exception:
-                    failures.add("retention")
-                    log.exception(
-                        "deferred startup step retention failed for connection %s; "
-                        "retrying next interval",
-                        conn.id,
-                    )
-                else:
-                    _retention_completed.add(conn.id)
-            if all(conn.id in _retention_completed for conn in connections):
-                pending.remove("retention")
+            if complete is False:
+                failures.add(identifier)
+            else:
+                pending.remove(identifier)
 
     _startup_pending = frozenset(pending)
     _startup_failures = tuple(sorted(failures))
@@ -155,7 +172,7 @@ def startup_maintenance() -> None:
 
 def _begin_startup() -> None:
     global _startup_pending, _startup_failures
-    _startup_pending = _STARTUP_STEPS
+    _startup_pending = frozenset(identifier for identifier, _ in _STARTUP_STEPS)
     _startup_failures = ()
     _retention_completed.clear()
 

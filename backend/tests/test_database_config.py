@@ -10,6 +10,7 @@ import urllib.error
 import urllib.request
 
 import pytest
+from psycopg.conninfo import conninfo_to_dict
 
 from app import config, db
 from app.config import settings as cfg
@@ -57,7 +58,35 @@ def test_conninfo_carries_the_file_password(tmp_path, monkeypatch):
     secret.write_text("from-the-file", encoding="utf-8")
     monkeypatch.setattr(cfg, "database_url", "postgresql://vcf_doctor@pg:5432/vcf_doctor")
     monkeypatch.setattr(cfg, "db_password_file", str(secret))
-    assert "password=from-the-file" in db.conninfo()
+    parsed = conninfo_to_dict(db.conninfo())
+    assert parsed["password"] == "from-the-file"
+    expected = {
+        "connect_timeout": "5",
+        "tcp_user_timeout": "60000",
+        "keepalives": "1",
+        "keepalives_idle": "20",
+        "keepalives_interval": "10",
+        "keepalives_count": "3",
+    }
+    assert {key: parsed[key] for key in expected} == expected
+
+
+def test_conninfo_preserves_explicit_socket_timeouts(monkeypatch):
+    monkeypatch.setattr(
+        cfg,
+        "database_url",
+        "postgresql://vcf_doctor@pg:5432/vcf_doctor?connect_timeout=9&"
+        "tcp_user_timeout=90000&keepalives=0&keepalives_idle=30&"
+        "keepalives_interval=15&keepalives_count=4",
+    )
+    monkeypatch.setattr(cfg, "db_password_file", "")
+    parsed = conninfo_to_dict(db.conninfo())
+    assert parsed["connect_timeout"] == "9"
+    assert parsed["tcp_user_timeout"] == "90000"
+    assert parsed["keepalives"] == "0"
+    assert parsed["keepalives_idle"] == "30"
+    assert parsed["keepalives_interval"] == "15"
+    assert parsed["keepalives_count"] == "4"
 
 
 def test_a_reachable_migrated_database_is_healthy():

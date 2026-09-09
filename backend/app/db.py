@@ -44,12 +44,15 @@ LOCK_OBJ_SCHEDULER = 1
 # time across every worker and pod, not merely inside one process.
 SCAN_LOCK = "scan"
 
-# Nothing in libpq bounds a TCP connect by default, so a host that stops
-# answering (node loss, a failed-over primary) blocks for the kernel's SYN
-# timeout, minutes rather than seconds. The background scheduler takes its lock
-# on a direct connection, so that retry still needs a bound. A URL that sets its
-# own connect_timeout wins.
-CONNECT_TIMEOUT = 5
+# A URL that sets any of these libpq options wins.
+CONNECTION_DEFAULTS = {
+    "connect_timeout": 5,
+    "tcp_user_timeout": 60_000,
+    "keepalives": 1,
+    "keepalives_idle": 20,
+    "keepalives_interval": 10,
+    "keepalives_count": 3,
+}
 
 _pool: ConnectionPool | None = None
 _pool_guard = threading.Lock()
@@ -59,14 +62,15 @@ _leader_guard = threading.Lock()
 
 def conninfo() -> str:
     """libpq connection string: the configured URL, the password file and a
-    bounded connect."""
+    bounded connection."""
     url = config.database_url_without_password()
-    extra: dict[str, Any] = {}
+    configured = conninfo_to_dict(url)
+    extra: dict[str, Any] = {
+        option: value for option, value in CONNECTION_DEFAULTS.items() if option not in configured
+    }
     password = config.database_password()
     if password is not None:
         extra["password"] = password
-    if "connect_timeout" not in conninfo_to_dict(url):
-        extra["connect_timeout"] = CONNECT_TIMEOUT
     return make_conninfo(url, **extra)
 
 
