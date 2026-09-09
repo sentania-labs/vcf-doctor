@@ -356,7 +356,11 @@ def test_drain_reports_the_real_name_for_an_unknown_event_class(monkeypatch):
 
 
 def test_drain_reports_the_latest_registration_when_its_placeholder_is_wrong(monkeypatch):
+    """The wrong-placeholder set is patched as well as the registrar, so this
+    drain does not leave a name in the real process-global set and make the
+    sibling tests depend on the order they run in."""
     monkeypatch.setattr(collector_events, "register_placeholder_type", lambda name: True)
+    monkeypatch.setattr(collector_events, "_wrong_placeholders", set())
 
     class MixedUnknownTypes:
         rewinds = 0
