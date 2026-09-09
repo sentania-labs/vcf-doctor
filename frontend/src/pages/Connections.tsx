@@ -16,7 +16,6 @@ export default function ConnectionsPage() {
   const [confirm, setConfirm] = useState<ConnectionPublic | null>(null)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
-  const [staleBusyId, setStaleBusyId] = useState<string | null>(null)
 
   const remove = async (c: ConnectionPublic) => {
     setBusy(true); setErr(null)
@@ -25,43 +24,10 @@ export default function ConnectionsPage() {
     finally { setBusy(false) }
   }
 
-  // Leftover from a removed test/demo fixture connection (#33): its schedule is
-  // already paused on startup, but it still needs an operator to delete it.
-  const staleFixtures = connections.filter(c => c.kind === 'fixture')
-  const removeStale = async (c: ConnectionPublic) => {
-    setStaleBusyId(c.id); setErr(null)
-    try { await deleteConnection(c.id); await reloadConnections(); refreshAll() }
-    catch (e) { setErr(e instanceof Error ? e.message : String(e)) }
-    finally { setStaleBusyId(null) }
-  }
-
   return (
     <div className="anim-fade-up">
       <PageHeader title="Connections" subtitle="Each vCenter scans on its own schedule and keeps its own snapshots"
         actions={<Button variant="primary" onClick={() => setAdding(true)}><Plus size={15} /> Add vCenter</Button>} />
-
-      {staleFixtures.length > 0 ? (
-        <Card className="mb-4 px-5 py-4 border-warning/40 bg-warning-bg">
-          <div className="flex items-start gap-3">
-            <AlertTriangle size={16} className="text-warning shrink-0 mt-0.5" />
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold">Leftover fixture connection{staleFixtures.length > 1 ? 's' : ''}</p>
-              <p className="text-sm text-muted mt-0.5">
-                {staleFixtures.length > 1 ? 'These point at bundled test data, not a real vCenter, and are left over from a removed test setup.' : 'This points at bundled test data, not a real vCenter, and is left over from a removed test setup.'} Their schedule is paused so nothing scans or errors, but they still show here until removed.
-              </p>
-              <div className="mt-3 flex flex-col gap-2">
-                {staleFixtures.map(c => (
-                  <div key={c.id} className="flex items-center gap-3">
-                    <span className="text-sm font-medium">{c.name}</span>
-                    <Button size="sm" variant="danger" loading={staleBusyId === c.id} onClick={() => void removeStale(c)}><Trash2 size={13} /> Remove</Button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </Card>
-      ) : null}
-      {err && !confirm ? <p className="mb-4 text-sm text-critical bg-critical-bg rounded-md px-3 py-2" role="alert">{err}</p> : null}
 
       {connectionsLoading ? <div className="space-y-4">{[0, 1].map(i => <Skeleton key={i} className="h-32 rounded-xl" />)}</div>
         : connections.length === 0 ? (
