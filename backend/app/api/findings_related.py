@@ -221,7 +221,7 @@ def related_changes(connection_id: str, finding: Finding, resources: list[Resour
         return FindingRelated(
             finding_id=finding.id, connection_id=connection_id, resource_ids=near, window=window
         )
-    log_starts = store.log_since(connection_id)
+    log_starts = store.effective_log_since(connection_id)
     if log_starts is not None:
         floor = store.now() - MAX_WINDOW
         # The introducing diff is stamped with the first snapshot that holds the finding, or

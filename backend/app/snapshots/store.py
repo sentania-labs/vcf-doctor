@@ -810,12 +810,23 @@ def count_changes_by_significance(
 
 
 LOG_SINCE_KEY = "log_since"
+LOG_RETAINED_SINCE_KEY = "log_retained_since"
 
 
 def log_since(connection_id: str) -> datetime | None:
     """First covered interval for this connection, including empty diffs."""
     raw = db.get_setting(f"{LOG_SINCE_KEY}:{connection_id}")
     return datetime.fromisoformat(raw) if raw else None
+
+
+def effective_log_since(connection_id: str) -> datetime | None:
+    """Oldest interval still covered after change-log retention."""
+    started = log_since(connection_id)
+    if started is None:
+        return None
+    raw = db.get_setting(f"{LOG_RETAINED_SINCE_KEY}:{connection_id}")
+    retained = datetime.fromisoformat(raw) if raw else started
+    return max(started, retained)
 
 
 # The marker is a settings row, written through save_changes' own transaction so
@@ -857,6 +868,11 @@ def count_changes(connection_id: str) -> int:
 
 def prune_changes(connection_id: str, before: datetime) -> int:
     with db.transaction() as c:
+        key = f"{LOG_RETAINED_SINCE_KEY}:{connection_id}"
+        row = c.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+        previous = datetime.fromisoformat(json.loads(row["value"])) if row else before
+        retained_since = max(previous, before)
+        c.execute(_SETTING_UPSERT, (key, json.dumps(retained_since.isoformat())))
         cur = c.execute(
             "DELETE FROM changes WHERE connection_id = ? AND observed_at < ?",
             (connection_id, before.isoformat()),

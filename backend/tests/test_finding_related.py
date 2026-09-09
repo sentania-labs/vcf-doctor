@@ -13,6 +13,7 @@ from app.models import Resource
 from app.models.change import Change
 from app.models.finding import Finding
 from app.models.resource import Relationship
+from app.models.snapshot import RetentionPolicy
 from app.snapshots import store
 
 FIXTURE_CONN = {
@@ -125,6 +126,59 @@ def test_pruned_middle_snapshot_keeps_the_cause_in_the_query(client):
     assert body["window"]["scans_present"] == 1
     assert body["window"]["since"] == snaps[2]["created_at"]
     assert body["changes"][0]["summary"] == "connectionState connected -> disconnected"
+
+
+def test_change_retention_recovers_the_cause_from_surviving_manual_snapshots(
+    client, monkeypatch
+):
+    now = datetime(2026, 9, 9, 12, tzinfo=UTC)
+    before_at = now - timedelta(days=31)
+    cid = _connection(client, 0)
+    host = Resource(
+        id="host:retained",
+        type="host",
+        name="retained-host",
+        source="test",
+        properties={"connectionState": "connected"},
+    )
+    monkeypatch.setattr(store, "now", lambda: before_at)
+    before = store.save_snapshot(cid, [host], "before", scheduled=False)
+    store.save_findings(before.id, [])
+    disconnected = host.model_copy(deep=True)
+    disconnected.properties["connectionState"] = "disconnected"
+    finding = Finding(
+        id="test:retained-cause",
+        check_id="HOST_DISCONNECTED",
+        severity="critical",
+        title="Host disconnected",
+        summary="The host is disconnected",
+        resource_id=disconnected.id,
+        resource_type=disconnected.type,
+        resource_name=disconnected.name,
+    )
+    monkeypatch.setattr(store, "now", lambda: before_at + timedelta(minutes=15))
+    after = store.save_snapshot(cid, [disconnected], "after", scheduled=False)
+    store.save_findings(after.id, [finding])
+    changes = scheduler.compute_changes(before.resources, after.resources)
+    store.save_changes(cid, before.id, after.id, after.created_at, changes)
+
+    policy = RetentionPolicy(recent_days=1, hourly_days=7, daily_days=30)
+    store.set_retention_policy(policy)
+    monkeypatch.setattr(store, "now", lambda: now)
+    assert store.apply_retention(cid, policy, at=now) == 0
+    assert store.count_changes(cid) == 0
+    retained_since = now - timedelta(days=30)
+    assert store.log_since(cid) == before_at
+    assert store.effective_log_since(cid) == retained_since
+
+    response = client.get(f"/api/findings/{finding.id}/related?connection_id={cid}")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["window"]["basis"] == "pre_log_bracketing_pair"
+    assert datetime.fromisoformat(body["window"]["log_starts_at"]) == retained_since
+    assert [change["summary"] for change in body["changes"]] == [
+        "connectionState connected -> disconnected"
+    ]
 
 
 def test_rows_ending_at_the_pre_finding_snapshot_are_excluded(client):

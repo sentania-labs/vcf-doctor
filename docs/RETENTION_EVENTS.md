@@ -55,13 +55,17 @@ stamps the snapshot it was taken from into a `log_since:<connection_id>` setting
 database that already had change rows gets the marker at startup from its
 oldest surviving row for that same connection, using its source snapshot when
 available and its observation time otherwise. This is an internal marker, and
-it is not configurable or part of `GET /api/settings`. A database upgraded to the change-log
-release mid-life has snapshots older than that stamp, and the log cannot
-describe that era. Readers recover available snapshot history:
+it is not configurable or part of `GET /api/settings`. Retention also advances a
+separate internal retained-history boundary in the same transaction that expires
+change rows. Readers use the later of the first coverage marker and this retained
+boundary, so a longer policy selected later cannot claim rows already pruned. A
+database upgraded to the change-log release mid-life has snapshots older than
+that effective boundary, and the log cannot describe that era. Readers recover
+available snapshot history:
 
 - `GET /api/findings/{id}/related` sets `window.log_starts_at` when the finding's
-  first-observation interval starts before its connection's log begins. It then
-  diffs the two snapshots around first observation
+  first-observation interval starts before its connection's retained log begins.
+  It then diffs the two snapshots around first observation
   (`window.basis = "pre_log_bracketing_pair"`), or
   the newest differing pair when retention has pruned one of those two
   (`"pre_log_differing_pair"`), and lists the logged rows about the finding's
