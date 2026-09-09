@@ -238,14 +238,21 @@ def test_stale_fixture_schedule_paused_when_hook_off(client, monkeypatch):
     """#33: after the hook that allows fixture-kind connections is turned off,
     a leftover fixture connection has its schedule paused instead of erroring
     on every scheduled run."""
+    from datetime import UTC, datetime, timedelta
+
     from app.config import settings
 
     cid = client.post("/api/connections", json=FIXTURE_CONN).json()["id"]
     assert client.get(f"/api/connections/{cid}/schedule").json()["enabled"] is True
+    # Simulate a next_run persisted from before VCF_DOCTOR_SCHEDULER was turned
+    # off (the scheduler never runs under pytest, so it must be set directly).
+    store.update_schedule(cid, next_run=datetime.now(UTC) + timedelta(minutes=15))
 
     monkeypatch.setattr(settings, "test_fixtures", False)
     assert scheduler.disable_stale_fixture_schedules() == [cid]
-    assert client.get(f"/api/connections/{cid}/schedule").json()["enabled"] is False
+    sched = client.get(f"/api/connections/{cid}/schedule").json()
+    assert sched["enabled"] is False
+    assert sched["next_run"] is None
     # Idempotent: nothing left to pause on a second pass, e.g. a later restart.
     assert scheduler.disable_stale_fixture_schedules() == []
 

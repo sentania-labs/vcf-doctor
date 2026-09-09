@@ -49,7 +49,7 @@ def disable_stale_fixture_schedules() -> list[str]:
             continue
         sched = store.get_schedule(conn.id)
         if sched is not None and sched.enabled:
-            store.update_schedule(conn.id, enabled=False)
+            store.update_schedule(conn.id, enabled=False, clear_next_run=True)
             remove_job(conn.id)
             paused.append(conn.id)
     if paused:
