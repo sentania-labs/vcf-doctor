@@ -322,7 +322,7 @@ def default_retention_policy() -> RetentionPolicy:
     tz = cfg.retention_timezone
     if not timezones.is_valid(tz):
         log.warning("unknown retention timezone %r in the environment, using UTC", tz)
-        tz = ""
+        tz = "UTC"
     return RetentionPolicy(
         recent_days=cfg.retention_recent_days,
         hourly_days=cfg.retention_hourly_days,
@@ -366,6 +366,7 @@ def _row_to_summary(
     row, policy: RetentionPolicy | None = None, at: datetime | None = None
 ) -> SnapshotSummary:
     created = _dt(row["created_at"])
+    resolved_policy = policy or retention_policy()
     return SnapshotSummary(
         id=row["id"],
         created_at=created,
@@ -373,7 +374,10 @@ def _row_to_summary(
         connection_id=row["connection_id"],
         scheduled=bool(row["scheduled"]),
         resource_count=row["resource_count"],
-        tier=tier_for(created, bool(row["scheduled"]), policy or retention_policy(), at or now()),
+        tier=tier_for(created, bool(row["scheduled"]), resolved_policy, at or now()),
+        retention_day=(
+            created.astimezone(timezones.zone(resolved_policy.timezone)).date().isoformat()
+        ),
     )
 
 
@@ -407,6 +411,7 @@ def save_snapshot(
 ) -> Snapshot:
     sid = new_id()
     created = now()
+    policy = retention_policy()
     with db.transaction() as c:
         c.execute(
             "INSERT INTO snapshots(id, connection_id, created_at, label, scheduled, "
@@ -431,6 +436,7 @@ def save_snapshot(
         resource_count=len(resources),
         resources=resources,
         tier="recent" if scheduled else "manual",
+        retention_day=created.astimezone(timezones.zone(policy.timezone)).date().isoformat(),
     )
 
 

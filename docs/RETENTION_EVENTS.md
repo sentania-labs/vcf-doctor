@@ -13,22 +13,24 @@ Applied per connection after every scan and at startup (idempotent):
   midnight in the policy's `timezone`;
 - age >= daily_days: prune.
 
-`timezone` is an IANA zone name, editable in Settings > Retention. Empty (the
-default) follows the server's own zone, reported as `server_timezone` by
-`GET /api/settings`. Deployment overrides are listed in
-[Environment variables](DEPLOYMENT.md#environment-variables). Day marks use
-the chosen zone, while the Snapshots page groups by the browser's local date.
-Choose the browser's zone to align those timezones; Settings warns when they
-differ. The survivor is nearest midnight and can be on either side of it, so
-its displayed date can still be the preceding day. Hour marks stay on the UTC
+`timezone` is an IANA zone name, editable in Settings > Retention. New installs
+use the `TZ` environment value when set and UTC otherwise. Empty follows the
+server's own zone, reported as `server_timezone` by `GET /api/settings`.
+Deployment overrides are listed in
+[Environment variables](DEPLOYMENT.md#environment-variables). Day marks and
+the Snapshots page day groups use this same zone, which the page names beside
+the groups. Two operators therefore see the same day boundaries. The survivor
+is nearest midnight and can be on either side of it. Hour marks stay on the UTC
 hour. Unknown zones are rejected by the Settings API. An invalid stored policy
 falls back to deployment defaults; an invalid environment timezone falls back
-to the server's zone.
+to UTC.
 
 Manual snapshots (`scheduled = 0`) are never pruned; scheduled snapshots
 follow the tiers whether or not they carry a label. `SnapshotSummary.tier` is
-`recent | hourly | daily | manual`. The old `retention` count setting is
-removed from the API and the GUI and is no longer read by the code.
+`recent | hourly | daily | manual`; `SnapshotSummary.retention_day` is the
+configured-zone calendar key used by the Snapshots page. The old `retention`
+count setting is removed from the API and the GUI and is no longer read by the
+code.
 
 Snapshot resource blobs are stored gzip-compressed (`resources_gz` BLOB);
 existing rows are migrated at startup in place, in batches, without blocking
@@ -70,8 +72,9 @@ available snapshot history:
   the newest differing pair when retention has pruned one of those two
   (`"pre_log_differing_pair"`), and lists the logged rows about the finding's
   neighbourhood after that diff as a separate block, then caps the combined list.
-  Logged occurrences remain visible even when their summaries match the
-  snapshot diff, including when the fallback diff overlaps a logged interval.
+  A retained row for the exact bracketing snapshot pair is not repeated.
+  Genuinely later occurrences remain visible even when their summaries match
+  the snapshot diff.
 - the Overview feed recovers the part of its 24 h window that predates the log
   by diffing the snapshots that do cover it, newest first and bounded. Recovered
   changes use the newer snapshot's observation time when ranked alongside

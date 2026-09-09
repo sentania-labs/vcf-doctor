@@ -44,6 +44,7 @@ class SnapshotSummary(BaseModel):
     scheduled: bool = False  # True when produced by the scheduler; eligible for pruning
     resource_count: int = 0
     tier: Tier = "recent"  # computed on read from age and the retention policy
+    retention_day: str = ""
 
 
 class Snapshot(SnapshotSummary):

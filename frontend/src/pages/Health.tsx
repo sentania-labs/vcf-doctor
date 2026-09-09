@@ -85,7 +85,9 @@ function describeScope(scope: RelatedWindow): string {
       : `Since the first snapshot ${formatDateTime(scope.since)} (${scans}${capped})`
   }
   if (scope.basis === 'pre_log_bracketing_pair' || scope.basis === 'pre_log_differing_pair') {
-    const from = scope.log_starts_at ? `The change log only starts ${formatDateTime(scope.log_starts_at)}, after this finding appeared` : 'The change log starts after this finding appeared'
+    const from = scope.log_starts_at
+      ? `The retained change log does not cover this finding's introducing interval (coverage begins ${formatDateTime(scope.log_starts_at)})`
+      : `The retained change log does not cover this finding's introducing interval`
     const pair = scope.basis === 'pre_log_bracketing_pair' ? 'the snapshots around first observation' : 'newest snapshots that differ'
     return scope.since && scope.until
       ? `${from}: ${pair}, ${formatDateTime(scope.since)} to ${formatTime(scope.until)}, then the change log`

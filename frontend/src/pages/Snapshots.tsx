@@ -1,18 +1,19 @@
 import { useMemo, useState } from 'react'
 import { Camera, Search, Trash2 } from 'lucide-react'
 import type { SnapshotSummary, SnapshotTier } from '@/types'
-import { createSnapshot, deleteSnapshot, getSnapshots } from '@/api'
+import { createSnapshot, deleteSnapshot, getSettings, getSnapshots } from '@/api'
 import { useAsync } from '@/hooks/useAsync'
 import { useAppState } from '@/state/AppState'
 import { Badge, Button, Card, Dialog, EmptyState, ErrorState, Field, Input, PageHeader, Select, Skeleton } from '@/components/ui'
 import { TierBadge, snapshotTier, tierLabel } from '@/components/domain'
-import { formatDateTime, formatTime, groupByDay, relativeTime } from '@/lib/format'
+import { formatDateTime, formatTime, groupByDayKey, relativeTime } from '@/lib/format'
 
 const TIER_ORDER: SnapshotTier[] = ['manual', 'recent', 'hourly', 'daily']
 
 export default function SnapshotsPage() {
   const { connectionId, connections, refreshKey, refreshAll } = useAppState()
   const snaps = useAsync(() => getSnapshots(connectionId), [connectionId, refreshKey])
+  const settings = useAsync(() => getSettings(), [refreshKey])
   const [open, setOpen] = useState(false)
   const [label, setLabel] = useState('')
   const [target, setTarget] = useState(connectionId ?? connections[0]?.id ?? '')
@@ -21,6 +22,9 @@ export default function SnapshotsPage() {
   const [confirm, setConfirm] = useState<string | null>(null)
   const [q, setQ] = useState('')
   const connName = (id: string) => connections.find(c => c.id === id)?.name ?? id
+  const groupingTimezone = settings.data?.retention_policy.timezone
+    || settings.data?.server_timezone
+    || 'UTC'
 
   const capture = async () => {
     const conn = connectionId ?? target
@@ -50,7 +54,10 @@ export default function SnapshotsPage() {
   const filtered = useMemo(() => !needle ? list : list.filter(s =>
     [s.label, tierLabel[snapshotTier(s)], connName(s.connection_id), formatDateTime(s.created_at), relativeTime(s.created_at)]
       .some(t => t.toLowerCase().includes(needle))), [list, needle]) // eslint-disable-line react-hooks/exhaustive-deps
-  const groups = useMemo(() => groupByDay(filtered, s => s.created_at), [filtered])
+  const groups = useMemo(
+    () => groupByDayKey(filtered, s => s.retention_day, groupingTimezone),
+    [filtered, groupingTimezone],
+  )
 
   return (
     <div className="anim-fade-up">
@@ -70,6 +77,7 @@ export default function SnapshotsPage() {
             <div className="flex flex-wrap items-baseline gap-x-5 gap-y-2 mb-5 text-sm">
               <span className="text-2xl font-semibold tracking-tight tnum">{list.length} <span className="text-base text-muted font-medium">{list.length === 1 ? 'snapshot' : 'snapshots'}</span></span>
               {TIER_ORDER.filter(t => tierCounts[t] > 0).map(t => <span key={t} className="text-muted"><span className="font-semibold text-fg tnum">{tierCounts[t]}</span> {tierLabel[t].toLowerCase()}</span>)}
+              <span className="text-muted">Day groups: <span className="font-medium text-fg">{groupingTimezone}</span></span>
               {needle ? <span className="text-muted ml-auto">{filtered.length} match{filtered.length === 1 ? '' : 'es'} <button className="text-accent hover:underline ml-1" onClick={() => setQ('')}>clear</button></span> : null}
             </div>
             {filtered.length === 0 ? (

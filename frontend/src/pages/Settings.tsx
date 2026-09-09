@@ -67,15 +67,15 @@ function AccessCard() {
   )
 }
 
-const DEFAULT_RETENTION: RetentionPolicy = { recent_days: 14, hourly_days: 30, daily_days: 365, timezone: '' }
+const DEFAULT_RETENTION: RetentionPolicy = { recent_days: 14, hourly_days: 30, daily_days: 365, timezone: 'UTC' }
 
 // Zones offered for the daily tier's day marks. The browser's full IANA list when it has one
 // (every current browser does), else a short list. UTC is added by hand: browsers leave it out
 // of that list, and a container running UTC is the common case. The stored value is always
 // offered so a zone this browser does not know is not silently swapped on save.
-function zoneOptions(current: string, browser: string): string[] {
+function zoneOptions(current: string): string[] {
   const supported = (Intl as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf
-  const all = supported ? supported('timeZone') : ['America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'Europe/London', 'Europe/Berlin', 'Asia/Kolkata', 'Asia/Tokyo', 'Australia/Sydney', browser]
+  const all = supported ? supported('timeZone') : ['America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'Europe/London', 'Europe/Berlin', 'Asia/Kolkata', 'Asia/Tokyo', 'Australia/Sydney']
   return [...new Set(['UTC', ...all, current].filter(Boolean))].sort()
 }
 const DEFAULT_EVENTS: EventPolicy = { retention_hours: 48, row_cap: 250000 }
@@ -94,9 +94,8 @@ function RetentionCard({ value, onChange, serverTimezone }: { value: RetentionPo
   const problem = retentionProblem(value)
   const set = (k: 'recent_days' | 'hourly_days' | 'daily_days') => (e: ChangeEvent<HTMLInputElement>) => onChange({ ...value, [k]: e.target.value === '' ? 0 : Math.floor(Number(e.target.value)) })
   const cls = (k: keyof RetentionPolicy) => problem?.field === k ? 'border-critical focus:border-critical focus:ring-critical/25' : undefined
-  const browser = Intl.DateTimeFormat().resolvedOptions().timeZone
   const effective = value.timezone || serverTimezone || 'UTC'
-  const zones = zoneOptions(value.timezone, browser)
+  const zones = zoneOptions(value.timezone)
   return (
     <Card>
       <CardHeader title="Retention" subtitle="How long scheduled snapshots are kept, thinning out as they age. Applied per connection after every scan."
@@ -121,8 +120,7 @@ function RetentionCard({ value, onChange, serverTimezone }: { value: RetentionPo
             </Select>
           </Field>
           <div className="text-xs text-faint sm:pt-6 space-y-1">
-            <p>Day marks are midnight {effective}.</p>
-            {effective !== browser ? <p>This browser shows times in {browser}, so the kept daily snapshot can appear under the neighbouring day here.</p> : <p>That matches this browser, so daily snapshots group under the day they were taken.</p>}
+            <p>Daily retention and Snapshots page groups use midnight {effective}.</p>
           </div>
         </div>
         {problem ? <p className="text-sm text-critical bg-critical-bg rounded-md px-3 py-2" role="alert">{problem.message}</p>

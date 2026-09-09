@@ -195,6 +195,27 @@ def test_day_marks_follow_the_policy_timezone(tmp_path):
     assert [t.hour for t in _kept(conn.id)[:-1]] == [0, 0, 0]
 
 
+def test_retention_survivor_carries_its_configured_calendar_day(tmp_path):
+    db.reset_for_tests(str(tmp_path / "t.db"))
+    conn = _conn()
+    policy = RetentionPolicy(
+        recent_days=1, hourly_days=1, daily_days=30, timezone="Asia/Tokyo"
+    )
+    store.set_retention_policy(policy)
+    candidates = [
+        datetime(2026, 1, 17, 14, 40, tzinfo=UTC),
+        datetime(2026, 1, 17, 15, 5, tzinfo=UTC),
+    ]
+    ids = _bulk_insert(conn.id, candidates)
+
+    assert store.apply_retention(conn.id, policy, at=AT) == 1
+
+    survivor = store.list_snapshots(conn.id)[0]
+    assert survivor.id == ids[1]
+    assert survivor.created_at.date().isoformat() == "2026-01-17"
+    assert survivor.retention_day == "2026-01-18"
+
+
 def test_day_marks_survive_a_dst_change(tmp_path):
     """A 23-hour local day (spring forward) still keeps one snapshot per local day."""
     db.reset_for_tests(str(tmp_path / "t.db"))

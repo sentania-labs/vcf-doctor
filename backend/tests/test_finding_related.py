@@ -181,6 +181,64 @@ def test_change_retention_recovers_the_cause_from_surviving_manual_snapshots(
     ]
 
 
+def test_retained_cutoff_does_not_duplicate_the_bracketing_log_interval(client, monkeypatch):
+    cutoff = datetime(2026, 8, 10, 10, tzinfo=UTC)
+    now = cutoff + timedelta(days=30)
+    cid = _connection(client, 0)
+    host = Resource(
+        id="host:cutoff",
+        type="host",
+        name="cutoff-host",
+        source="test",
+        properties={"connectionState": "connected"},
+    )
+    finding = Finding(
+        id="test:cutoff",
+        check_id="VM_SNAPSHOT_STALE",
+        severity="warning",
+        title="Persistent finding",
+        summary="The finding remains present",
+        resource_id=host.id,
+        resource_type=host.type,
+        resource_name=host.name,
+    )
+    monkeypatch.setattr(store, "now", lambda: cutoff - timedelta(minutes=10))
+    previous = store.save_snapshot(cid, [host], "before", scheduled=False)
+    store.save_findings(previous.id, [])
+    states = [
+        (cutoff + timedelta(minutes=5), "disconnected"),
+        (cutoff + timedelta(minutes=20), "connected"),
+        (cutoff + timedelta(minutes=35), "disconnected"),
+    ]
+    for observed_at, state in states:
+        current_host = host.model_copy(deep=True)
+        current_host.properties["connectionState"] = state
+        monkeypatch.setattr(store, "now", lambda at=observed_at: at)
+        current = store.save_snapshot(cid, [current_host], state, scheduled=False)
+        store.save_findings(current.id, [finding])
+        changes = scheduler.compute_changes(previous.resources, current.resources)
+        store.save_changes(cid, previous.id, current.id, current.created_at, changes)
+        previous = current
+        host = current_host
+
+    policy = RetentionPolicy(recent_days=1, hourly_days=7, daily_days=30)
+    store.set_retention_policy(policy)
+    monkeypatch.setattr(store, "now", lambda: now)
+    store.apply_retention(cid, policy, at=now)
+    assert store.count_changes(cid) == 3
+
+    response = client.get(f"/api/findings/{finding.id}/related?connection_id={cid}")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["window"]["basis"] == "pre_log_bracketing_pair"
+    assert datetime.fromisoformat(body["window"]["log_starts_at"]) == cutoff
+    assert [change["summary"] for change in body["changes"]] == [
+        "connectionState connected -> disconnected",
+        "connectionState disconnected -> connected",
+        "connectionState connected -> disconnected",
+    ]
+
+
 def test_rows_ending_at_the_pre_finding_snapshot_are_excluded(client):
     """A row stamped with the snapshot before the finding appeared belongs to the
     diff that ended there (Z -> A), not to the A -> B interval that introduced it."""

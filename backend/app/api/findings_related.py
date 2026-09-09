@@ -259,6 +259,12 @@ def related_changes(connection_id: str, finding: Finding, resources: list[Resour
                     first.interval_start,
                     seen_at,
                 )
+                rows = [
+                    row
+                    for row in rows
+                    if (row.from_snapshot_id, row.to_snapshot_id)
+                    != (first.interval_start_id, first.seen_id)
+                ]
             else:
                 basis = "pre_log_differing_pair"
                 diff, pair_since, pair_until = _latest_differing_pair(connection_id)

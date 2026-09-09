@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import db, timezones
+from app.config import Settings, settings
 from app.main import app
 from app.snapshots import store
 
@@ -24,11 +25,12 @@ def _put(client, policy):
 def test_defaults_come_from_config_and_old_count_is_ignored(client):
     db.set_setting("retention", 2)  # a pre-tier database that only has the old count
     body = client.get("/api/settings").json()
+    default_timezone = store.default_retention_policy().timezone
     assert body["retention_policy"] == {
         "recent_days": 14,
         "hourly_days": 30,
         "daily_days": 365,
-        "timezone": "",  # empty: day marks follow the server's own zone
+        "timezone": default_timezone,
     }
     assert body["server_timezone"]  # the GUI names the default it is offering
     assert body["event_policy"] == {"retention_hours": 48, "row_cap": 250000}
@@ -44,13 +46,13 @@ def test_partial_update_merges_and_persists(client):
         "recent_days": 14,
         "hourly_days": 60,
         "daily_days": 400,
-        "timezone": "",
+        "timezone": settings.retention_timezone,
     }
     assert db.get_setting("retention_policy") == {
         "recent_days": 14,
         "hourly_days": 60,
         "daily_days": 400,
-        "timezone": "",
+        "timezone": settings.retention_timezone,
     }
     # Equal tiers are allowed (a tier of zero width simply does nothing).
     assert _put(client, {"recent_days": 60}).status_code == 200
@@ -108,6 +110,14 @@ def test_timezone_is_stored_and_shown_with_the_server_default(client):
     assert timezones.zone("") is timezones.zone(timezones.server_timezone())
 
 
+def test_deployment_default_uses_tz_then_utc(monkeypatch):
+    monkeypatch.delenv("VCF_DOCTOR_RETENTION_TIMEZONE", raising=False)
+    monkeypatch.setenv("TZ", "America/Chicago")
+    assert Settings().retention_timezone == "America/Chicago"
+    monkeypatch.delenv("TZ")
+    assert Settings().retention_timezone == "UTC"
+
+
 def test_an_unknown_stored_timezone_does_not_break_a_retention_pass():
     """A zone this machine no longer knows falls back to UTC with a warning
     rather than failing every scan's retention pass."""
@@ -119,13 +129,11 @@ def test_an_unknown_stored_timezone_does_not_break_a_retention_pass():
 def test_an_unknown_environment_timezone_degrades_to_utc_instead_of_failing(client, monkeypatch):
     """A typo in VCF_DOCTOR_RETENTION_TIMEZONE on a fresh install must not turn
     every snapshot listing and retention pass into a validation error."""
-    from app.config import settings
-
     monkeypatch.setattr(settings, "retention_timezone", "Amercia/Chicago")
     db.set_setting(store.RETENTION_POLICY_KEY, None)
 
     policy = store.retention_policy()
 
-    assert policy.timezone == ""
+    assert policy.timezone == "UTC"
     assert client.get("/api/settings").status_code == 200
     assert client.get("/api/snapshots").status_code == 200

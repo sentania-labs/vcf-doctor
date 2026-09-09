@@ -23,7 +23,7 @@ export interface Change {
 export type SnapshotTier = 'manual' | 'recent' | 'hourly' | 'daily'
 export interface SnapshotSummary {
   id: string; created_at: string; label: string; connection_id: string
-  scheduled: boolean; resource_count: number; tier: SnapshotTier
+  scheduled: boolean; resource_count: number; tier: SnapshotTier; retention_day: string
 }
 // A persisted diff row from GET /changes/log (newest first). observed_at is the TO snapshot time.
 export type ChangeLogEntry = Change & { id: string; observed_at: string; from_snapshot_id: string; to_snapshot_id: string }
@@ -116,7 +116,7 @@ export interface Overview {
 }
 export interface ConnectionTestResult { ok: boolean; message: string; version?: string | null; build?: string | null }
 // Snapshot retention in days per tier; changes follow daily_days.
-// timezone: IANA zone whose midnights are the daily tier's day marks; empty follows the server (issue #28).
+// timezone: IANA zone whose midnights define retention and snapshot day groups.
 export interface RetentionPolicy { recent_days: number; hourly_days: number; daily_days: number; timezone: string }
 export interface EventPolicy { retention_hours: number; row_cap: number }
 export interface EventMaintenanceStatus { migration_required: boolean; last_run: string | null; last_error: string | null; pages_reclaimed: number }

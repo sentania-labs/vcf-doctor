@@ -1,6 +1,6 @@
 import type { SnapshotSummary } from '@/types'
 import { apiGet, apiSend } from './client'
-import { qs } from '@/lib/format'
+import { dayKey, qs } from '@/lib/format'
 import { USE_MOCKS, delay, mockEstate, mockState } from './mocks'
 
 export function getSnapshots(connectionId?: string | null): Promise<SnapshotSummary[]> {
@@ -15,9 +15,12 @@ export function createSnapshot(connectionId: string, label: string): Promise<Sna
   if (USE_MOCKS) {
     const estate = mockEstate(connectionId)[0]
     if (!estate) return Promise.reject(new Error('Unknown connection'))
+    const created_at = new Date().toISOString()
+    const timezone = mockState.settings.retention_policy.timezone || mockState.settings.server_timezone
     const snap: SnapshotSummary = {
-      id: `snap-${connectionId}-${mockState.nextId++}`, created_at: new Date().toISOString(), label: label || 'Manual',
+      id: `snap-${connectionId}-${mockState.nextId++}`, created_at, label: label || 'Manual',
       connection_id: connectionId, scheduled: false, resource_count: estate.resources.length, tier: 'manual',
+      retention_day: dayKey(created_at, timezone),
     }
     estate.snapshots.unshift(snap)
     return delay(snap, 900)

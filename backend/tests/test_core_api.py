@@ -120,12 +120,13 @@ def test_overview_shape(client):
 
 def test_settings_retention_policy_roundtrip(client):
     body = client.get("/api/settings").json()
+    default_timezone = store.default_retention_policy().timezone
     assert "retention" not in body
     assert body["retention_policy"] == {
         "recent_days": 14,
         "hourly_days": 30,
         "daily_days": 365,
-        "timezone": "",
+        "timezone": default_timezone,
     }
     r = client.put("/api/settings", json={"retention_policy": {"recent_days": 7}})
     assert r.status_code == 200, r.text
@@ -133,7 +134,7 @@ def test_settings_retention_policy_roundtrip(client):
         "recent_days": 7,
         "hourly_days": 30,
         "daily_days": 365,
-        "timezone": "",
+        "timezone": default_timezone,
     }
     assert client.get("/api/settings").json()["retention_policy"]["recent_days"] == 7
     # The old count is neither accepted nor echoed.

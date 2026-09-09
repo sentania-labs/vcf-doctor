@@ -7,6 +7,7 @@ import type {
 const now = Date.now()
 const minutesAgo = (m: number) => new Date(now - m * 60_000).toISOString()
 const hoursAgo = (h: number) => minutesAgo(h * 60)
+const retentionDay = (iso: string) => iso.slice(0, 10)
 
 // Scheduled snapshot series shaped like the retention policy leaves it: every scan for the
 // last few hours (recent), one per few hours for the last two days (hourly), one per day
@@ -15,7 +16,8 @@ function tieredSnapshots(src: string, idPrefix: string, resourceCount: number, s
   const out: SnapshotSummary[] = []
   let seq = startSeq
   const add = (minAgo: number, tier: SnapshotTier, label = 'Scheduled', count = resourceCount) => {
-    out.push({ id: `${idPrefix}-${String(seq--).padStart(3, '0')}`, created_at: minutesAgo(minAgo), label, connection_id: src, scheduled: true, resource_count: count, tier })
+    const created_at = minutesAgo(minAgo)
+    out.push({ id: `${idPrefix}-${String(seq--).padStart(3, '0')}`, created_at, label, connection_id: src, scheduled: true, resource_count: count, tier, retention_day: retentionDay(created_at) })
   }
   for (let m = 102; m <= 12 * 60; m += 40) add(m, 'recent', 'Scheduled', resourceCount - 1)            // ~17 rows over the last 12 h
   for (let h = 15; h <= 48; h += 3) add(h * 60, 'hourly', 'Scheduled', resourceCount - 1)              // 12 rows, hourly tier
@@ -232,7 +234,11 @@ function buildWorkloadDomain(): MockEstate {
     { id: 'snap-vc01-002', created_at: minutesAgo(62), label: 'Scheduled', connection_id: src, scheduled: true, resource_count: r.length - 1, tier: 'recent' },
     { id: 'snap-vc01-001', created_at: minutesAgo(180), label: 'Baseline', connection_id: src, scheduled: false, resource_count: r.length - 1, tier: 'manual' },
     ...tieredSnapshots(src, 'snap-vc01-h', r.length, 99),
-  ] satisfies SnapshotSummary[]).sort((a, b) => b.created_at.localeCompare(a.created_at))
+  ].map((s): SnapshotSummary => ({
+    ...s,
+    tier: s.tier as SnapshotTier,
+    retention_day: retentionDay(s.created_at),
+  })) satisfies SnapshotSummary[]).sort((a, b) => b.created_at.localeCompare(a.created_at))
 
   const changes: Change[] = [
     { change_type: 'modified', resource_id: hosts[2].id, resource_type: 'host', resource_name: hosts[2].name, significance: 'high', summary: 'Host connection state changed', property_changes: { connectionState: { old: 'connected', new: 'disconnected' }, powerState: { old: 'poweredOn', new: 'unknown' } } },
@@ -406,7 +412,11 @@ function buildManagementDomain(): MockEstate {
       { id: 'snap-vc00-001', created_at: minutesAgo(130), label: 'Scheduled', connection_id: src, scheduled: true, resource_count: r.length, tier: 'recent' },
       { id: 'snap-vc00-000', created_at: hoursAgo(26), label: 'Scheduled', connection_id: src, scheduled: true, resource_count: r.length, tier: 'hourly' },
       { id: 'snap-vc00-d01', created_at: hoursAgo(74), label: 'Scheduled', connection_id: src, scheduled: true, resource_count: r.length, tier: 'daily' },
-    ],
+    ].map((s): SnapshotSummary => ({
+      ...s,
+      tier: s.tier as SnapshotTier,
+      retention_day: retentionDay(s.created_at),
+    })),
     changes: [
       { change_type: 'modified', resource_id: hosts[1].id, resource_type: 'host', resource_name: hosts[1].name, significance: 'low', summary: 'Host resource usage changed', property_changes: { cpuUsagePct: { old: 31, new: 35 } } },
     ],
@@ -427,7 +437,8 @@ function buildManagementDomain(): MockEstate {
 export const mockState = {
   estates: [buildWorkloadDomain(), buildManagementDomain()] as MockEstate[],
   settings: {
-    retention_policy: { recent_days: 14, hourly_days: 30, daily_days: 365 },
+    retention_policy: { recent_days: 14, hourly_days: 30, daily_days: 365, timezone: 'UTC' },
+    server_timezone: 'UTC',
     event_policy: { retention_hours: 48, row_cap: 250000 },
     event_maintenance: { migration_required: false, last_run: hoursAgo(1), last_error: null, pages_reclaimed: 36 },
     changes_min_significance: 'low',
