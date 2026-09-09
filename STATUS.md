@@ -1,6 +1,6 @@
 # STATUS
 
-Current state of the product against `main`. Updated 2026-09-08. Every claim
+Current state of the product against `main`. Updated 2026-09-09. Every claim
 here was checked against the code on that date; the earlier hackathon-era
 version of this file is in git history.
 
@@ -40,10 +40,14 @@ version of this file is in git history.
   numbers (#17, #36).
 - Python 3.14 base image, pip dropped from the runtime image (#52).
 - Build identity is available (#60); see the [deployment contract](docs/DEPLOYMENT.md#contract).
-- Live lab operation against real vCenters is confirmed. Issue #58 records
+- Live lab operation against real vCenters is confirmed. Issue #58 recorded
   1,194,962 event rows and a 393 MB events table collected over 4.6 days from
-  that deployment (evidence checked 2026-09-08).
-- 534 backend tests pass (`make test`, 2026-09-08).
+  that deployment (evidence checked 2026-09-08); #61 gave events their own
+  retention (48 hours, 250,000 rows per connection, both in Settings) with
+  bounded compaction, and capture checkpoints that retry gaps (#27).
+- Event capture tolerates managed object types the installed pyVmomi does
+  not define, such as `ContentLibrary` on vCenter 9.1 (#65).
+- 584 backend tests pass (`make test`, 2026-09-09).
 
 ## Broken
 

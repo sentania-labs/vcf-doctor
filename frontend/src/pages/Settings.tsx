@@ -136,7 +136,7 @@ function EventsRetentionCard({ value, onChange, settings }: { value: EventPolicy
         action={problem ? <Badge tone="critical"><AlertTriangle size={11} /> Check values</Badge> : <Badge tone="ok" dot>Valid</Badge>} />
       <div className="px-5 pb-5 space-y-4">
         <div className="grid sm:grid-cols-2 gap-4">
-          <Field label="Keep events for (hours)" hint="Events older than this are removed after a scan. Default: 48 hours.">
+          <Field label="Keep events for (hours)" hint="Events older than this are removed after a scan. A connection's first capture also reaches this far back. Default: 48 hours.">
             <Input type="number" min={1} max={8760} inputMode="numeric" value={value.retention_hours || ''} onChange={set('retention_hours')} aria-invalid={problem?.field === 'retention_hours'} className={problem?.field === 'retention_hours' ? 'border-critical focus:border-critical focus:ring-critical/25' : undefined} />
           </Field>
           <Field label="Maximum rows per connection" hint="A hard backstop after time-based pruning. The newest rows are kept. Default: 250,000.">

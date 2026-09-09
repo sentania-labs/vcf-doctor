@@ -72,14 +72,32 @@ when event capture fails. Time-based pruning runs first, then the row cap
 keeps the newest remaining rows. Saving settings takes effect at the next
 retention pass. Existing databases gain the defaults and supporting tables
 automatically at startup, so existing history is subject to these limits.
-A result that reaches the 20,000-item vCenter safety limit is split into
-smaller time windows. If the
-minimum window still reaches the limit, its interval is persisted, shown on
-the Events page, and retried on later scans. Overlapping gaps are coalesced;
-gaps covered by the checkpoint window are not queried separately. Recorded
-gaps expire when their end precedes the retention cutoff. Before retry selection,
-surviving gaps are trimmed to that cutoff so a prolonged outage does not trigger
-queries for expired history.
+A result that reaches the collector's 20,000-item safety cap is split into
+smaller time windows. If the minimum window still reaches the cap, its
+interval is persisted, shown on the Events page, and retried on later scans.
+Overlapping gaps are coalesced; gaps covered by the checkpoint window are not
+queried separately. Recorded gaps expire when their end precedes the retention
+cutoff. Before retry selection, surviving gaps are trimmed to that cutoff so a
+prolonged outage does not trigger queries for expired history.
+
+A vCenter newer than the installed pyVmomi can reference a managed object
+type pyVmomi does not define (vCenter 9.1 returns `ContentLibrary` entities;
+pyVmomi 9.1.0.0 has no such type). pyVmomi fails the whole page on one such
+reference, which used to fail the capture for that connection. The collector
+registers a placeholder type for the name pyVmomi reports, logs a warning
+naming the read (`ReadNextEvents` or `ReadNextTasks`), the type and the
+pyVmomi version, rewinds and reads the window again. Known names in
+[KNOWN_MISSING_TYPES](../backend/app/collectors/vsphere/events.py) are
+registered before the first fetch. Rows for such an entity keep the
+lower-cased type as `resource_type` (for example `contentlibrary`) and are not
+joined to a snapshot resource. An unknown event class produces the same
+initial pyVmomi error but cannot use a managed object placeholder. That capture
+remains pending for retry, and its warning keeps the real event class name on
+the first and later scans instead of reporting pyVmomi's internal `type` key.
+The unsuccessful placeholder remains in pyVmomi's process-wide registry until
+restart; the collector does not modify pyVmomi's private maps to remove it.
+Hitting that cap in the smallest query window, or a failed task query, is
+logged as a warning as well as being recorded as an incomplete interval.
 
 Pruning is followed by bounded `incremental_vacuum` maintenance. Settings shows
 its last run, reclaimed page count, and last error. A scan never runs a full
