@@ -185,27 +185,73 @@ jobs:
 
       # VCF_DOCTOR_TEST_FIXTURES is the test-only hook that lets a connection
       # of kind "fixture" (bundled snapshot data) stand in for a vCenter.
+      #
+      # The stack is PostgreSQL plus the image under test, wired the way
+      # docker-compose.yml wires them: the database password is a file mounted
+      # read only, never an environment variable, and the schema is applied by a
+      # one-shot run of the same image before the console starts.
       - name: Smoke test (fixture collector, no vCenter)
+        env:
+          DATABASE_URL: postgresql://vcf_doctor@smoke-db:5432/vcf_doctor
         run: |
+          docker network create smoke-net
+          mkdir -p "$RUNNER_TEMP/secrets"
+          head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' > "$RUNNER_TEMP/secrets/db-password"
+          chmod 0644 "$RUNNER_TEMP/secrets/db-password"
+          docker run -d --name smoke-db --network smoke-net \
+            -e POSTGRES_USER=vcf_doctor -e POSTGRES_DB=vcf_doctor \
+            -e POSTGRES_PASSWORD_FILE=/run/secrets/db-password \
+            -v "$RUNNER_TEMP/secrets:/run/secrets:ro" \
+            -v smoke-db-data:/var/lib/postgresql/data \
+            postgres:16
+          for i in $(seq 1 60); do
+            docker exec smoke-db pg_isready -U vcf_doctor -d vcf_doctor -q && break
+            if [ "$i" = 60 ]; then echo "postgres never became ready"; docker logs smoke-db; exit 1; fi
+            sleep 1
+          done
+          # The one-shot migration step, exactly as compose runs it.
+          docker run --rm --network smoke-net \
+            -e VCF_DOCTOR_DATABASE_URL="$DATABASE_URL" \
+            -e VCF_DOCTOR_DB_PASSWORD_FILE=/run/secrets/db-password \
+            -v "$RUNNER_TEMP/secrets:/run/secrets:ro" \
+            vcf-doctor:ci python3 -m app.migrate upgrade | tee migrate.log
+          grep -q '0001_initial' migrate.log
           # Trust the whole docker bridge so the forwarded-header checks below see a trusted peer.
-          docker run -d --name smoke -p 8000:8000 \
+          # Two workers: the single-writer ceiling that forced one replica is gone.
+          docker run -d --name smoke --network smoke-net -p 8000:8000 \
             -e VCF_DOCTOR_TEST_FIXTURES=1 -e VCF_DOCTOR_ADMIN_PASSWORD=smoke-test-pass \
             -e VCF_DOCTOR_TRUSTED_PROXIES=172.16.0.0/12 \
-            vcf-doctor:ci
-          for i in $(seq 1 30); do
+            -e VCF_DOCTOR_DATABASE_URL="$DATABASE_URL" \
+            -e VCF_DOCTOR_DB_PASSWORD_FILE=/run/secrets/db-password \
+            -v "$RUNNER_TEMP/secrets:/run/secrets:ro" \
+            -v smoke-data:/data \
+            vcf-doctor:ci \
+            uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-proxy-headers --workers 2
+          for i in $(seq 1 60); do
             curl -fsS localhost:8000/api/health && break
-            if [ "$i" = 30 ]; then echo "container never became healthy"; exit 1; fi
+            if [ "$i" = 60 ]; then echo "container never became healthy"; docker logs smoke; exit 1; fi
             sleep 1
           done
           curl -fsS localhost:8000/api/health | grep -q '"status":"ok"'
+          # The database is reachable and migrated, and one worker holds the
+          # scheduler lock, which every worker reports.
+          curl -fsS localhost:8000/api/health | grep -q '"database":true'
+          curl -fsS localhost:8000/api/health | grep -q '"scheduler":true'
+          # One uvicorn master with two worker processes under it. Uvicorn spawns
+          # workers through multiprocessing, so a worker's command line is the
+          # spawn helper rather than "uvicorn"; if that ever changes this check
+          # fails loudly rather than passing on a single worker.
+          test "$(docker top smoke -o pid,args | grep -c 'app.main:app')" = 1
+          test "$(docker top smoke -o pid,args | grep -c -- '--multiprocessing-fork')" = 2
           VERSION='${{ steps.identity.outputs.version }}' SHA="$GITHUB_SHA" BUILT_AT='${{ steps.identity.outputs.built_at }}' \
             python3 -c 'import json,os,urllib.request; v=json.load(urllib.request.urlopen("http://localhost:8000/api/version")); assert v["version"] == os.environ["VERSION"]; assert v["sha"] == os.environ["SHA"]; assert v["built_at"] == os.environ["BUILT_AT"]'
           VERSION='${{ steps.identity.outputs.version }}' \
             python3 -c 'import json,os,urllib.request; h=json.load(urllib.request.urlopen("http://localhost:8000/api/health")); assert h["version"] == os.environ["VERSION"]'
           curl -fsS localhost:8000/ | grep -q '<title>VCF Doctor</title>'
-          # Unauthenticated API access is refused; traversal cannot reach the database.
+          # Unauthenticated API access is refused; traversal cannot reach the
+          # encryption key file, which is all the volume still holds.
           test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8000/api/overview)" = 401
-          curl -s --path-as-is localhost:8000/../data/vcf-doctor.db | grep -q '<title>VCF Doctor</title>'
+          curl -s --path-as-is localhost:8000/../data/vcf-doctor.key | grep -q '<title>VCF Doctor</title>'
           # Log in with the seeded password. A fresh install has no connections.
           curl -fsS -c cj -H 'content-type: application/json' -d '{"password":"smoke-test-pass"}' localhost:8000/api/auth/login
           test "$(curl -fsS -b cj localhost:8000/api/connections)" = '[]'
@@ -228,10 +274,27 @@ jobs:
           test "$(curl -s -o /dev/null -w '%{http_code}' -H 'content-type: application/json' -H 'X-Forwarded-For: 203.0.113.6' -d '{"password":"smoke-test-pass"}' localhost:8000/api/auth/login)" = 200
           # Runs as a non-root user.
           test "$(docker exec smoke id -u)" = 10001
+          # A restart keeps its history: the connection, its snapshot and the
+          # 51 fixture resources are all still there afterwards.
+          docker restart smoke
+          for i in $(seq 1 60); do
+            curl -fsS localhost:8000/api/health >/dev/null && break
+            if [ "$i" = 60 ]; then echo "container did not come back"; docker logs smoke; exit 1; fi
+            sleep 1
+          done
+          curl -fsS -c cj2 -H 'content-type: application/json' -d '{"password":"smoke-test-pass"}' localhost:8000/api/auth/login
+          curl -fsS -b cj2 localhost:8000/api/connections | grep -q '"Smoke"'
+          curl -fsS -b cj2 localhost:8000/api/overview | python3 -c 'import json,sys; o=json.load(sys.stdin); assert o["resource_total"] == 51, o["resource_total"]'
+          test "$(docker top smoke -o pid,args | grep -c -- '--multiprocessing-fork')" = 2
 
       - name: Container logs
         if: always()
-        run: docker logs smoke || true; docker rm -f smoke || true
+        run: |
+          docker logs smoke || true
+          docker logs smoke-db || true
+          docker rm -f smoke smoke-db || true
+          docker network rm smoke-net || true
+          docker volume rm -f smoke-db-data smoke-data || true
 
       # Uploaded only after scan and smoke passed, so the artifact is the
       # validated image and nothing else. Artifacts are scoped to the run, so a

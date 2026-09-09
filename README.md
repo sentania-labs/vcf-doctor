@@ -38,6 +38,10 @@ healthy and never runs anything. The console is read-only by design.
   ENVIRONMENT and are never executed.
 - **Retention that thins with age.** Every scan for 14 days, hourly for 30,
   daily for a year, all adjustable in Settings. Manual snapshots are kept.
+- **PostgreSQL underneath.** One database, one dialect, no single-writer
+  ceiling, so the console runs with more than one worker and more than one
+  replica. Exactly one of them holds the advisory lock that runs scheduled
+  scans.
 - **Sensible defaults.** Every setting has a GUI control and a working default.
   A fresh install runs with nothing pre-configured. There is no
   sample-data mode; it expects a live vCenter.
@@ -50,13 +54,20 @@ healthy and never runs anything. The console is read-only by design.
 Read the [Getting Started guide](docs/GETTING_STARTED.md). The short version:
 
 ```bash
-# Quickstarts track latest. Deployments should pin an exact vX.Y.Z release.
-docker run -d --name vcf-doctor -p 8000:8000 -v vcf-doctor-data:/data \
-  ghcr.io/sentania-labs/vcf-doctor:latest
+git clone https://github.com/sentania-labs/vcf-doctor && cd vcf-doctor
+docker compose up -d
 ```
 
-Open http://localhost:8000, set the operator password, add a vCenter, and
-click Scan Now.
+That is self-contained: it brings up PostgreSQL on a named volume, generates a
+database password into a second volume, applies the schema migrations, and
+starts the console. Open http://localhost:8000, set the operator password, add
+a vCenter, and click Scan Now.
+
+The console stores everything in PostgreSQL, so a deployment that already runs
+one points at it instead. See the
+[deployment contract](docs/DEPLOYMENT.md#contract) and, for a lab moving off
+the old SQLite volume, the
+[one-shot import](docs/DEPLOYMENT.md#upgrading-a-lab-that-is-still-on-sqlite).
 
 ## Screenshots
 
@@ -71,7 +82,7 @@ click Scan Now.
 | Document | What it covers |
 |---|---|
 | [Getting Started](docs/GETTING_STARTED.md) | First run, password, first vCenter, first scan, where to look |
-| [Deployment](docs/DEPLOYMENT.md) | Image, port, volume, replica rules, every environment variable |
+| [Deployment](docs/DEPLOYMENT.md) | Image, port, the database and its shapes, migrations, the SQLite import, every environment variable |
 | [Security](docs/SECURITY.md) | Access model, secrets at rest, browser headers, CI gates, supply chain |
 | [Retention, change log and events](docs/RETENTION_EVENTS.md) | How snapshots thin out and what the change log and event store keep |
 | [Resource properties](docs/PROPERTIES.md) | The normalised inventory schema every check and diff keys on |
@@ -92,18 +103,24 @@ and the [deployment contract](docs/DEPLOYMENT.md#contract) for image tag behavio
 
 MIT. See [LICENSE](LICENSE).
 
-## Upgrade notes: event compaction
+## Upgrade notes: moving to PostgreSQL
 
-Existing SQLite databases with auto-vacuum disabled receive a one-time startup
-migration to incremental reclamation. This performs one full VACUUM before the
-scheduler starts, under the shared single-writer lock. Startup can take longer
-while the database is rewritten. Free space on the database volume must be at
-least 1.5 times the database file size. A durable migration marker and SQLite's
-mode prevent repeat rewrites; routine scan cleanup remains bounded.
+This release retires SQLite. A deployment upgrading from an earlier one needs a
+PostgreSQL database and one command to bring its history across:
 
-If space is insufficient, startup continues without compaction. Settings > Events
-retention shows `compaction unavailable: needs N MB free`. Free space and choose
-**Run compaction migration now** to retry the same guarded migration. Database
-writes wait for the migration to finish. The migration preserves events and
-settings; subsequent [event retention](docs/RETENTION_EVENTS.md#events-and-tasks)
-cleanup applies the independent limits to existing history too.
+```bash
+python3 -m app.import_sqlite --path /data/vcf-doctor.db
+```
+
+Connections, schedules, scan runs, snapshots, findings, changes, events and
+capture state all move; the old deployment's settings, including its operator
+password, win over the defaults a fresh instance seeded. Keep the encryption
+key with them, or the stored vCenter passwords need re-entering. Nothing writes
+back to the SQLite file, so the old volume stays a rollback option until you
+delete it. The procedure, and both Kubernetes shapes, are in
+[Deployment](docs/DEPLOYMENT.md#upgrading-a-lab-that-is-still-on-sqlite).
+
+The SQLite event-compaction migration that earlier releases ran at startup is
+gone with the engine. PostgreSQL's autovacuum reclaims space after retention
+deletes rows, so Settings no longer has a compaction control and nothing has to
+be run by hand.

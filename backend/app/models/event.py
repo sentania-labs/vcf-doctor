@@ -51,9 +51,3 @@ class EventCaptureStatus(BaseModel):
     task_history_unavailable: bool = False
     incomplete_intervals: list[IncompleteInterval] = Field(default_factory=list)
 
-
-class EventMaintenanceStatus(BaseModel):
-    migration_required: bool = False
-    last_run: datetime | None = None
-    last_error: str | None = None
-    pages_reclaimed: int = 0

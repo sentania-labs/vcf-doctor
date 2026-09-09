@@ -113,7 +113,7 @@ def set_weights(update: dict[str, Any]) -> dict[str, int]:
 
 def reset_weights() -> dict[str, int]:
     with db.transaction() as c:
-        c.execute("DELETE FROM settings WHERE key = ?", (WEIGHTS_KEY,))
+        c.execute("DELETE FROM settings WHERE key = %s", (WEIGHTS_KEY,))
     return default_weights()
 
 

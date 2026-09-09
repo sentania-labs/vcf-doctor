@@ -150,16 +150,13 @@ restart; the collector does not modify pyVmomi's private maps to remove it.
 Hitting that cap in the smallest query window, or a failed task query, is
 logged as a warning as well as being recorded as an incomplete interval.
 
-Pruning is followed by bounded `incremental_vacuum` maintenance. Settings shows
-its last run, reclaimed page count, and last error. A scan never runs a full
-database vacuum. For existing databases, see the
-[compaction upgrade notes](../README.md#upgrade-notes-event-compaction).
+Pruning deletes rows and stops there. Reclaiming the space is PostgreSQL's
+autovacuum, not the application's, so there is no maintenance schedule to tune,
+no page-reclamation figure to read and nothing in Settings to run. The
+SQLite-era compaction migration is gone with the engine.
 
-- `GET /api/settings` returns `event_policy` and `event_maintenance`;
-  `PUT /api/settings` accepts partial `event_policy` updates.
-- `POST /api/settings/events/compaction-migration` retries migration and runs
-  bounded maintenance, returning its status. Check `last_error` even when the
-  request succeeds.
+- `GET /api/settings` returns `event_policy`; `PUT /api/settings` accepts
+  partial `event_policy` updates.
 - `GET /api/events?connection_id=&since=&until=&resource_id=&category=&q=&limit=`
   newest first, default last 24 h, limit 500.
 - `GET /api/events/status?connection_id=` returns

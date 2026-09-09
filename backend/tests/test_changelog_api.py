@@ -23,7 +23,7 @@ FIXTURE_CONN = {
 
 @pytest.fixture()
 def client(tmp_path):
-    db.reset_for_tests(str(tmp_path / "t.db"))
+    db.reset_for_tests()
     with TestClient(app) as c:
         yield c
 
@@ -59,7 +59,7 @@ def test_log_defaults_newest_first_last_24h(client):
     # Rows observed more than 24 h ago fall outside the default window.
     old = (store.now() - timedelta(hours=25)).isoformat()
     with db.transaction() as c:
-        c.execute("UPDATE changes SET observed_at = ? WHERE significance = 'low'", (old,))
+        c.execute("UPDATE changes SET observed_at = %s WHERE significance = 'low'", (old,))
     assert len(client.get(f"/api/changes/log?connection_id={cid}").json()) == 13
     since = quote((store.now() - timedelta(days=2)).isoformat())
     assert len(client.get(f"/api/changes/log?connection_id={cid}&since={since}").json()) == 15
@@ -165,7 +165,7 @@ def test_overview_keeps_latest_pair_when_last_scan_is_older_than_24h(client):
     assert store.count_changes(cid) == 15
     old = (store.now() - timedelta(hours=25)).isoformat()
     with db.transaction() as c:
-        c.execute("UPDATE changes SET observed_at = ? WHERE connection_id = ?", (old, cid))
+        c.execute("UPDATE changes SET observed_at = %s WHERE connection_id = %s", (old, cid))
     # The default log window no longer covers the rows...
     assert client.get(f"/api/changes/log?connection_id={cid}").json() == []
     # ...but the Overview still shows the latest snapshot pair's changes.

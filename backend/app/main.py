@@ -8,7 +8,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app import auth, db, proxies, scheduler, vault
+from app import auth, db, migrate, proxies, scheduler, vault
 from app._version import BUILD_INFO
 from app.api.auth_router import router as auth_router
 from app.api.encryption_router import router as encryption_router
@@ -26,7 +26,15 @@ log = logging.getLogger("vcf_doctor")
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
-    db.connect()
+    # An unreachable database must not crash-loop the container: a PostgreSQL
+    # failover is exactly when the console should still come up and say the
+    # database is unavailable. Everything below tolerates that and logs it.
+    try:
+        applied = migrate.upgrade()
+        if applied:
+            log.info("applied %d schema migration(s): %s", len(applied), ", ".join(applied))
+    except Exception:
+        log.exception("startup: schema migration failed; the database is not usable yet")
     try:
         # Rotation first: a secret still under the previous key must move to
         # the current one before migrate_plaintext can judge what is plaintext.
@@ -37,18 +45,28 @@ async def lifespan(application: FastAPI):
         vault.migrate_plaintext()
     except Exception:
         log.exception("startup: secret migration failed; plaintext rows are still readable")
-    for cid, start in store.backfill_log_since().items():
-        log.info("change log coverage for %s starts %s", cid, start.isoformat())
-    interrupted = store.reconcile_interrupted_runs()
-    if interrupted:
-        log.warning("marked %d interrupted scan run(s) as error", interrupted)
-    auth.bootstrap_from_env()
-    scheduler.startup_maintenance()
-    scheduler.start()
+    try:
+        for cid, start in store.backfill_log_since().items():
+            log.info("change log coverage for %s starts %s", cid, start.isoformat())
+        interrupted = store.reconcile_interrupted_runs()
+        if interrupted:
+            log.warning("marked %d interrupted scan run(s) as error", interrupted)
+    except Exception:
+        log.exception("startup: recovering change log coverage and scan runs failed")
+    try:
+        auth.bootstrap_from_env()
+    except Exception:
+        log.exception("startup: seeding the operator password failed")
+    try:
+        scheduler.startup_maintenance()
+        scheduler.start()
+    except Exception:
+        log.exception("startup: the scheduler did not start; scheduled scans are not running")
     try:
         yield
     finally:
         scheduler.shutdown()
+        db.close()
 
 
 app = FastAPI(
@@ -134,10 +152,14 @@ async def key_unavailable(request: Request, exc: vault.KeyUnavailable):
 
 @app.get("/api/health")
 def health() -> dict:
+    """Public. `database` is what the Settings database panel reads, and it is
+    the one field that stays answerable while PostgreSQL is unreachable."""
+    database, _ = db.healthy()
     return {
         "status": "ok",
         "version": app.version,
         "scheduler": scheduler.running(),
+        "database": database,
     }
 
 

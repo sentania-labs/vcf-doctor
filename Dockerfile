@@ -27,8 +27,11 @@ COPY fixtures/ /app/fixtures/
 COPY --from=frontend /src/dist /app/static
 RUN useradd -r -u 10001 -d /app -s /usr/sbin/nologin app \
     && mkdir -p /data && chown -R app:app /data
+# /data is no longer a database: PostgreSQL holds everything. The volume's only
+# remaining job is the generated encryption key file, so a deployment that sets
+# VCF_DOCTOR_SECRET_KEY needs no volume at all.
 ENV VCF_DOCTOR_STATIC_DIR=/app/static \
-    VCF_DOCTOR_DB_PATH=/data/vcf-doctor.db
+    VCF_DOCTOR_DATA_DIR=/data
 USER app
 VOLUME ["/data"]
 EXPOSE 8000

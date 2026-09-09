@@ -124,7 +124,7 @@ def test_ipv4_mapped_ipv6_peer_matches_ipv4_network():
 
 
 def _app(tmp_path):
-    db.reset_for_tests(str(tmp_path / "t.db"))
+    db.reset_for_tests()
     import importlib
 
     import app.main as main

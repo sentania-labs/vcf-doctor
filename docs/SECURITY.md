@@ -29,12 +29,29 @@ authentication.
 ## Secrets at rest
 
 vCenter passwords and the Anthropic key (when entered via the GUI) are
-encrypted (Fernet, authenticated) before they reach SQLite. The encryption
+encrypted (Fernet, authenticated) before they reach PostgreSQL. The encryption
 key comes from `VCF_DOCTOR_SECRET_KEY` when set (in the lab a sealed
 Kubernetes secret, so it survives redeploys); otherwise the app generates
-`vcf-doctor.key` next to the database on first start, owner-only
-permissions, and reuses it. Rows written by older builds are encrypted on
-the next startup. Settings shows which key source is active, never the key.
+`vcf-doctor.key` in `VCF_DOCTOR_DATA_DIR` on the persistent volume on first
+start, owner-only permissions, and reuses it. It is deliberately not in the
+database it protects: a copied database must not carry the key that opens it.
+Rows written by older builds are encrypted on the next startup. Settings shows
+which key source is active, never the key.
+
+## The database password
+
+The database password is never an environment variable on any supported path.
+`VCF_DOCTOR_DATABASE_URL` carrying one is refused at startup, because an
+environment variable is readable from a process listing, a container inspect
+and any crash dump that captures the environment. It is read from the file
+named by `VCF_DOCTOR_DB_PASSWORD_FILE`, which is a mounted Kubernetes Secret
+in the cluster and a bind-mounted file under docker compose, so the code path
+is the same in both. See
+[the database](DEPLOYMENT.md#the-password) for the manifest.
+
+The connection itself (host, database, user) is a deployment binding rather
+than a product setting. It has no field in Settings; the interface reports only
+whether the database is reachable, and where to change it is the deployment.
 
 Losing the key means re-entering the vCenter passwords and the API key,
 nothing worse: affected connections are flagged "Needs password" on the

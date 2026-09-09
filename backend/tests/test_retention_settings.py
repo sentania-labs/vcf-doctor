@@ -13,7 +13,7 @@ from app.snapshots import store
 
 @pytest.fixture()
 def client(tmp_path):
-    db.reset_for_tests(str(tmp_path / "t.db"))
+    db.reset_for_tests()
     with TestClient(app) as c:
         yield c
 
@@ -33,7 +33,8 @@ def test_defaults_come_from_config_and_old_count_is_ignored(client):
         "timezone": default_timezone,
     }
     assert body["event_policy"] == {"retention_hours": 48, "row_cap": 250000}
-    assert body["event_maintenance"]["last_run"] is None
+    # PostgreSQL's autovacuum reclaims space, so there is no maintenance card.
+    assert "event_maintenance" not in body
     assert db.get_setting("event_policy") == {"retention_hours": 48, "row_cap": 250000}
     assert "retention" not in body
 

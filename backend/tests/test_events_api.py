@@ -17,7 +17,7 @@ from tests.conftest import seed_fixture_connection
 
 @pytest.fixture()
 def client(tmp_path):
-    db.reset_for_tests(str(tmp_path / "fixture.db"))
+    db.reset_for_tests()
     with TestClient(app) as c:
         seed_fixture_connection(c)
         yield c
@@ -138,9 +138,8 @@ def test_task_failure_capture_checkpoint_and_visible_status(client, monkeypatch,
     assert events_store.capture_checkpoint(cid) == (end if unsupported else checkpoint)
     assert any(e.id == f"{cid}:98765" for e in events_store.list_events(cid))
 
-    from app.config import settings
-
-    db.reset_for_tests(settings.db_path)
+    # A restart with the data intact: the pool is dropped, the rows are not.
+    db.reconnect_for_tests()
     status = client.get(f"/api/events/status?connection_id={cid}").json()
     assert status["task_history_unavailable"] is unsupported
     assert bool(status["incomplete_intervals"]) is not unsupported

@@ -1,16 +1,24 @@
 """Scan pipeline and APScheduler wiring.
 
-run_scan() is the single code path for scheduled and manual captures.
-The scheduler holds one interval job per enabled connection; its state is
-reloaded from SQLite at startup so a container restart resumes unattended.
+run_scan() is the single code path for scheduled and manual captures. One scan
+of a connection at a time is enforced by a PostgreSQL advisory lock, so a
+manual scan on one worker and a scheduled scan on another cannot overlap.
+
+Every worker serves the API, but only one runs scheduled scans: the one holding
+the scheduler advisory lock. Every worker runs a background job once a minute
+that tries to take that lock, checks it is still held, and re-reads the stored
+schedules. That one loop covers three things: a schedule edited on another
+worker reaches the worker that owns the jobs, a database restart that ended the
+lock session is noticed and the lock retaken, and a leader that goes away is
+replaced by another worker or pod within a minute.
 """
 
 import logging
 import os
 import sys
-import threading
 from datetime import timedelta
 
+from app import db
 from app.collectors.registry import get_collector
 from app.config import settings
 from app.models import Finding, Resource, ScanRun, Snapshot
@@ -19,14 +27,13 @@ from app.snapshots import store
 
 log = logging.getLogger("vcf_doctor.scan")
 
-_locks: dict[str, threading.Lock] = {}
-_locks_guard = threading.Lock()
 _scheduler = None
-
-
-def _lock_for(connection_id: str) -> threading.Lock:
-    with _locks_guard:
-        return _locks.setdefault(connection_id, threading.Lock())
+# Whether this process currently holds the scheduler advisory lock.
+_leader = False
+# What the leader has jobs for: connection id -> (interval_minutes, enabled).
+# Compared against the stored schedules by reconcile_jobs().
+_scheduled_state: dict[str, tuple[int, bool]] = {}
+RECONCILE_MINUTES = 1
 
 
 def retention_policy() -> RetentionPolicy:
@@ -61,16 +68,17 @@ def disable_stale_fixture_schedules() -> list[str]:
 
 
 def startup_maintenance() -> None:
-    """Catch up persisted state after downtime before scheduled scans resume."""
+    """Catch up persisted state after downtime before scheduled scans resume.
+
+    Runs on every worker. Everything it does is idempotent, so N workers
+    starting together repeat work rather than corrupt any.
+    """
     from app.events import store as events_store
 
-    events_store.ensure_schema()
     try:
-        migrated = store.migrate_legacy_snapshots()
-        if migrated:
-            log.info("startup: compressed %d legacy snapshot(s)", migrated)
+        events_store.seed_defaults()
     except Exception:
-        log.exception("startup: legacy snapshot migration failed")
+        log.exception("startup: seeding the default event policy failed")
     try:
         disable_stale_fixture_schedules()
     except Exception:
@@ -143,52 +151,55 @@ def run_scan(connection_id: str, trigger: str = "manual", label: str | None = No
         store.update_schedule(connection_id, last_run=run.finished, last_status="skipped")
         _refresh_next_run(connection_id)
         return run
-    lock = _lock_for(connection_id)
-    if not lock.acquire(blocking=False):
-        run = store.create_run(connection_id, trigger, status="skipped")
-        run = store.finish_run(run.id, "skipped", error="previous run still active")
-        store.update_schedule(connection_id, last_status="skipped")
-        return run
-    try:
-        run = store.create_run(connection_id, trigger)
-        try:
-            collector = get_collector(conn)
-            previous = store.latest_snapshot(connection_id)
-            resources = collector.collect()
-            changes = compute_changes(previous.resources, resources) if previous is not None else []
-            snapshot: Snapshot = store.save_snapshot(
-                connection_id, resources, _label(trigger, label), scheduled=trigger == "scheduled"
-            )
-            findings = compute_findings(resources, previous.resources if previous else None)
-            store.save_findings(snapshot.id, findings)
-            # --- events capture (app/events); never fails the scan ---
-            try:
-                from app.events.service import capture_events
+    with db.try_advisory_lock(db.SCAN_LOCK, connection_id) as acquired:
+        if not acquired:
+            run = store.create_run(connection_id, trigger, status="skipped")
+            run = store.finish_run(run.id, "skipped", error="previous run still active")
+            store.update_schedule(connection_id, last_status="skipped")
+            return run
+        return _run_scan_locked(conn, trigger, label)
 
-                capture_events(conn, collector, snapshot)
-            except Exception:  # noqa: BLE001
-                log.exception("event capture failed for %s", connection_id)
-            # --- end events capture ---
-            if previous is not None:
-                store.save_changes(
-                    connection_id,
-                    previous.id,
-                    snapshot.id,
-                    snapshot.created_at,
-                    changes,
-                )
-            store.apply_retention(connection_id)
-            run = store.finish_run(run.id, "ok", snapshot_id=snapshot.id)
-            status = "ok"
-        except Exception as exc:
-            log.exception("scan failed for %s", connection_id)
-            run = store.finish_run(run.id, "error", error=str(exc)[:500])
-            status = "error"
-        store.update_schedule(connection_id, last_run=run.finished, last_status=status)
-        _refresh_next_run(connection_id)
-        return run
-    finally:
-        lock.release()
+
+def _run_scan_locked(conn, trigger: str, label: str | None) -> ScanRun:
+    """The scan itself, with this connection's scan lock already held."""
+    connection_id = conn.id
+    run = store.create_run(connection_id, trigger)
+    try:
+        collector = get_collector(conn)
+        previous = store.latest_snapshot(connection_id)
+        resources = collector.collect()
+        changes = compute_changes(previous.resources, resources) if previous is not None else []
+        snapshot: Snapshot = store.save_snapshot(
+            connection_id, resources, _label(trigger, label), scheduled=trigger == "scheduled"
+        )
+        findings = compute_findings(resources, previous.resources if previous else None)
+        store.save_findings(snapshot.id, findings)
+        # --- events capture (app/events); never fails the scan ---
+        try:
+            from app.events.service import capture_events
+
+            capture_events(conn, collector, snapshot)
+        except Exception:  # noqa: BLE001
+            log.exception("event capture failed for %s", connection_id)
+        # --- end events capture ---
+        if previous is not None:
+            store.save_changes(
+                connection_id,
+                previous.id,
+                snapshot.id,
+                snapshot.created_at,
+                changes,
+            )
+        store.apply_retention(connection_id)
+        run = store.finish_run(run.id, "ok", snapshot_id=snapshot.id)
+        status = "ok"
+    except Exception as exc:
+        log.exception("scan failed for %s", connection_id)
+        run = store.finish_run(run.id, "error", error=str(exc)[:500])
+        status = "error"
+    store.update_schedule(connection_id, last_run=run.finished, last_status=status)
+    _refresh_next_run(connection_id)
+    return run
 
 
 def run_all_scans(trigger: str = "manual") -> list[ScanRun]:
@@ -216,7 +227,7 @@ def _scheduled_job(connection_id: str) -> None:
 
 
 def _refresh_next_run(connection_id: str) -> None:
-    if _scheduler is None:
+    if not _leader or _scheduler is None:
         return
     job = _scheduler.get_job(_job_id(connection_id))
     if job is not None and job.next_run_time:
@@ -224,16 +235,26 @@ def _refresh_next_run(connection_id: str) -> None:
 
 
 def reschedule(connection_id: str) -> None:
-    """(Re)create the interval job for a connection from its stored schedule."""
-    if _scheduler is None:
+    """(Re)create the interval job for a connection from its stored schedule.
+
+    A no-op on a worker that does not hold the scheduler lock. That worker's
+    saved change still reaches the leader, which re-reads the schedules in
+    reconcile_jobs().
+    """
+    if not _leader or _scheduler is None:
         return
     from apscheduler.triggers.interval import IntervalTrigger
 
     sched = store.get_schedule(connection_id)
     remove_job(connection_id)
     if sched is None or not sched.enabled:
+        _scheduled_state[connection_id] = (0, False) if sched is None else (
+            sched.interval_minutes,
+            False,
+        )
         store.update_schedule(connection_id, clear_next_run=True)
         return
+    _scheduled_state[connection_id] = (sched.interval_minutes, sched.enabled)
     minutes = max(sched.interval_minutes, settings.min_interval_minutes)
     now = store.now()
     start = now + timedelta(minutes=minutes)
@@ -259,25 +280,105 @@ def remove_job(connection_id: str) -> None:
         _scheduler.remove_job(_job_id(connection_id))
 
 
+def reconcile_jobs() -> None:
+    """Bring the leader's jobs back in line with the stored schedules.
+
+    Connections are added and schedules are edited through whichever worker
+    served the request; only this one holds jobs, so it re-reads rather than
+    being told.
+    """
+    if not _leader or _scheduler is None:
+        return
+    wanted: dict[str, tuple[int, bool]] = {}
+    for conn in store.list_connections():
+        sched = store.get_schedule(conn.id)
+        wanted[conn.id] = (0, False) if sched is None else (sched.interval_minutes, sched.enabled)
+    for connection_id in list(_scheduled_state):
+        if connection_id not in wanted:
+            remove_job(connection_id)
+            _scheduled_state.pop(connection_id, None)
+    for connection_id, state in wanted.items():
+        if _scheduled_state.get(connection_id) != state:
+            log.info("picking up schedule change for %s", connection_id)
+            reschedule(connection_id)
+
+
+def _drop_scan_jobs() -> None:
+    for connection_id in list(_scheduled_state):
+        remove_job(connection_id)
+    _scheduled_state.clear()
+
+
+def take_leadership() -> None:
+    """Hold the scheduler lock if it is free, and keep the jobs in step with it.
+
+    Runs on every worker once a minute. A leader whose lock session ended (a
+    restarted or failed-over database) drops its jobs and competes for the lock
+    again, so scheduled scans resume instead of stopping silently.
+    """
+    global _leader
+    if _leader and not db.scheduler_lock_alive():
+        log.warning("lost the scheduler lock; the database session ended. Dropping scan jobs")
+        _leader = False
+        _drop_scan_jobs()
+    if not _leader:
+        if not db.acquire_scheduler_lock():
+            return  # another worker or pod has it
+        _leader = True
+        _scheduled_state.clear()
+        log.info("holding the scheduler lock; scheduled scans run in this worker")
+    reconcile_jobs()
+
+
+def _leadership_job() -> None:
+    try:
+        take_leadership()
+    except Exception:
+        log.exception("scheduler leadership check failed; retrying next interval")
+
+
 def start() -> None:
+    """Start the background scheduler. Every worker runs one; only the worker
+    holding the advisory lock owns scan jobs."""
     global _scheduler
     if _scheduler is not None or not scheduler_enabled():
         return
     from apscheduler.schedulers.background import BackgroundScheduler
+    from apscheduler.triggers.interval import IntervalTrigger
 
     _scheduler = BackgroundScheduler(timezone="UTC")
     _scheduler.start()
-    for conn in store.list_connections():
-        reschedule(conn.id)
-    log.info("scheduler started with %d connections", len(store.list_connections()))
+    _scheduler.add_job(
+        _leadership_job,
+        IntervalTrigger(minutes=RECONCILE_MINUTES),
+        id="scheduler-leadership",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    _leadership_job()
+    if _leader:
+        log.info("scheduler started with %d connections", len(_scheduled_state))
+    else:
+        log.info("another worker holds the scheduler lock; this one serves the API only")
 
 
 def shutdown() -> None:
-    global _scheduler
+    global _scheduler, _leader
     if _scheduler is not None:
         _scheduler.shutdown(wait=False)
         _scheduler = None
+    _scheduled_state.clear()
+    _leader = False
+    db.release_scheduler_lock()
 
 
 def running() -> bool:
-    return _scheduler is not None
+    """Whether scheduled scans are running anywhere in this deployment.
+
+    Asked of a worker that is not the leader, the answer still has to be yes,
+    so it comes from the lock rather than from this process.
+    """
+    if _leader:
+        return True
+    return db.scheduler_lock_held()

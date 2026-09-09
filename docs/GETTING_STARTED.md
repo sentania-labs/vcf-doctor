@@ -7,31 +7,47 @@ there is no sample-data mode, and the first useful screen is the one after
 you add a connection. No configuration files are needed;
 everything is set in the GUI.
 
-## 1. Run the container
+## 1. Run the stack
 
-Use the published image:
+VCF Doctor keeps everything in PostgreSQL. From a clone of this repository,
+one command brings up the database and the console together:
+
+```bash
+docker compose up -d
+```
+
+That starts `postgres:16` on a named volume, generates a database password into
+a second volume, applies the schema migrations in a one-shot service, and then
+starts the console with two workers. Nothing has to
+be installed or configured first.
+
+The console is at http://localhost:8000. Keep the `vcf-doctor-db` volume: it
+holds every snapshot, the change log, your connections and your settings. Back
+it up the way you would back up any other database.
+
+If you already run a PostgreSQL, point the published image at it instead:
 
 ```bash
 # Quickstarts track latest. Deployments should pin an exact vX.Y.Z release.
 docker run -d --name vcf-doctor \
   -p 8000:8000 \
   -v vcf-doctor-data:/data \
+  -v /path/to/secrets:/run/secrets:ro \
+  -e VCF_DOCTOR_DATABASE_URL=postgresql://vcf_doctor@db.example:5432/vcf_doctor \
   ghcr.io/sentania-labs/vcf-doctor:latest
 ```
 
-Or, from a clone of this repository:
+The password is read from a file, never from the URL or any other environment
+variable; `/run/secrets/vcf-doctor-db-password` is the default path. The `/data`
+volume now holds only the generated encryption key file.
 
-```bash
-docker compose up --build
-```
+More than one instance is fine. PostgreSQL owns concurrency, and exactly one
+worker takes an advisory lock that makes it the one running scheduled scans.
 
-Either way the console is at http://localhost:8000 and the database lives on
-the `/data` volume. Keep that volume: it holds every snapshot, the change log,
-your connections and your settings. Run exactly one instance per volume; two
-instances would scan twice and fight over the database.
-
-See the [deployment contract](DEPLOYMENT.md#contract) for image tag meanings.
-Pin a release or digest in anything that is not a laptop.
+See the [deployment contract](DEPLOYMENT.md#contract) for image tag meanings and
+[the database](DEPLOYMENT.md#the-database) for the Kubernetes shapes and the
+one-shot import from an old SQLite volume. Pin a release or digest in anything
+that is not a laptop.
 
 ## 2. Set the operator password
 
@@ -101,8 +117,9 @@ written to the database. The encryption key comes from one of two places:
   Kubernetes, a SealedSecret or equivalent in the deployment repository) so
   it survives redeploys and rebuilds.
 - **A generated key file.** Without the variable, the app creates
-  `vcf-doctor.key` next to the database on the volume on first start, with
-  owner-only permissions, and reuses it afterwards.
+  `vcf-doctor.key` on the `/data` volume on first start, with owner-only
+  permissions, and reuses it afterwards. It is kept out of the database on
+  purpose, so a copied database does not carry the key that opens it.
 
 Losing the key is recoverable: the snapshots and history are untouched, but
 each connection is flagged **Needs password** on the Connections page until

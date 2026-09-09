@@ -5,7 +5,7 @@ def _client(tmp_path, monkeypatch, **env):
     from app import db
     from app.config import settings
 
-    db.reset_for_tests(str(tmp_path / "t.db"))
+    db.reset_for_tests()
     monkeypatch.setattr(settings, "auth", "on")
     for k, v in env.items():
         monkeypatch.setenv(k, v)
@@ -72,7 +72,7 @@ def test_every_issued_token_validates(tmp_path, monkeypatch):
     """Regression: raw HMAC bytes containing 0x2E used to break delimiter parsing."""
     from app import auth, db
 
-    db.reset_for_tests(str(tmp_path / "t.db"))
+    db.reset_for_tests()
     for _ in range(300):
         assert auth.token_valid(auth.issue_token())
 

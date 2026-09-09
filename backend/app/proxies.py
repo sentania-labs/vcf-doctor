@@ -5,7 +5,7 @@ ingress, not the person at the keyboard. The ingress adds X-Forwarded-For
 and X-Forwarded-Proto, but so can anyone who reaches the pod directly, so
 those headers are only believed when the peer is in the trusted list.
 
-The list is edited on the Settings page (stored in SQLite) and can be
+The list is edited on the Settings page (stored in the database) and can be
 pinned by VCF_DOCTOR_TRUSTED_PROXIES (comma-separated IPs or CIDRs), which
 wins over the stored value. Default: empty, trust nobody. With nothing
 trusted every request behind the ingress looks like it comes from the
@@ -79,8 +79,21 @@ def env_problem() -> str | None:
 
 
 def stored_value() -> list[str]:
+    """The saved list, or nothing when it cannot be read.
+
+    This runs in the outermost middleware, on every request including
+    /api/health and the login page. An unreachable database must not turn every
+    response into a 500: the console has to stay up to say the database is
+    unavailable. Trusting nobody is also the safe answer to fall back to, since
+    it only means each visitor shares the ingress's login lockout.
+    """
     try:
-        return parse_list(db.get_setting(SETTING_KEY) or [])
+        stored = db.get_setting(SETTING_KEY, timeout=db.PROBE_TIMEOUT) or []
+    except Exception:  # noqa: BLE001  a database that cannot be read trusts nobody
+        log.warning("trusted proxies unreadable; trusting nobody until the database returns")
+        return []
+    try:
+        return parse_list(stored)
     except ValueError:
         return []
 

@@ -11,7 +11,7 @@ from app.assistant.router import router
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
-    db.reset_for_tests(str(tmp_path / "assistant.db"))
+    db.reset_for_tests()
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     app = FastAPI()
     app.include_router(router, prefix="/api/assistant")
@@ -151,7 +151,7 @@ def test_models_endpoint_curated_without_key(monkeypatch, tmp_path):
     from app import db
     from app.config import settings
 
-    db.reset_for_tests(str(tmp_path / "m.db"))
+    db.reset_for_tests()
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setattr(settings, "auth", "off")
     import importlib

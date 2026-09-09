@@ -4,7 +4,12 @@ This repository is **not** responsible for deployment. It publishes a
 container image; whoever deploys it (in the lab, the deployment repository
 and Argo CD) owns everything else. Nothing about a specific vCenter belongs
 in a manifest: connections, schedules, retention and assistant settings are
-application state set through the GUI and stored on the volume.
+application state set through the GUI and stored in PostgreSQL.
+
+The console needs a PostgreSQL database. It is the only supported one; there
+is no SQLite mode and no file-backed fallback. The database connection is a
+deployment binding, so it is set here and never in Settings, which reports
+only whether the database is reachable.
 
 ## Contract
 
@@ -12,10 +17,12 @@ application state set through the GUI and stored on the volume.
 |---|---|
 | Image | `ghcr.io/sentania-labs/vcf-doctor:<tag>` where tag is `vX.Y.Z` (release), `sha-<7>` or `latest` |
 | Port | `8000` (HTTP) |
-| Health | `GET /api/health` (the container also declares a `HEALTHCHECK` on it) |
+| Health | `GET /api/health` (the container also declares a `HEALTHCHECK` on it). Give Kubernetes probes `timeoutSeconds: 5`: while the database is unreachable it still answers, in about three seconds, with `"database": false`. |
 | Build identity | `GET /api/version` returns the [build identity fields](../backend/app/_version.py); `GET /api/health` reports the same version |
-| Persistent volume | `/data` (SQLite at `/data/vcf-doctor.db`, encryption key file next to it) |
-| Replicas | **exactly 1**, `strategy: Recreate`. Two pods would double-scan and contend for SQLite. |
+| Database | PostgreSQL 14 or newer, reached over `VCF_DOCTOR_DATABASE_URL`. Schema migrations are applied at startup and by `python3 -m app.migrate upgrade`. |
+| Database password | A file, never an environment variable. `VCF_DOCTOR_DB_PASSWORD_FILE`, default `/run/secrets/vcf-doctor-db-password`. |
+| Persistent volume | `/data`, holding only the generated encryption key file. A deployment that sets `VCF_DOCTOR_SECRET_KEY` needs no volume at all. |
+| Replicas | More than one is supported. PostgreSQL owns concurrency, and one worker takes an advisory lock that makes it the only one running scheduled scans. |
 | User | runs as uid `10001`; set `fsGroup: 10001` so the volume is writable |
 
 Every published digest first passes the checks, repository scan, image scan and
@@ -47,6 +54,113 @@ checkout SHA, and an unknown build time because there was no image build.
 Follow [Cut a release](../CONTRIBUTING.md#cut-a-release) for the annotated-tag
 procedure and version pinning guidance.
 
+## The database
+
+### Schema migrations
+
+The schema lives in numbered `.sql` files under
+[`backend/app/migrations`](../backend/app/migrations), applied in order and
+recorded in a `schema_migrations` table. Two things apply them, and both take
+the same PostgreSQL advisory lock, so several workers or pods starting together
+migrate once rather than racing:
+
+- the console itself, at startup;
+- `python3 -m app.migrate upgrade`, which is the one-shot `migrate` service in
+  `docker-compose.yml` and is the same thing a Kubernetes `Job` or an
+  `initContainer` should run.
+
+`python3 -m app.migrate status` prints what is applied and what is pending. A
+reachable database with a pending migration reports as unhealthy on
+`GET /api/health` and on the Settings database panel, because a server missing
+its tables is not a working database.
+
+Adding the next migration is dropping in `0002_<what_it_does>.sql`. Nothing
+else is registered and no shipped file is ever edited.
+
+### The password
+
+No supported path carries the database password in an environment variable.
+`VCF_DOCTOR_DATABASE_URL` must not contain one; a URL that does is refused at
+startup with a message naming the file to use instead. The password is read
+from `VCF_DOCTOR_DB_PASSWORD_FILE`, a path that is a compose bind mount in one
+shape and a mounted Kubernetes Secret in the other, so the application does the
+same thing in both. No file means no password is sent, which is what a
+trust-authenticated local server wants.
+
+```yaml
+# Kubernetes: the Secret arrives at the same path compose mounts.
+        env:
+          - name: VCF_DOCTOR_DATABASE_URL
+            value: postgresql://vcf_doctor@vcf-doctor-db:5432/vcf_doctor
+          - name: VCF_DOCTOR_DB_PASSWORD_FILE
+            value: /run/secrets/vcf-doctor-db-password
+        volumeMounts:
+          - name: db-password
+            mountPath: /run/secrets
+            readOnly: true
+      volumes:
+        - name: db-password
+          secret:
+            secretName: vcf-doctor-db
+            items: [{ key: password, path: vcf-doctor-db-password }]
+```
+
+### Standalone and docker
+
+`docker-compose.yml` in this repository is self-contained: `docker compose up`
+brings up `postgres:16` on a named volume, generates a database password into a
+second volume, applies the migrations in the one-shot `migrate` service, and
+starts the console with two uvicorn workers. There is no
+external dependency to install first.
+
+### Kubernetes, single pod
+
+One PostgreSQL pod with one PVC. In the sentania lab that is Longhorn with
+best-effort locality and two replicas: in-cluster, node-survivable (the volume
+reattaches when the pod is rescheduled), roughly a minute of downtime on node
+loss, and no read replicas. The console is unchanged; it only takes a
+`VCF_DOCTOR_DATABASE_URL`.
+
+This is where a lab starts. It is enough for a single-estate console and it is
+one object to reason about.
+
+### Kubernetes, HA with CloudNativePG
+
+A CloudNativePG `Cluster`: a primary and standbys spread across nodes, streaming
+replication, automated failover, and in-cluster WAL archiving for
+point-in-time recovery. Each instance can sit on fast local or single-replica
+storage, because the redundancy is in PostgreSQL rather than in the block layer.
+Synchronous block replication under a database pays a cross-node fsync on every
+commit; streaming replication does not.
+
+Nothing in the application changes between the two shapes. Point
+`VCF_DOCTOR_DATABASE_URL` at the CloudNativePG read-write service, mount its
+generated Secret at the password path above, and restart. Pooled connections
+that break during a failover are checked on the way out of the pool, so a
+failover costs a retry rather than an error.
+
+### Upgrading a lab that is still on SQLite
+
+The old volume's `vcf-doctor.db` is imported once, into a database that has no
+history yet:
+
+```bash
+python3 -m app.migrate upgrade
+python3 -m app.import_sqlite --path /data/vcf-doctor.db
+```
+
+Connections, schedules, scan runs, snapshots, findings, changes, events and
+capture state all come across. Integer flags become real booleans, and a
+snapshot still held as JSON text by a pre-gzip build is compressed on the way.
+The old deployment's settings win, so its operator password, retention policy
+and health score weights survive; the encryption key must come across too, or
+the vCenter passwords need re-entering exactly as they would after any key loss.
+
+It refuses a target that already holds history, so a second accidental run
+cannot double one. `--force` overrides that; it adds rows to what is there.
+Nothing writes back to the SQLite file, so the old volume stays a rollback
+option until you delete it.
+
 ## Environment variables
 
 All optional. Anything an operator would change day to day has a GUI
@@ -55,8 +169,13 @@ them.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `VCF_DOCTOR_DB_PATH` | `/data/vcf-doctor.db` | SQLite location |
-| `VCF_DOCTOR_SECRET_KEY` | unset | Key for encrypting vCenter passwords and the Anthropic key at rest. Unset: a key file is generated next to the database. See [Security](SECURITY.md). |
+| `VCF_DOCTOR_DATABASE_URL` | `postgresql://vcf_doctor@postgres:5432/vcf_doctor` | PostgreSQL connection, without a password. `DATABASE_URL` is read when this is unset. A URL carrying a password is refused. |
+| `VCF_DOCTOR_DB_PASSWORD_FILE` | `/run/secrets/vcf-doctor-db-password` | File holding the database password. Missing file means none is sent. |
+| `VCF_DOCTOR_DB_POOL_MAX_SIZE` | `10` | Pooled connections per worker process. A scan holds one for its whole run, so keep this above the number of vCenters that can scan at once, and multiply by the worker count when sizing the server's `max_connections`. |
+| `VCF_DOCTOR_DB_POOL_MIN_SIZE` | `1` | Connections kept open per worker process |
+| `VCF_DOCTOR_DB_POOL_TIMEOUT` | `10` | Seconds a request waits for a free pooled connection |
+| `VCF_DOCTOR_DATA_DIR` | `/data` | Writable directory for the generated encryption key file. Nothing else is written there. |
+| `VCF_DOCTOR_SECRET_KEY` | unset | Key for encrypting vCenter passwords and the Anthropic key at rest. Unset: a key file is generated in `VCF_DOCTOR_DATA_DIR`. See [Security](SECURITY.md). |
 | `VCF_DOCTOR_SECRET_KEY_PREVIOUS` | unset | Previous encryption key for startup rotation. See [rotating the encryption key](#rotating-the-encryption-key) for the procedure in each deployment shape. |
 | `ANTHROPIC_API_KEY` | unset | Enables the Claude assistant. A key entered in Settings takes precedence. |
 | `VCF_DOCTOR_AUTH` | `on` | `off` disables the login page (use only behind ingress authentication) |
@@ -210,14 +329,22 @@ docker buildx imagetools inspect ghcr.io/sentania-labs/vcf-doctor:<tag> --format
 
 ## Local convenience
 
-`docker-compose.yml` builds and runs the image with a named volume for
-laptop use. It is not a deployment artifact.
+`docker-compose.yml` builds and runs the whole stack for laptop use. It is not
+a deployment artifact.
 
 ## Recovery
 
-- **Lost volume**: history is gone; connections and settings must be
-  re-entered. Nothing in vCenter is affected.
-- **Lost encryption key, volume intact**: history is intact; re-enter each
+- **Lost database**: history is gone; connections and settings must be
+  re-entered. Nothing in vCenter is affected. Back up PostgreSQL the way you
+  back up any other database; the container volume no longer holds history.
+- **Database unreachable**: the console still starts, and `GET /api/health`
+  answers within two seconds with `"database": false` rather than timing out.
+  That is deliberate: a PostgreSQL failover should not turn into a
+  crash-looping pod. Everything that needs the database does fail while it is
+  down, sign-in included, so the Settings database panel reports the outage
+  only once the page is reachable again, which covers the common partial case
+  of a database that is up but not migrated.
+- **Lost encryption key, database intact**: history is intact; re-enter each
   vCenter password (flagged "Needs password" on Connections) and the
   Anthropic key. See [Security](SECURITY.md).
 - **Rotated encryption key, previous key still available**: no re-entry is

@@ -1,7 +1,7 @@
 import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react'
 import { AlertTriangle, CheckCircle2, Database, KeyRound, ShieldCheck } from 'lucide-react'
 import type { AssistantSettings, EventPolicy, RetentionPolicy, Settings, Significance } from '@/types'
-import { getSettings, runCompactionMigration, updateSettings, getAssistantStatus, changePassword, getAssistantModels, type AssistantModel } from '@/api'
+import { getSettings, updateSettings, getAssistantStatus, changePassword, getAssistantModels, type AssistantModel } from '@/api'
 import { ApiError } from '@/api/client'
 import { useAuth } from '@/state/AuthState'
 import { useAsync } from '@/hooks/useAsync'
@@ -11,6 +11,7 @@ import HealthScoreCard from '@/components/settings/HealthScoreCard'
 import EncryptionCard from '@/components/settings/EncryptionCard'
 import TrustedProxiesCard from '@/components/settings/TrustedProxiesCard'
 import AboutCard from '@/components/settings/AboutCard'
+import DatabaseCard from '@/components/settings/DatabaseCard'
 
 function AccessCard() {
   const { status } = useAuth()
@@ -157,19 +158,9 @@ function eventProblem(p: EventPolicy): { field: keyof EventPolicy; message: stri
   return null
 }
 
-function EventsRetentionCard({ value, onChange, settings }: { value: EventPolicy; onChange: (p: EventPolicy) => void; settings: Settings }) {
+function EventsRetentionCard({ value, onChange }: { value: EventPolicy; onChange: (p: EventPolicy) => void }) {
   const problem = eventProblem(value)
   const set = (k: keyof EventPolicy) => (e: ChangeEvent<HTMLInputElement>) => onChange({ ...value, [k]: e.target.value === '' ? 0 : Math.floor(Number(e.target.value)) })
-  const [maintenance, setMaintenance] = useState(settings.event_maintenance)
-  const [migrating, setMigrating] = useState(false)
-  const [migrationError, setMigrationError] = useState<string | null>(null)
-  useEffect(() => { setMaintenance(settings.event_maintenance) }, [settings.event_maintenance])
-  const migrate = async () => {
-    setMigrating(true); setMigrationError(null)
-    try { setMaintenance(await runCompactionMigration()) }
-    catch (e) { setMigrationError(e instanceof Error ? e.message : String(e)) }
-    finally { setMigrating(false) }
-  }
   return (
     <Card>
       <CardHeader title="Events retention" subtitle="Limits event history independently for each connection. Changes apply on the next scan."
@@ -186,13 +177,8 @@ function EventsRetentionCard({ value, onChange, settings }: { value: EventPolicy
         {problem ? <p className="text-sm text-critical bg-critical-bg rounded-md px-3 py-2" role="alert">{problem.message}</p> : null}
         <div className="flex items-start gap-2 text-xs text-faint bg-surface-2 rounded-md px-3 py-2">
           <Database size={14} className="mt-0.5 shrink-0" />
-          <span>{maintenance.last_run ? `Bounded cleanup last ran ${new Date(maintenance.last_run).toLocaleString()} and reclaimed ${maintenance.pages_reclaimed.toLocaleString()} page${maintenance.pages_reclaimed === 1 ? '' : 's'}.` : 'Bounded cleanup has not run yet.'}{maintenance.last_error ? ` Last error: ${maintenance.last_error}` : ''} Routine scan cleanup uses bounded reclamation.</span>
+          <span>Rows past these limits are deleted after a scan. PostgreSQL reclaims the space on its own, so there is nothing to run here.</span>
         </div>
-        {maintenance.migration_required ? <div className="space-y-2">
-          <p className="text-xs text-faint">The one-time migration pauses database writes and needs free space of at least 1.5 times the database size.</p>
-          <Button onClick={() => void migrate()} loading={migrating} disabled={migrating}>Run compaction migration now</Button>
-        </div> : null}
-        {migrationError ? <p className="text-sm text-critical" role="alert">{migrationError}</p> : null}
       </div>
     </Card>
   )
@@ -241,7 +227,7 @@ export default function SettingsPage() {
     } catch { /* the encryption card reports its own status */ }
   }
 
-  if (s.error && !s.data) return <div className="anim-fade-up"><PageHeader title="Settings" /><Card><ErrorState title="Settings unavailable" error={s.error} onRetry={s.reload} /></Card></div>
+  if (s.error && !s.data) return <div className="anim-fade-up max-w-3xl"><PageHeader title="Settings" /><div className="space-y-5"><DatabaseCard /><Card><ErrorState title="Settings unavailable" error={s.error} onRetry={s.reload} /></Card></div></div>
 
   return (
     <div className="anim-fade-up max-w-3xl">
@@ -251,7 +237,7 @@ export default function SettingsPage() {
       {!s.data ? <div className="space-y-5"><Skeleton className="h-40 rounded-xl" /><Skeleton className="h-72 rounded-xl" /></div> : (
         <div className="space-y-5">
           <RetentionCard value={retention} onChange={setRetention} />
-          <EventsRetentionCard value={eventPolicy} onChange={setEventPolicy} settings={s.data} />
+          <EventsRetentionCard value={eventPolicy} onChange={setEventPolicy} />
           <HealthScoreCard />
 
           <Card>
@@ -300,6 +286,7 @@ export default function SettingsPage() {
           </Card>
 
           <EncryptionCard reloadKey={`${assistant.api_key_set}:${assistant.api_key_unreadable ?? false}`} onRotated={() => void refreshKeyState()} />
+          <DatabaseCard />
           <AccessCard />
           <TrustedProxiesCard />
           <AboutCard />

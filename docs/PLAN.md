@@ -7,6 +7,7 @@
 > - Retention moved from a snapshot count to tiered days, 14/30/365, editable in Settings (#31).
 > - Cross-vCenter comparison was redefined as an estate-wide time-1 vs time-2 view and delivered as the Environment page (#38).
 > - The Investigate action is an LLM prompt over the recorded evidence. The guided, deterministic evidence collection described in the vision is not built.
+- 2026-09-09: persistence moved from SQLite to PostgreSQL (#59). The single-connection, process-wide write lock is gone, so "single replica" below no longer holds: more than one worker and more than one pod are supported, and one of them takes an advisory lock that makes it the only one running scheduled scans. The schema is numbered migrations rather than CREATE TABLE IF NOT EXISTS on connect.
 
 # VCF Doctor: MVP Plan, Schedulable Inventory
 

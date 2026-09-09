@@ -11,7 +11,7 @@ def _client(tmp_path, monkeypatch, static: Path | None = None):
     from app import db
     from app.config import settings
 
-    db.reset_for_tests(str(tmp_path / "t.db"))
+    db.reset_for_tests()
     if static is not None:
         monkeypatch.setattr(settings, "static_dir", str(static))
     import importlib
@@ -124,8 +124,7 @@ def test_interrupted_runs_are_reconciled_on_startup(tmp_path, monkeypatch):
     from app import db
     from app.snapshots import store
 
-    db.reset_for_tests(str(tmp_path / "r.db"))
-    db.connect()
+    db.reset_for_tests()
     conn = store.create_connection(
         __import__("app.models", fromlist=["ConnectionCreate"]).ConnectionCreate(
             name="x", host="fixture", username="u", password="p", kind="fixture"

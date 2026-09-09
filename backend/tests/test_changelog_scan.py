@@ -18,7 +18,7 @@ def _conn():
 
 
 def test_fixture_scans_write_fifteen_rows_a_to_b(tmp_path):
-    db.reset_for_tests(str(tmp_path / "t.db"))
+    db.reset_for_tests()
     conn = _conn()
     first = scheduler.run_scan(conn.id, "manual")
     assert first.status == "ok"
@@ -50,7 +50,7 @@ def test_fixture_scans_write_fifteen_rows_a_to_b(tmp_path):
 
 
 def test_diff_failure_does_not_persist_a_snapshot_or_claim_coverage(tmp_path, monkeypatch):
-    db.reset_for_tests(str(tmp_path / "t.db"))
+    db.reset_for_tests()
     conn = _conn()
     first = scheduler.run_scan(conn.id, "manual")
     real_diff = engine.diff
@@ -73,7 +73,7 @@ def test_diff_failure_does_not_persist_a_snapshot_or_claim_coverage(tmp_path, mo
 
 
 def test_change_rows_outlive_pruned_snapshots_and_expire_with_daily_days(tmp_path):
-    db.reset_for_tests(str(tmp_path / "t.db"))
+    db.reset_for_tests()
     conn = _conn()
     scheduler.run_scan(conn.id, "scheduled")
     second = scheduler.run_scan(conn.id, "scheduled")
@@ -82,7 +82,7 @@ def test_change_rows_outlive_pruned_snapshots_and_expire_with_daily_days(tmp_pat
     # Age both snapshots past a tiny policy: snapshots go, rows stay.
     old = (store.now() - timedelta(days=5)).isoformat()
     with db.transaction() as c:
-        c.execute("UPDATE snapshots SET created_at = ? WHERE connection_id = ?", (old, conn.id))
+        c.execute("UPDATE snapshots SET created_at = %s WHERE connection_id = %s", (old, conn.id))
     tiny = RetentionPolicy(recent_days=1, hourly_days=1, daily_days=2)
     assert store.apply_retention(conn.id, tiny) == 2
     assert store.list_snapshots(conn.id) == []
@@ -91,13 +91,13 @@ def test_change_rows_outlive_pruned_snapshots_and_expire_with_daily_days(tmp_pat
 
     # Once observed_at is older than daily_days the rows expire too.
     with db.transaction() as c:
-        c.execute("UPDATE changes SET observed_at = ? WHERE connection_id = ?", (old, conn.id))
+        c.execute("UPDATE changes SET observed_at = %s WHERE connection_id = %s", (old, conn.id))
     store.apply_retention(conn.id, RetentionPolicy(recent_days=1, hourly_days=1, daily_days=1))
     assert store.count_changes(conn.id) == 0
 
 
 def test_deleting_a_connection_removes_its_change_rows(tmp_path):
-    db.reset_for_tests(str(tmp_path / "t.db"))
+    db.reset_for_tests()
     conn, other = _conn(), _conn()
     for c in (conn, other):
         scheduler.run_scan(c.id, "manual")
@@ -109,7 +109,7 @@ def test_deleting_a_connection_removes_its_change_rows(tmp_path):
 
 
 def test_deleting_a_connection_removes_its_events(tmp_path):
-    db.reset_for_tests(str(tmp_path / "t.db"))
+    db.reset_for_tests()
     conn, other = _conn(), _conn()
     for c in (conn, other):
         events_store.upsert_events(

@@ -19,7 +19,7 @@ def _main(tmp_path, monkeypatch, auth: str = "off"):
     from app import db
     from app.config import settings
 
-    db.reset_for_tests(str(tmp_path / "t.db"))
+    db.reset_for_tests()
     monkeypatch.setattr(settings, "auth", auth)
     static = tmp_path / "static"
     (static / "assets").mkdir(parents=True)

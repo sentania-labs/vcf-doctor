@@ -37,7 +37,7 @@ export default function EncryptionCard({ reloadKey, onRotated }: { reloadKey?: u
             </div>
             {d.key_error ? <p className="text-sm text-critical bg-critical-bg rounded-md px-3 py-2" role="alert">{d.key_error}. Until this is fixed, stored passwords cannot be read and new ones cannot be saved.</p> : null}
             {d.key_source === 'file' ? (
-              <p className="text-xs text-faint">The key file lives next to the database on the persistent volume with owner-only permissions. Setting <span className="font-mono">{d.key_env_var}</span> in the deployment takes precedence over it. The key is never shown here.</p>
+              <p className="text-xs text-faint">The key file lives on the persistent volume with owner-only permissions. Setting <span className="font-mono">{d.key_env_var}</span> in the deployment takes precedence over it. The key is never shown here.</p>
             ) : null}
             {last ? (
               <p className={`text-xs rounded-md px-3 py-2 ${last.error && problems ? 'text-critical bg-critical-bg' : 'text-faint bg-surface-2'}`} role={last.error && problems ? 'alert' : undefined}>

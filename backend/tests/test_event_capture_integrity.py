@@ -16,8 +16,7 @@ NOW = datetime(2026, 9, 8, 12, 0, tzinfo=UTC)
 
 @pytest.fixture(autouse=True)
 def _fresh_db(tmp_path):
-    db.reset_for_tests(str(tmp_path / "events.db"))
-    events_store.ensure_schema()
+    db.reset_for_tests()
 
 
 def _snapshot(at: datetime = NOW) -> Snapshot:
@@ -130,25 +129,6 @@ def test_independent_pruning_and_per_connection_row_cap():
     assert {e.id for e in kept}.isdisjoint({"c1:1000", "c1:1001", "c1:1002", "c1:1003", "c1:1004"})
 
 
-@pytest.mark.parametrize("pages", [7, 1000, 10000])
-def test_incremental_maintenance_records_reclamation(pages):
-    assert db.fetchone("PRAGMA auto_vacuum")[0] == 2
-    payload = "x" * 4000
-    events_store.upsert_events([_event(i, NOW, payload) for i in range(1500)])
-    events_store.prune_events("c1", 1, now=NOW + timedelta(hours=2))
-    before = int(db.fetchone("PRAGMA freelist_count")[0])
-    assert before > 1000
-    expected = min(pages, before)
-    status = events_store.bounded_maintenance(at=NOW, pages=pages)
-    after = int(db.fetchone("PRAGMA freelist_count")[0])
-
-    assert status.last_run == NOW
-    assert status.last_error is None
-    assert status.pages_reclaimed == expected
-    assert before - after == expected
-    assert events_store.maintenance_status() == status
-
-
 def test_persistent_burst_coalesces_gaps_without_extra_retries(monkeypatch):
     monkeypatch.setattr(service, "MAX_ITEMS", 10)
     events_store.set_capture_checkpoint("c1", NOW - timedelta(minutes=30))
@@ -218,22 +198,16 @@ def test_gap_outside_capture_window_is_still_retried():
     assert events_store.capture_status("c1").incomplete_intervals == []
 
 
-def test_existing_capture_state_upgrades_with_task_history_status(tmp_path):
-    import sqlite3
-
-    path = tmp_path / "old-capture.db"
-    with sqlite3.connect(path) as conn:
-        conn.execute(
-            "CREATE TABLE event_capture_state "
-            "(connection_id TEXT PRIMARY KEY, last_complete_end TEXT)"
-        )
-        conn.execute("INSERT INTO event_capture_state VALUES (?, ?)", ("c1", NOW.isoformat()))
-    db.reset_for_tests(str(path))
+def test_capture_state_survives_a_restart():
+    """A checkpoint and the task-history flag are durable, so a restart resumes
+    where capture left off instead of refetching from scratch."""
+    events_store.set_capture_checkpoint("c1", NOW)
+    db.reconnect_for_tests()
     status = events_store.capture_status("c1")
     assert status.last_complete_end == NOW
     assert status.task_history_unavailable is False
     events_store.set_task_history_unavailable("c1", True)
-    db.reset_for_tests(str(path))
+    db.reconnect_for_tests()
     status = events_store.capture_status("c1")
     assert status.task_history_unavailable is True
     assert status.last_complete_end == NOW

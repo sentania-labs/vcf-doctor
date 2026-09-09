@@ -13,7 +13,7 @@ from app.snapshots import store
 
 @pytest.fixture()
 def client(tmp_path):
-    db.reset_for_tests(str(tmp_path / "t.db"))
+    db.reset_for_tests()
     with TestClient(app) as c:
         yield c
 
@@ -154,14 +154,13 @@ def test_health_reports_scheduler_off_under_pytest(client):
 
 
 def test_scan_lock_skips_overlapping_run(tmp_path):
-    db.reset_for_tests(str(tmp_path / "t.db"))
+    db.reset_for_tests()
     conn = store.create_connection(ConnectionCreate(**FIXTURE_CONN))
-    lock = scheduler._lock_for(conn.id)
-    lock.acquire()
-    try:
+    # The scan lock is a PostgreSQL advisory lock, so holding it from anywhere,
+    # including another worker or pod, is what makes the next scan skip.
+    with db.try_advisory_lock(db.SCAN_LOCK, conn.id) as held:
+        assert held
         run = scheduler.run_scan(conn.id, "scheduled")
-    finally:
-        lock.release()
     assert run.status == "skipped"
     assert "still active" in run.error
     assert store.get_schedule(conn.id).last_status == "skipped"
@@ -171,7 +170,7 @@ def test_scan_lock_skips_overlapping_run(tmp_path):
 
 def test_scan_lock_under_real_concurrency(tmp_path):
     """Two threads scanning the same connection: exactly one ok, one skipped."""
-    db.reset_for_tests(str(tmp_path / "t.db"))
+    db.reset_for_tests()
     conn = store.create_connection(ConnectionCreate(**FIXTURE_CONN))
     barrier = threading.Barrier(2)
     results = []

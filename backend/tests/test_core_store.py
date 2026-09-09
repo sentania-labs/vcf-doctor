@@ -25,7 +25,7 @@ def _res(i: int) -> Resource:
 
 
 def test_snapshot_persistence_roundtrip(tmp_path):
-    db.reset_for_tests(str(tmp_path / "t.db"))
+    db.reset_for_tests()
     conn = _conn()
     snap = store.save_snapshot(conn.id, [_res(1), _res(2)], "Manual x", scheduled=False)
     loaded = store.get_snapshot(snap.id)
@@ -42,7 +42,7 @@ def test_snapshot_persistence_roundtrip(tmp_path):
 
 def test_retention_prunes_only_scheduled(tmp_path):
     """Tier pruning never touches manual snapshots, even ancient ones."""
-    db.reset_for_tests(str(tmp_path / "t.db"))
+    db.reset_for_tests()
     conn = _conn()
     manual = store.save_snapshot(conn.id, [_res(1)], "keep me", scheduled=False)
     old = store.save_snapshot(conn.id, [_res(1)], "Scheduled ancient", scheduled=True)
@@ -50,7 +50,8 @@ def test_retention_prunes_only_scheduled(tmp_path):
     ancient = (store.now() - timedelta(days=400)).isoformat()
     with db.transaction() as c:
         c.execute(
-            "UPDATE snapshots SET created_at = ? WHERE id IN (?, ?)", (ancient, manual.id, old.id)
+            "UPDATE snapshots SET created_at = %s WHERE id IN (%s, %s)",
+            (ancient, manual.id, old.id),
         )
     assert store.apply_retention(conn.id) == 1
     remaining = {s.id: s.tier for s in store.list_snapshots(conn.id)}
@@ -59,12 +60,12 @@ def test_retention_prunes_only_scheduled(tmp_path):
 
 def test_scan_applies_retention_policy_setting(tmp_path):
     """run_scan applies the stored policy after every scan, manual or scheduled."""
-    db.reset_for_tests(str(tmp_path / "t.db"))
+    db.reset_for_tests()
     conn = _conn()
     assert scheduler.run_scan(conn.id, "scheduled").status == "ok"
     stale = (store.now() - timedelta(days=3)).isoformat()
     with db.transaction() as c:
-        c.execute("UPDATE snapshots SET created_at = ? WHERE connection_id = ?", (stale, conn.id))
+        c.execute("UPDATE snapshots SET created_at = %s WHERE connection_id = %s", (stale, conn.id))
     # Default policy keeps a 3-day-old scheduled snapshot (recent tier).
     assert scheduler.run_scan(conn.id, "manual").status == "ok"
     assert len(store.list_snapshots(conn.id)) == 2
@@ -78,7 +79,7 @@ def test_scan_applies_retention_policy_setting(tmp_path):
 
 
 def test_snapshots_are_keyed_per_connection(tmp_path):
-    db.reset_for_tests(str(tmp_path / "t.db"))
+    db.reset_for_tests()
     a, b = _conn(), _conn()
     store.save_snapshot(a.id, [_res(1)], "a", scheduled=True)
     store.save_snapshot(b.id, [_res(2)], "b", scheduled=True)

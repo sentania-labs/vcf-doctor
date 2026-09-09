@@ -18,7 +18,7 @@ NOW = datetime(2026, 8, 31, 12, 0, 0, tzinfo=UTC)
 
 @pytest.fixture(autouse=True)
 def _fresh_db(tmp_path):
-    db.reset_for_tests(str(tmp_path / "events.db"))
+    db.reset_for_tests()
     yield
 
 

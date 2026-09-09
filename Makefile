@@ -1,7 +1,20 @@
 # One definition, two callers: local and CI both invoke these targets.
 # CI never hand-copies a scanner command; if a gate changes, it changes here.
-.PHONY: setup lint test build-frontend run dev-backend dev-frontend image \
-        scan scan-deps scan-secrets scan-fs scan-image
+.PHONY: setup lint test test-backend build-frontend run dev-backend dev-frontend image \
+        dev-db dev-db-stop migrate scan scan-deps scan-secrets scan-fs scan-image
+
+SHELL := /bin/bash
+
+# PostgreSQL is the only supported database. Two throwaway servers live here so
+# a checkout needs nothing installed: one for `make test`, dropped afterwards,
+# and one for `make run` / `make dev-backend`, which keeps its volume.
+POSTGRES_IMAGE ?= postgres:16
+TEST_PG_NAME ?= vcf-doctor-test-pg
+TEST_PG_PORT ?= 55433
+TEST_DATABASE_URL ?= postgresql://vcf_doctor@127.0.0.1:$(TEST_PG_PORT)/vcf_doctor_test
+DEV_PG_NAME ?= vcf-doctor-dev-pg
+DEV_PG_PORT ?= 55432
+DEV_DATABASE_URL ?= postgresql://vcf_doctor@127.0.0.1:$(DEV_PG_PORT)/vcf_doctor
 
 setup:
 	cd backend && uv venv && uv pip install -e ".[dev]"
@@ -11,20 +24,66 @@ lint:
 	cd backend && uv run ruff check .
 	cd frontend && npx tsc -b --noEmit
 
-test:
-	cd backend && uv run pytest -q
+# The backend suite drops and rebuilds the schema between tests, so it needs a
+# database of its own and refuses to run without one being named. Set
+# VCF_DOCTOR_TEST_DATABASE_URL to use a server you already have; otherwise a
+# disposable container is started and removed here. CI calls this same target.
+test: test-backend
 	cd frontend && npm test
+
+test-backend:
+	@if [ -n "$$VCF_DOCTOR_TEST_DATABASE_URL" ]; then \
+	  cd backend && uv run pytest -q; \
+	else \
+	  trap 'docker rm -f $(TEST_PG_NAME) >/dev/null 2>&1 || true' EXIT; \
+	  docker rm -f $(TEST_PG_NAME) >/dev/null 2>&1 || true; \
+	  docker run -d --name $(TEST_PG_NAME) \
+	    -e POSTGRES_USER=vcf_doctor -e POSTGRES_DB=vcf_doctor_test \
+	    -e POSTGRES_HOST_AUTH_METHOD=trust \
+	    -p 127.0.0.1:$(TEST_PG_PORT):5432 $(POSTGRES_IMAGE) >/dev/null; \
+	  for i in $$(seq 1 60); do \
+	    docker exec $(TEST_PG_NAME) pg_isready -U vcf_doctor -q 2>/dev/null && break; \
+	    if [ "$$i" = 60 ]; then \
+	      echo "test postgres never became ready (port $(TEST_PG_PORT) in use?):"; \
+	      docker logs $(TEST_PG_NAME) 2>&1 | tail -20; exit 1; \
+	    fi; \
+	    sleep 1; \
+	  done; \
+	  cd backend && VCF_DOCTOR_TEST_DATABASE_URL="$(TEST_DATABASE_URL)" uv run pytest -q; \
+	fi
+
+# A local PostgreSQL for `make run` and `make dev-backend`. It keeps its data in
+# a named volume, so a restart does not lose the connections you added.
+dev-db:
+	@docker start $(DEV_PG_NAME) >/dev/null 2>&1 || \
+	  docker run -d --name $(DEV_PG_NAME) \
+	    -e POSTGRES_USER=vcf_doctor -e POSTGRES_DB=vcf_doctor \
+	    -e POSTGRES_HOST_AUTH_METHOD=trust \
+	    -v vcf-doctor-dev-pg:/var/lib/postgresql/data \
+	    -p 127.0.0.1:$(DEV_PG_PORT):5432 $(POSTGRES_IMAGE) >/dev/null
+	@for i in $$(seq 1 60); do \
+	  docker exec $(DEV_PG_NAME) pg_isready -U vcf_doctor -q && exit 0; \
+	  sleep 1; \
+	done; echo "dev postgres never became ready"; exit 1
+
+dev-db-stop:
+	docker stop $(DEV_PG_NAME) >/dev/null 2>&1 || true
+
+# Apply pending schema migrations to the dev database. The app does this itself
+# at startup; this target is for looking at the schema without starting it.
+migrate: dev-db
+	cd backend && VCF_DOCTOR_DATABASE_URL="$(DEV_DATABASE_URL)" uv run python -m app.migrate upgrade
 
 build-frontend:
 	cd frontend && npm run build
 
 # Backend serving the built frontend, like the container does.
-run: build-frontend
-	cd backend && VCF_DOCTOR_STATIC_DIR=../frontend/dist VCF_DOCTOR_DB_PATH=../data/vcf-doctor.db \
+run: build-frontend dev-db
+	cd backend && VCF_DOCTOR_STATIC_DIR=../frontend/dist VCF_DOCTOR_DATABASE_URL="$(DEV_DATABASE_URL)" \
 		uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-proxy-headers
 
-dev-backend:
-	cd backend && VCF_DOCTOR_DB_PATH=../data/vcf-doctor.db uv run uvicorn app.main:app --reload --port 8000 --no-proxy-headers
+dev-backend: dev-db
+	cd backend && VCF_DOCTOR_DATABASE_URL="$(DEV_DATABASE_URL)" uv run uvicorn app.main:app --reload --port 8000 --no-proxy-headers
 
 dev-frontend:
 	cd frontend && npm run dev
@@ -40,7 +99,6 @@ image:
 # Fast path: trivy / gitleaks binaries on PATH (see README, "Security posture").
 # Fallback: the pinned scanner containers, run as the calling user. Both read
 # the same committed config (trivy.yaml, .trivyignore), so results are identical.
-SHELL := /bin/bash
 TRIVY_VERSION ?= 0.74.0
 GITLEAKS_VERSION ?= v8.30.1
 TRIVY_CACHE ?= $(HOME)/.cache/trivy
