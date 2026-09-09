@@ -16,7 +16,7 @@ export function getEncryptionStatus(): Promise<EncryptionStatus> {
 // Re-encrypt every stored secret the current key cannot open, using the previous
 // key. A pasted key is sent once and never stored; passing useKeyFile instead
 // rotates from the generated key file still on the volume, with no key in the
-// browser. Nothing changes if the key opens nothing.
+// browser. Credentials stay untouched if the key opens nothing.
 export function rekeyEncryption(previousKey: string, useKeyFile = false): Promise<RekeyResult> {
   if (USE_MOCKS) {
     return delay({

@@ -25,7 +25,7 @@ transaction. It runs from VCF_DOCTOR_SECRET_KEY_PREVIOUS at startup, or from
 the Settings encryption card: a pasted key, or one click on the generated key
 file a deployment left behind when it moved to an env key. That last one is
 never automatic, so an env key set by mistake stays recoverable by unsetting
-it. A previous key that opens nothing changes nothing.
+it. See docs/SECURITY.md for the operator procedure and recovery contract.
 """
 
 from __future__ import annotations
@@ -305,11 +305,11 @@ def rekey(previous_key: str, source: str) -> RekeyOutcome:
     """Re-encrypt every stored secret the current key cannot open, using the
     supplied previous key.
 
-    One transaction: either every row moves to the current key or none does, so
-    an interrupted rotation never leaves half the connections needing a
-    re-entered password. Rows the current key already opens are left alone,
-    legacy plaintext is left to migrate_plaintext, and a previous key that
-    opens nothing writes nothing.
+    Recoverable rows and the outcome commit in one transaction, so an
+    interrupted rotation cannot commit only some of its planned rewrites.
+    Rows neither key opens remain untouched and are reported as unreadable.
+    Rows the current key already opens are left alone, and legacy plaintext
+    is left to migrate_plaintext.
     """
     from app import db
 

@@ -35,10 +35,8 @@ version of this file is in git history.
   and a trusted proxies setting (#4, #47); vCenter passwords and the
   Anthropic key encrypted at rest (#46). The Settings password change shares
   the login lockout (#37).
-- Encryption key rotation in place, no credentials re-entered (#48):
-  `VCF_DOCTOR_SECRET_KEY_PREVIOUS` for one restart, or the Rotate control on
-  the Settings encryption card (pasted previous key, or one click from the
-  generated key file after a move to a sealed secret).
+- Encryption key rotation in place with the previous key (#48); see
+  [rotation and recovery](docs/SECURITY.md#secrets-at-rest).
 - Security gates in CI (lint, tests, dependency and secret scan, repo scan,
   image scan, smoke test, CodeQL); the image is signed with provenance and
   SBOM, and CI publishes the exact digest it tested with one-by-one release

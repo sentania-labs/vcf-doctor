@@ -108,8 +108,8 @@ Losing the key is recoverable: the snapshots and history are untouched, but
 each connection is flagged **Needs password** on the Connections page until
 you re-enter it, and the Anthropic key must be re-entered in Settings.
 Settings, Encryption at rest shows which source is active and never shows
-the key itself. Rotate by setting a new key, restarting, and re-entering the
-passwords. Generate one with:
+the key itself. For rotation and recovery, see
+[Secrets at rest](SECURITY.md#secrets-at-rest). Generate a new key with:
 
 ```bash
 python3 -c 'import secrets; print(secrets.token_urlsafe(32))'

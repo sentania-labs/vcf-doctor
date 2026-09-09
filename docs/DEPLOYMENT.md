@@ -57,7 +57,7 @@ them.
 |---|---|---|
 | `VCF_DOCTOR_DB_PATH` | `/data/vcf-doctor.db` | SQLite location |
 | `VCF_DOCTOR_SECRET_KEY` | unset | Key for encrypting vCenter passwords and the Anthropic key at rest. Unset: a key file is generated next to the database. See [Security](SECURITY.md). |
-| `VCF_DOCTOR_SECRET_KEY_PREVIOUS` | unset | The key stored secrets were last encrypted under. Set it alongside a new `VCF_DOCTOR_SECRET_KEY` for one restart: every stored secret is re-encrypted under the new key in one transaction at startup, so rotating costs no re-entered credentials. Remove it on the next deploy. Settings > Encryption at rest reports the outcome, and Settings can also rotate on demand. |
+| `VCF_DOCTOR_SECRET_KEY_PREVIOUS` | unset | Previous encryption key for startup rotation. See [rotation and recovery](SECURITY.md#secrets-at-rest) for the procedure and Settings alternative. |
 | `ANTHROPIC_API_KEY` | unset | Enables the Claude assistant. A key entered in Settings takes precedence. |
 | `VCF_DOCTOR_AUTH` | `on` | `off` disables the login page (use only behind ingress authentication) |
 | `VCF_DOCTOR_ADMIN_PASSWORD` | unset | Seeds the operator password on first boot; otherwise the UI asks on first visit |
@@ -103,12 +103,9 @@ laptop use. It is not a deployment artifact.
 - **Lost encryption key, volume intact**: history is intact; re-enter each
   vCenter password (flagged "Needs password" on Connections) and the
   Anthropic key. See [Security](SECURITY.md).
-- **Rotated encryption key, previous key still available**: no re-entry
-  needed. Restart once with the old value in
-  `VCF_DOCTOR_SECRET_KEY_PREVIOUS`, or rotate from Settings > Encryption at
-  rest. A key that opens nothing changes nothing, though wrong guesses count
-  against the login backoff like a wrong password. See
-  [Security](SECURITY.md).
+- **Rotated encryption key, previous key still available**: follow
+  [rotation and recovery](SECURITY.md#secrets-at-rest), including the shared
+  backoff for pasted wrong guesses.
 - **Bad release**: re-pin the previous digest or tag and file an issue. The
   database schema is migrated forward on startup; going back a release is
   not guaranteed to be safe once a newer release has written to the volume,

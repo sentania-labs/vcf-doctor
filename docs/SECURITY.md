@@ -58,8 +58,12 @@ is never automatic on purpose: an environment key set by mistake stays
 recoverable by unsetting it, which a silent re-encryption would prevent.
 Delete the key file once the console reads its credentials again.
 
-A rotation writes nothing unless the supplied key opens the secret, so a
-wrong key leaves the database exactly as it was and says so.
+A rotation rewrites only secrets the supplied key opens; secrets under other
+keys stay untouched and are reported as unreadable. All recoverable secrets
+and the outcome commit in one transaction. A wrong key leaves stored
+credentials unchanged, but records a failed outcome. Pasted wrong guesses
+count against the shared login backoff described above. If every secret is
+already readable, a pasted key is not checked and the backoff stays unchanged.
 
 ## Browser headers
 

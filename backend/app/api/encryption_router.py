@@ -36,7 +36,7 @@ class EncryptionStatus(BaseModel):
     # Set when no usable key exists (corrupt or unreadable key file, malformed
     # env value). Reads degrade to "needs credentials"; saving secrets fails.
     key_error: str | None = None
-    unreadable_connections: list[str]  # connection ids needing a re-entered password
+    unreadable_connections: list[str]  # connection ids needing credential recovery
     assistant_key_unreadable: bool
     # The stored assistant key is unreadable but ANTHROPIC_API_KEY covers for it.
     assistant_env_fallback: bool = False
@@ -94,7 +94,7 @@ def get_encryption_status():
 def rekey(body: RekeyBody, request: Request):
     """Re-encrypt secrets left behind by a key rotation, without re-entering
     them. A pasted key is a password check like any other, so it shares the
-    login backoff; a key that opens nothing changes nothing."""
+    login backoff; a key that opens nothing leaves credentials untouched."""
     pasted = body.previous_key.strip()
     if body.use_key_file and pasted:
         raise HTTPException(400, "supply either the previous key or the key file, not both")

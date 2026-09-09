@@ -10,7 +10,7 @@ Prerequisites: Python 3.14+, [uv](https://docs.astral.sh/uv/), Node 22+.
 ```bash
 make setup          # backend venv via uv, frontend npm ci
 make lint           # ruff (backend) and tsc (frontend)
-make test           # backend pytest
+make test           # backend pytest and frontend Node tests
 make run            # builds the frontend, serves everything on :8000
 ```
 
