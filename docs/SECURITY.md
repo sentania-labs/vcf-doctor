@@ -68,8 +68,8 @@ command:
 | CodeQL | `codeql.yml` | Python and TypeScript static analysis; PRs, main, weekly |
 | Smoke test | `ci.yml` image job | container does not boot, fixture scan fails, auth bypass, path traversal, missing headers, or not running as uid 10001 |
 
-Only a main-branch push that passed every gate publishes, and it publishes
-the exact digest that was scanned and smoke-tested. Dependabot opens weekly
+See the [deployment contract](DEPLOYMENT.md#contract) for publication triggers,
+digest guarantees, and completed-release retries. Dependabot opens weekly
 grouped PRs for pip, npm, GitHub Actions and the base image digests. The
 hackathon exception that once suspended image scanning is closed; these
 gates are the release discipline.
