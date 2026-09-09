@@ -138,10 +138,33 @@ export function formatProperty(k: string, v: unknown): string {
 /* ---------- Day grouping and time-range presets (Snapshots, Changes timeline, Events) ---------- */
 
 // Local calendar day key for an ISO time ("2026-09-01"). Groups lists under date headers.
-export function dayKey(iso: string): string {
+export function dayKey(iso: string, timeZone?: string): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso
+  if (timeZone) {
+    try {
+      const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
+      }).formatToParts(d)
+      const get = (type: 'year' | 'month' | 'day') => parts.find(p => p.type === type)?.value ?? ''
+      return `${get('year')}-${get('month')}-${get('day')}`
+    } catch (error) {
+      if (!(error instanceof RangeError)) throw error
+      return d.toISOString().slice(0, 10)
+    }
+  }
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function supportsTimeZone(timeZone?: string): boolean {
+  if (!timeZone) return true
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone }).format()
+    return true
+  } catch (error) {
+    if (error instanceof RangeError) return false
+    throw error
+  }
 }
 
 // "Today", "Yesterday", else "Mon, Sep 1" (with the year once it differs from the current one).
@@ -158,13 +181,33 @@ export function dayLabel(iso: string, now: number = Date.now()): string {
 export interface DayGroup<T> { key: string; label: string; items: T[] }
 // Groups items (already in display order) under their local day, keeping first-seen order of days.
 export function groupByDay<T>(items: T[], time: (t: T) => string): Array<DayGroup<T>> {
+  return groupByDayKey(items, it => dayKey(time(it)))
+}
+
+export function groupByDayKey<T>(
+  items: T[], keyFor: (item: T) => string, timeZone?: string,
+): Array<DayGroup<T>> {
   const out: Array<DayGroup<T>> = []
   const idx = new Map<string, number>()
+  const relativeLabels = supportsTimeZone(timeZone)
+  const today = relativeLabels ? dayKey(new Date().toISOString(), timeZone) : null
+  const yesterday = today
+    ? new Date(new Date(`${today}T12:00:00Z`).getTime() - 86_400_000).toISOString().slice(0, 10)
+    : null
   for (const it of items) {
-    const iso = time(it)
-    const key = dayKey(iso)
+    const key = keyFor(it)
     let i = idx.get(key)
-    if (i === undefined) { i = out.length; idx.set(key, i); out.push({ key, label: dayLabel(iso), items: [] }) }
+    if (i === undefined) {
+      i = out.length
+      idx.set(key, i)
+      const midday = `${key}T12:00:00Z`
+      const label = key === today
+        ? 'Today'
+        : key === yesterday
+          ? 'Yesterday'
+          : new Date(midday).toLocaleDateString([], { timeZone: 'UTC', weekday: 'short', month: 'short', day: 'numeric', ...(today && key.slice(0, 4) === today.slice(0, 4) ? {} : { year: 'numeric' }) })
+      out.push({ key, label, items: [] })
+    }
     out[i].items.push(it)
   }
   return out

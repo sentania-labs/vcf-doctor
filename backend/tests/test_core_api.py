@@ -120,11 +120,22 @@ def test_overview_shape(client):
 
 def test_settings_retention_policy_roundtrip(client):
     body = client.get("/api/settings").json()
+    default_timezone = store.default_retention_policy().timezone
     assert "retention" not in body
-    assert body["retention_policy"] == {"recent_days": 14, "hourly_days": 30, "daily_days": 365}
+    assert body["retention_policy"] == {
+        "recent_days": 14,
+        "hourly_days": 30,
+        "daily_days": 365,
+        "timezone": default_timezone,
+    }
     r = client.put("/api/settings", json={"retention_policy": {"recent_days": 7}})
     assert r.status_code == 200, r.text
-    assert r.json()["retention_policy"] == {"recent_days": 7, "hourly_days": 30, "daily_days": 365}
+    assert r.json()["retention_policy"] == {
+        "recent_days": 7,
+        "hourly_days": 30,
+        "daily_days": 365,
+        "timezone": default_timezone,
+    }
     assert client.get("/api/settings").json()["retention_policy"]["recent_days"] == 7
     # The old count is neither accepted nor echoed.
     r = client.put("/api/settings", json={"retention": 12})
@@ -232,6 +243,36 @@ def test_fixture_kind_is_test_only(client, monkeypatch):
     # Plain unknown kinds are refused too.
     r = client.post("/api/connections", json={**live, "kind": "nsx"})
     assert r.status_code == 400
+
+
+def test_stale_fixture_schedule_paused_when_hook_off(client, monkeypatch):
+    """#33: after the hook that allows fixture-kind connections is turned off,
+    a leftover fixture connection has its schedule paused instead of erroring
+    on every scheduled run."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.config import settings
+
+    cid = client.post("/api/connections", json=FIXTURE_CONN).json()["id"]
+    assert client.get(f"/api/connections/{cid}/schedule").json()["enabled"] is True
+    # Simulate a next_run persisted from before VCF_DOCTOR_SCHEDULER was turned
+    # off (the scheduler never runs under pytest, so it must be set directly).
+    store.update_schedule(cid, next_run=datetime.now(UTC) + timedelta(minutes=15))
+
+    monkeypatch.setattr(settings, "test_fixtures", False)
+    assert scheduler.disable_stale_fixture_schedules() == [cid]
+    sched = client.get(f"/api/connections/{cid}/schedule").json()
+    assert sched["enabled"] is False
+    assert sched["next_run"] is None
+    # Idempotent: nothing left to pause on a second pass, e.g. a later restart.
+    assert scheduler.disable_stale_fixture_schedules() == []
+
+
+def test_fixture_schedule_untouched_when_hook_on(client):
+    """With the hook on (test/dev use), fixture connections keep scanning normally."""
+    cid = client.post("/api/connections", json=FIXTURE_CONN).json()["id"]
+    assert scheduler.disable_stale_fixture_schedules() == []
+    assert client.get(f"/api/connections/{cid}/schedule").json()["enabled"] is True
 
 
 def test_settings_carries_assistant_and_never_echoes_key(client):

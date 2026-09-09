@@ -11,11 +11,12 @@ import gzip
 import json
 import logging
 import uuid
-from datetime import UTC, datetime, timedelta
+from dataclasses import dataclass
+from datetime import UTC, datetime, time, timedelta, tzinfo
 
 from pydantic import ValidationError
 
-from app import db, vault
+from app import db, timezones, vault
 from app.config import settings as cfg
 from app.events import store as events_store
 from app.models import (
@@ -319,10 +320,15 @@ def latest_run(connection_id: str | None = None) -> ScanRun | None:
 
 
 def default_retention_policy() -> RetentionPolicy:
+    tz = cfg.retention_timezone
+    if not timezones.is_valid(tz):
+        log.warning("unknown retention timezone %r in the environment, using UTC", tz)
+        tz = "UTC"
     return RetentionPolicy(
         recent_days=cfg.retention_recent_days,
         hourly_days=cfg.retention_hourly_days,
         daily_days=cfg.retention_daily_days,
+        timezone=tz,
     )
 
 
@@ -361,6 +367,7 @@ def _row_to_summary(
     row, policy: RetentionPolicy | None = None, at: datetime | None = None
 ) -> SnapshotSummary:
     created = _dt(row["created_at"])
+    resolved_policy = policy or retention_policy()
     return SnapshotSummary(
         id=row["id"],
         created_at=created,
@@ -368,7 +375,10 @@ def _row_to_summary(
         connection_id=row["connection_id"],
         scheduled=bool(row["scheduled"]),
         resource_count=row["resource_count"],
-        tier=tier_for(created, bool(row["scheduled"]), policy or retention_policy(), at or now()),
+        tier=tier_for(created, bool(row["scheduled"]), resolved_policy, at or now()),
+        retention_day=(
+            created.astimezone(timezones.zone(resolved_policy.timezone)).date().isoformat()
+        ),
     )
 
 
@@ -402,6 +412,7 @@ def save_snapshot(
 ) -> Snapshot:
     sid = new_id()
     created = now()
+    policy = retention_policy()
     with db.transaction() as c:
         c.execute(
             "INSERT INTO snapshots(id, connection_id, created_at, label, scheduled, "
@@ -426,6 +437,7 @@ def save_snapshot(
         resource_count=len(resources),
         resources=resources,
         tier="recent" if scheduled else "manual",
+        retention_day=created.astimezone(timezones.zone(policy.timezone)).date().isoformat(),
     )
 
 
@@ -530,6 +542,12 @@ def existing_snapshot_ids(snapshot_ids: list[str]) -> set[str]:
     return found
 
 
+def snapshot_summary(snapshot_id: str) -> SnapshotSummary | None:
+    """One snapshot's summary without decoding its resources."""
+    row = db.fetchone(f"SELECT {_SUMMARY_COLS} FROM snapshots WHERE id = ?", (snapshot_id,))
+    return _row_to_summary(row) if row is not None else None
+
+
 def get_snapshot(snapshot_id: str) -> Snapshot | None:
     row = db.fetchone("SELECT * FROM snapshots WHERE id = ?", (snapshot_id,))
     if row is None:
@@ -574,10 +592,16 @@ def delete_snapshots(snapshot_ids: list[str]) -> int:
 
 
 def _nearest_mark(t: datetime, period: timedelta) -> datetime:
-    """The hour or day (00:00 UTC) mark closest to t; a half-way tie rounds up."""
+    """The hour mark closest to t; a half-way tie rounds up."""
     whole, rem = divmod(t - _EPOCH, period)
     mark = _EPOCH + whole * period
     return mark + period if rem * 2 >= period else mark
+
+
+def _day_mark(t: datetime, tz: tzinfo) -> datetime:
+    """The starting midnight of t's local calendar day."""
+    local = t.astimezone(tz)
+    return datetime.combine(local.date(), time.min, tzinfo=tz)
 
 
 def select_retention_victims(
@@ -587,11 +611,13 @@ def select_retention_victims(
 
     age < recent_days: keep all. recent <= age < hourly: group by nearest hour
     mark, keep the snapshot closest to the mark (ties: oldest, then id).
-    hourly <= age < daily: same with day marks (00:00 UTC). age >= daily: prune.
+    hourly <= age < daily: group by local calendar day and keep the snapshot
+    nearest that day's starting midnight. age >= daily: prune.
     """
     recent = timedelta(days=policy.recent_days)
     hourly = timedelta(days=policy.hourly_days)
     daily = timedelta(days=policy.daily_days)
+    tz = timezones.zone(policy.timezone)
     best: dict[tuple[timedelta, datetime], tuple[timedelta, datetime, str]] = {}
     victims: list[str] = []
     for sid, created in rows:
@@ -602,7 +628,7 @@ def select_retention_victims(
             victims.append(sid)
             continue
         period = HOUR if age < hourly else DAY
-        mark = _nearest_mark(created, period)
+        mark = _nearest_mark(created, HOUR) if period is HOUR else _day_mark(created, tz)
         candidate = (abs(created - mark), created, sid)
         current = best.get((period, mark))
         if current is None:
@@ -675,10 +701,28 @@ def save_changes(
     changes: list[Change],
 ) -> int:
     """Persist one scan's diff(previous, current). Every significance is
-    stored; readers filter."""
+    stored; readers filter. An empty diff still marks the log as covering
+    this interval (see log_since).
+
+    The coverage marker is written in the same transaction as the rows. Setting
+    it first and failing afterwards would leave the connection claiming an
+    interval it never stored, and a later scan would not correct it because the
+    marker is only written once, so pre-log recovery would skip the interval
+    holding the change that caused a finding.
+    """
+    mark: tuple[str, str] | None = None
+    if log_since(connection_id) is None:
+        previous = snapshot_summary(from_snapshot_id)
+        at = previous.created_at if previous is not None else observed_at
+        mark = (f"{LOG_SINCE_KEY}:{connection_id}", json.dumps(at.isoformat()))
     if not changes:
+        if mark is not None:
+            with db.transaction() as c:
+                c.execute(_SETTING_UPSERT, mark)
         return 0
     with db.transaction() as c:
+        if mark is not None:
+            c.execute(_SETTING_UPSERT, mark)
         c.executemany(
             "INSERT INTO changes(id, connection_id, from_snapshot_id, to_snapshot_id, "
             "observed_at, resource_id, resource_type, resource_name, change_type, "
@@ -763,6 +807,86 @@ def count_changes_by_significance(
     return out
 
 
+LOG_SINCE_KEY = "log_since"
+LOG_RETAINED_SINCE_KEY = "log_retained_since"
+
+
+@dataclass(frozen=True)
+class LogCoverage:
+    since: datetime | None
+    overlapping_pair: tuple[str, str] | None = None
+
+
+def _oldest_change_row(connection_id: str):
+    return db.fetchone(
+        "SELECT c.from_snapshot_id, c.to_snapshot_id, c.observed_at, "
+        "source.id AS source_id, source.created_at AS source_created_at, "
+        "target.id AS target_id FROM changes c "
+        "LEFT JOIN snapshots source ON source.id = c.from_snapshot_id "
+        "AND source.connection_id = c.connection_id "
+        "LEFT JOIN snapshots target ON target.id = c.to_snapshot_id "
+        "AND target.connection_id = c.connection_id "
+        "WHERE c.connection_id = ? ORDER BY c.observed_at ASC LIMIT 1",
+        (connection_id,),
+    )
+
+
+def log_since(connection_id: str) -> datetime | None:
+    """First covered interval for this connection, including empty diffs."""
+    raw = db.get_setting(f"{LOG_SINCE_KEY}:{connection_id}")
+    return datetime.fromisoformat(raw) if raw else None
+
+
+def effective_log_since(connection_id: str) -> datetime | None:
+    """Oldest interval still covered after change-log retention."""
+    return effective_log_coverage(connection_id).since
+
+
+def effective_log_coverage(connection_id: str) -> LogCoverage:
+    started = log_since(connection_id)
+    if started is None:
+        return LogCoverage(None)
+    raw = db.get_setting(f"{LOG_RETAINED_SINCE_KEY}:{connection_id}")
+    retained = datetime.fromisoformat(raw) if raw else started
+    since = max(started, retained)
+    row = _oldest_change_row(connection_id)
+    pair = None
+    if (
+        row is not None
+        and row["source_id"] is None
+        and row["target_id"] is not None
+        and _dt(row["observed_at"]) == since
+    ):
+        pair = (row["from_snapshot_id"], row["to_snapshot_id"])
+    return LogCoverage(since, pair)
+
+
+# The marker is a settings row, written through save_changes' own transaction so
+# it commits with the rows it describes; db.set_setting would commit on its own.
+_SETTING_UPSERT = (
+    "INSERT INTO settings(key, value) VALUES(?, ?) "
+    "ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+)
+
+
+def _set_log_since(connection_id: str, at: datetime) -> None:
+    db.set_setting(f"{LOG_SINCE_KEY}:{connection_id}", at.isoformat())
+
+
+def backfill_log_since() -> dict[str, datetime]:
+    """Recover each connection's coverage from its oldest surviving change."""
+    starts = {}
+    for connection in db.fetchall("SELECT DISTINCT connection_id FROM changes"):
+        cid = connection["connection_id"]
+        start = log_since(cid)
+        if start is None:
+            row = _oldest_change_row(cid)
+            start = datetime.fromisoformat(row["source_created_at"] or row["observed_at"])
+            _set_log_since(cid, start)
+        starts[cid] = start
+    return starts
+
+
 def count_changes(connection_id: str) -> int:
     row = db.fetchone("SELECT COUNT(*) AS n FROM changes WHERE connection_id = ?", (connection_id,))
     return int(row["n"])
@@ -770,6 +894,11 @@ def count_changes(connection_id: str) -> int:
 
 def prune_changes(connection_id: str, before: datetime) -> int:
     with db.transaction() as c:
+        key = f"{LOG_RETAINED_SINCE_KEY}:{connection_id}"
+        row = c.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+        previous = datetime.fromisoformat(json.loads(row["value"])) if row else before
+        retained_since = max(previous, before)
+        c.execute(_SETTING_UPSERT, (key, json.dumps(retained_since.isoformat())))
         cur = c.execute(
             "DELETE FROM changes WHERE connection_id = ? AND observed_at < ?",
             (connection_id, before.isoformat()),
@@ -793,6 +922,31 @@ def save_findings(snapshot_id: str, findings: list[Finding]) -> None:
 def findings_cached(snapshot_id: str) -> bool:
     """True when a findings row exists for the snapshot (an empty list still counts)."""
     return db.fetchone("SELECT 1 FROM findings WHERE snapshot_id = ?", (snapshot_id,)) is not None
+
+
+def _like_literal(value: str) -> str:
+    """Escape LIKE wildcards; finding ids are full of underscores."""
+    for ch in ("\\", "%", "_"):
+        value = value.replace(ch, "\\" + ch)
+    return value
+
+
+def snapshot_ids_with_finding(connection_id: str, finding_id: str) -> set[str]:
+    """Snapshots of this connection whose cached findings hold this finding id.
+
+    One query instead of decoding every snapshot's findings blob in Python
+    (issue #40). The blobs are json.dumps of a list of findings, so the id
+    appears verbatim as `"id": "<finding id>"`; the closing quote keeps one id
+    from matching a longer one.
+    """
+    pattern = f'%"id": "{_like_literal(finding_id)}"%'
+    rows = db.fetchall(
+        "SELECT f.snapshot_id AS snapshot_id FROM findings f "
+        "JOIN snapshots s ON s.id = f.snapshot_id "
+        "WHERE s.connection_id = ? AND f.findings LIKE ? ESCAPE '\\'",
+        (connection_id, pattern),
+    )
+    return {r["snapshot_id"] for r in rows}
 
 
 def get_findings(snapshot_id: str) -> list[Finding]:

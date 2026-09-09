@@ -86,7 +86,17 @@ function AccessCard() {
   )
 }
 
-const DEFAULT_RETENTION: RetentionPolicy = { recent_days: 14, hourly_days: 30, daily_days: 365 }
+const DEFAULT_RETENTION: RetentionPolicy = { recent_days: 14, hourly_days: 30, daily_days: 365, timezone: 'UTC' }
+
+// Zones offered for the daily tier's day marks. The browser's full IANA list when it has one
+// (every current browser does), else a short list. UTC is added by hand: browsers leave it out
+// of that list, and a container running UTC is the common case. The stored value is always
+// offered so a zone this browser does not know is not silently swapped on save.
+function zoneOptions(current: string): string[] {
+  const supported = (Intl as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf
+  const all = supported ? supported('timeZone') : ['America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'Europe/London', 'Europe/Berlin', 'Asia/Kolkata', 'Asia/Tokyo', 'Australia/Sydney']
+  return [...new Set(['UTC', ...all, current].filter(Boolean))].sort()
+}
 const DEFAULT_EVENTS: EventPolicy = { retention_hours: 48, row_cap: 250000 }
 
 // Inline validation for the retention tiers. Returns the field in error and a message, or null.
@@ -101,8 +111,9 @@ function retentionProblem(p: RetentionPolicy): { field: keyof RetentionPolicy; m
 
 function RetentionCard({ value, onChange }: { value: RetentionPolicy; onChange: (p: RetentionPolicy) => void }) {
   const problem = retentionProblem(value)
-  const set = (k: keyof RetentionPolicy) => (e: ChangeEvent<HTMLInputElement>) => onChange({ ...value, [k]: e.target.value === '' ? 0 : Math.floor(Number(e.target.value)) })
+  const set = (k: 'recent_days' | 'hourly_days' | 'daily_days') => (e: ChangeEvent<HTMLInputElement>) => onChange({ ...value, [k]: e.target.value === '' ? 0 : Math.floor(Number(e.target.value)) })
   const cls = (k: keyof RetentionPolicy) => problem?.field === k ? 'border-critical focus:border-critical focus:ring-critical/25' : undefined
+  const zones = zoneOptions(value.timezone)
   return (
     <Card>
       <CardHeader title="Retention" subtitle="How long scheduled snapshots are kept, thinning out as they age. Applied per connection after every scan."
@@ -118,6 +129,16 @@ function RetentionCard({ value, onChange }: { value: RetentionPolicy; onChange: 
           <Field label="One per day kept for (days)" hint="Older than this, scheduled snapshots are removed.">
             <Input type="number" min={1} max={3650} inputMode="numeric" value={value.daily_days || ''} onChange={set('daily_days')} className={cls('daily_days')} aria-invalid={problem?.field === 'daily_days'} />
           </Field>
+        </div>
+        <div className="grid sm:grid-cols-2 gap-4">
+          <Field label="Day marks in timezone" hint="Which midnight the daily tier keeps a snapshot nearest, so it lands on the day the Snapshots page files it under.">
+            <Select className="w-full" value={value.timezone} onChange={e => onChange({ ...value, timezone: e.target.value })}>
+              {zones.map(z => <option key={z} value={z}>{z}</option>)}
+            </Select>
+          </Field>
+          <div className="text-xs text-faint sm:pt-6 space-y-1">
+            <p>Daily retention and Snapshots page groups use midnight {value.timezone}.</p>
+          </div>
         </div>
         {problem ? <p className="text-sm text-critical bg-critical-bg rounded-md px-3 py-2" role="alert">{problem.message}</p>
           : <p className="text-sm text-muted">Every scan for {value.recent_days} {value.recent_days === 1 ? 'day' : 'days'}, then hourly to {value.hourly_days} {value.hourly_days === 1 ? 'day' : 'days'}, then daily to {value.daily_days} {value.daily_days === 1 ? 'day' : 'days'}.</p>}
@@ -155,7 +176,7 @@ function EventsRetentionCard({ value, onChange, settings }: { value: EventPolicy
         action={problem ? <Badge tone="critical"><AlertTriangle size={11} /> Check values</Badge> : <Badge tone="ok" dot>Valid</Badge>} />
       <div className="px-5 pb-5 space-y-4">
         <div className="grid sm:grid-cols-2 gap-4">
-          <Field label="Keep events for (hours)" hint="Events older than this are removed after a scan. Default: 48 hours.">
+          <Field label="Keep events for (hours)" hint="Events older than this are removed after a scan. A connection's first capture also reaches this far back. Default: 48 hours.">
             <Input type="number" min={1} max={8760} inputMode="numeric" value={value.retention_hours || ''} onChange={set('retention_hours')} aria-invalid={problem?.field === 'retention_hours'} className={problem?.field === 'retention_hours' ? 'border-critical focus:border-critical focus:ring-critical/25' : undefined} />
           </Field>
           <Field label="Maximum rows per connection" hint="A hard backstop after time-based pruning. The newest rows are kept. Default: 250,000.">

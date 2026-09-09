@@ -34,9 +34,34 @@ def retention_policy() -> RetentionPolicy:
     return store.retention_policy()
 
 
+def disable_stale_fixture_schedules() -> list[str]:
+    """When VCF_DOCTOR_TEST_FIXTURES is off, a fixture-kind connection can only
+    be a leftover from a removed test/demo hook: it has no live vCenter behind
+    it, so its scheduled scans just error every interval until the operator
+    deletes it (#33). Pause its schedule so the log stays quiet; the operator
+    still sees and removes the connection itself on the Connections page.
+    Returns the ids paused."""
+    if settings.test_fixtures:
+        return []
+    paused = []
+    for conn in store.list_connections():
+        if conn.kind != "fixture":
+            continue
+        sched = store.get_schedule(conn.id)
+        if sched is not None and sched.enabled:
+            store.update_schedule(conn.id, enabled=False, clear_next_run=True)
+            remove_job(conn.id)
+            paused.append(conn.id)
+    if paused:
+        log.warning(
+            "startup: paused schedule for %d leftover fixture connection(s); remove them",
+            len(paused),
+        )
+    return paused
+
+
 def startup_maintenance() -> None:
-    """Once per process start: compress legacy snapshot rows, then apply
-    retention to every connection so a long-stopped instance catches up."""
+    """Catch up persisted state after downtime before scheduled scans resume."""
     from app.events import store as events_store
 
     events_store.ensure_schema()
@@ -46,6 +71,10 @@ def startup_maintenance() -> None:
             log.info("startup: compressed %d legacy snapshot(s)", migrated)
     except Exception:
         log.exception("startup: legacy snapshot migration failed")
+    try:
+        disable_stale_fixture_schedules()
+    except Exception:
+        log.exception("startup: disabling stale fixture schedules failed")
     policy = retention_policy()
     for conn in store.list_connections():
         try:
@@ -71,16 +100,20 @@ def compute_findings(resources: list[Resource], previous: list[Resource] | None)
         return []
 
 
+class ChangeDiffError(RuntimeError):
+    pass
+
+
 def compute_changes(old: list[Resource], new: list[Resource]) -> list:
     try:
         from app.diff.engine import diff
-    except ImportError:
-        return []
+    except ImportError as exc:
+        raise ChangeDiffError("change diff engine unavailable") from exc
     try:
         return list(diff(old, new))
-    except Exception:
+    except Exception as exc:
         log.exception("diff failed")
-        return []
+        raise ChangeDiffError("change diff failed") from exc
 
 
 def _label(trigger: str, label: str | None) -> str:
@@ -122,6 +155,7 @@ def run_scan(connection_id: str, trigger: str = "manual", label: str | None = No
             collector = get_collector(conn)
             previous = store.latest_snapshot(connection_id)
             resources = collector.collect()
+            changes = compute_changes(previous.resources, resources) if previous is not None else []
             snapshot: Snapshot = store.save_snapshot(
                 connection_id, resources, _label(trigger, label), scheduled=trigger == "scheduled"
             )
@@ -141,7 +175,7 @@ def run_scan(connection_id: str, trigger: str = "manual", label: str | None = No
                     previous.id,
                     snapshot.id,
                     snapshot.created_at,
-                    compute_changes(previous.resources, resources),
+                    changes,
                 )
             store.apply_retention(connection_id)
             run = store.finish_run(run.id, "ok", snapshot_id=snapshot.id)

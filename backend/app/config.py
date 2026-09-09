@@ -5,16 +5,24 @@ container. Operator-time configuration (connections, schedules, retention,
 assistant settings) lives in SQLite and is edited through the GUI.
 """
 
+import os
+
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _retention_timezone_default() -> str:
+    return (os.environ.get("TZ") or "UTC").strip() or "UTC"
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="VCF_DOCTOR_", extra="ignore")
 
     db_path: str = "/data/vcf-doctor.db"
-    # Test hook, deliberately undocumented: allows a connection of kind
-    # "fixture" (bundled snapshot data, no vCenter). Used by the backend test
-    # suite and the CI smoke test. Never set it on a real deployment.
+    # Test-only hook: allows a connection of kind "fixture" (bundled snapshot
+    # data, no vCenter). Used by the backend test suite and the CI smoke test;
+    # deployment behavior is documented in docs/DEPLOYMENT.md. Never set it on
+    # a real deployment.
     test_fixtures: bool = False
     llm_model: str = "claude-opus-5"
     # Directory containing the built frontend (index.html). Empty disables static serving.
@@ -25,6 +33,8 @@ class Settings(BaseSettings):
     retention_recent_days: int = 14
     retention_hourly_days: int = 30
     retention_daily_days: int = 365
+    # IANA zone whose midnights are the daily tier's day marks.
+    retention_timezone: str = Field(default_factory=_retention_timezone_default)
     # Event history is intentionally independent from snapshot history. The
     # effective values live in the settings table and are editable in the GUI.
     event_retention_hours: int = 48

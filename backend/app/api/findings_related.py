@@ -10,7 +10,13 @@ one scan older (issue #5). This walks back instead:
    the rows about the finding's object, its parent, its children and its
    related objects, plus any high-significance row on the connection.
 3. Databases predating the change log have no rows at all; then fall back to
-   diffing the newest pair of snapshots that actually differ.
+   diffing the newest pair of snapshots that actually differ. A database
+   upgraded to the change log mid-life has findings older than the log
+   (store.log_since), and no query over the log can reach the change that
+   caused those (issue #41): diff the two snapshots bracketing first
+   observation, or the newest differing pair when retention has pruned one
+   of those two, and show the logged rows after that diff. The window says
+   which case it is.
 
 The window is capped (MAX_WINDOW, MAX_SCANS_BACK) and the response says which
 window it shows, so the drawer can print it.
@@ -24,7 +30,7 @@ from pydantic import BaseModel, Field
 
 from app import scheduler
 from app.models import Finding, Resource
-from app.models.change import Change
+from app.models.change import Change, change_identity
 from app.snapshots import store
 
 router = APIRouter(prefix="/api")
@@ -36,7 +42,13 @@ MAX_CHANGES = 12  # rows returned to the drawer
 LOG_FETCH_LIMIT = 1000  # per query; rows are then sorted oldest first and capped
 SIGNIFICANCE_RANK = {"high": 0, "medium": 1, "low": 2}
 
-WindowBasis = Literal["first_observed", "latest_differing_pair", "no_snapshots"]
+WindowBasis = Literal[
+    "first_observed",
+    "latest_differing_pair",
+    "pre_log_bracketing_pair",
+    "pre_log_differing_pair",
+    "no_snapshots",
+]
 
 
 class RelatedWindow(BaseModel):
@@ -50,6 +62,9 @@ class RelatedWindow(BaseModel):
     first_observed: datetime | None = None  # created_at of the first snapshot holding the finding
     scans_present: int = 0  # consecutive snapshots (newest first) containing the finding
     capped: bool = False  # true when MAX_WINDOW or MAX_SCANS_BACK cut the walk short
+    # Where the change log starts, set only when the finding is older than
+    # that: the log cannot contain the cause (issue #41).
+    log_starts_at: datetime | None = None
 
 
 class FindingRelated(BaseModel):
@@ -95,7 +110,9 @@ def neighbourhood(finding: Finding, resources: list[Resource]) -> list[str]:
 
 class FirstObserved(BaseModel):
     seen_at: datetime | None = None  # oldest consecutive snapshot holding the finding
+    seen_id: str | None = None
     interval_start: datetime | None = None  # the snapshot before that one, else seen_at
+    interval_start_id: str | None = None  # None when no older snapshot survives
     count: int = 0  # how many consecutive snapshots hold it
     capped: bool = False  # MAX_SCANS_BACK stopped the walk
     all_surviving: bool = False  # present in every snapshot retention has kept
@@ -103,12 +120,19 @@ class FirstObserved(BaseModel):
 
 def first_observed(connection_id: str, finding_id: str) -> FirstObserved:
     snaps = store.list_snapshots(connection_id)  # newest first
+    holders = store.snapshot_ids_with_finding(connection_id, finding_id)
     out = FirstObserved()
     for i, summary in enumerate(snaps[:MAX_SCANS_BACK]):
-        if not any(f.id == finding_id for f in store.get_findings(summary.id)):
+        if summary.id not in holders:
             break
         out.seen_at = summary.created_at
-        out.interval_start = snaps[i + 1].created_at if i + 1 < len(snaps) else summary.created_at
+        out.seen_id = summary.id
+        if i + 1 < len(snaps):
+            out.interval_start = snaps[i + 1].created_at
+            out.interval_start_id = snaps[i + 1].id
+        else:
+            out.interval_start = summary.created_at
+            out.interval_start_id = None
         out.count = i + 1
     else:
         out.capped = len(snaps) > MAX_SCANS_BACK
@@ -160,7 +184,9 @@ def _logged(connection_id: str, since: datetime, near: list[str]) -> list:
     return list(unique.values())
 
 
-def _latest_differing_pair(connection_id: str) -> tuple[list, datetime | None, datetime | None]:
+def _latest_differing_pair(
+    connection_id: str,
+) -> tuple[list, datetime | None, datetime | None, tuple[str, str] | None]:
     """Fallback when nothing is logged: diff newest pairs until one differs."""
     summaries = store.list_snapshots(connection_id)[: MAX_PAIRS_BACK + 1]
     newer = store.get_snapshot(summaries[0].id) if summaries else None
@@ -170,9 +196,22 @@ def _latest_differing_pair(connection_id: str) -> tuple[list, datetime | None, d
             break
         diff = scheduler.compute_changes(older.resources, newer.resources)
         if diff:
-            return diff, older.created_at, newer.created_at
+            return diff, older.created_at, newer.created_at, (older.id, newer.id)
         newer = older
-    return [], None, None
+    return [], None, None, None
+
+
+def _bracketing_pair(first: FirstObserved) -> list | None:
+    """Diff of the snapshot before first observation against the first one
+    holding the finding: the interval in which the cause happened. None when
+    retention has pruned either side (or none older survives)."""
+    if first.interval_start_id is None or first.seen_id is None:
+        return None
+    older = store.get_snapshot(first.interval_start_id)
+    newer = store.get_snapshot(first.seen_id)
+    if older is None or newer is None:
+        return None
+    return scheduler.compute_changes(older.resources, newer.resources)
 
 
 def related_changes(connection_id: str, finding: Finding, resources: list[Resource]):
@@ -184,7 +223,9 @@ def related_changes(connection_id: str, finding: Finding, resources: list[Resour
         return FindingRelated(
             finding_id=finding.id, connection_id=connection_id, resource_ids=near, window=window
         )
-    if store.count_changes(connection_id):
+    coverage = store.effective_log_coverage(connection_id)
+    log_starts = coverage.since
+    if log_starts is not None:
         floor = store.now() - MAX_WINDOW
         # The introducing diff is stamped with the first snapshot that holds the finding, or
         # with a snapshot retention has since pruned; either way it is at or after the
@@ -200,17 +241,58 @@ def related_changes(connection_id: str, finding: Finding, resources: list[Resour
         since = max(first.interval_start, floor)
         if first.all_surviving and rows:
             since = min(since, max(min(r.observed_at for r in rows), floor))
-        window = RelatedWindow(
-            basis="first_observed",
-            since=since,
-            until=None,
-            first_observed=seen_at,
-            scans_present=count,
-            capped=walk_capped or first.interval_start < floor,
-        )
-        changes = _select(rows, near)
+        if first.interval_start >= log_starts:
+            changes = _select(rows, near)
+            window = RelatedWindow(
+                basis="first_observed",
+                since=since,
+                until=None,
+                first_observed=seen_at,
+                scans_present=count,
+                capped=walk_capped or first.interval_start < floor,
+            )
+        else:
+            # The log starts after the finding did, so it cannot hold the cause: the
+            # pre-log era is only in the snapshots (issue #41). Diff the pair around first
+            # observation and let the logged rows follow it.
+            diff = _bracketing_pair(first)
+            if diff is not None:
+                basis, pair_since, pair_until = (
+                    "pre_log_bracketing_pair",
+                    first.interval_start,
+                    seen_at,
+                )
+                pair_ids = (first.interval_start_id, first.seen_id)
+            else:
+                basis = "pre_log_differing_pair"
+                diff, pair_since, pair_until, pair_ids = _latest_differing_pair(connection_id)
+            excluded_pairs = {pair_ids} if pair_ids is not None else set()
+            if (
+                coverage.overlapping_pair is not None
+                and diff
+                and pair_ids is not None
+                and coverage.overlapping_pair[1] == pair_ids[1]
+            ):
+                excluded_pairs.add(coverage.overlapping_pair)
+            represented = {change_identity(change) for change in diff}
+            rows = [
+                row
+                for row in rows
+                if (row.from_snapshot_id, row.to_snapshot_id) not in excluded_pairs
+                or change_identity(row) not in represented
+            ]
+            changes = (_select(diff, near) + _select(rows, near))[:MAX_CHANGES]
+            window = RelatedWindow(
+                basis=basis,
+                since=pair_since,
+                until=pair_until,
+                first_observed=seen_at,
+                scans_present=count,
+                capped=walk_capped,
+                log_starts_at=log_starts,
+            )
     else:
-        diff, since, until = _latest_differing_pair(connection_id)
+        diff, since, until, _ = _latest_differing_pair(connection_id)
         window = RelatedWindow(
             basis="latest_differing_pair",
             since=since,

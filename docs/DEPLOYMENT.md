@@ -66,6 +66,7 @@ them.
 | `VCF_DOCTOR_RETENTION_RECENT_DAYS` | `14` | Default retention tier: every scheduled snapshot younger than this is kept; changeable in Settings |
 | `VCF_DOCTOR_RETENTION_HOURLY_DAYS` | `30` | Between recent and this age, one scheduled snapshot per hour is kept |
 | `VCF_DOCTOR_RETENTION_DAILY_DAYS` | `365` | Between hourly and this age, one per day is kept; older scheduled snapshots and change-log rows are pruned. Manual snapshots are never pruned. (`VCF_DOCTOR_DEFAULT_RETENTION`, the old snapshot count, is ignored.) |
+| `VCF_DOCTOR_RETENTION_TIMEZONE` | `TZ`, then `UTC` | Seeds the daily tier and Snapshots grouping timezone when no saved policy exists; see the [retention contract](RETENTION_EVENTS.md#retention-policy-settings-kv-retention_policy-gui-on-settings). |
 | `VCF_DOCTOR_EVENT_RETENTION_HOURS` | [Configuration default](../backend/app/config.py) | Seeds the independent event history window; saved Settings values take precedence. See [event retention](RETENTION_EVENTS.md#events-and-tasks). |
 | `VCF_DOCTOR_EVENT_ROW_CAP` | [Configuration default](../backend/app/config.py) | Seeds the maximum event rows per connection; saved Settings values take precedence. See [event retention](RETENTION_EVENTS.md#events-and-tasks). |
 | `VCF_DOCTOR_HEALTH_WEIGHTS` | `critical=40,warning=15,info=0` | Deployment default for the health score weights; the values saved in Settings take precedence |
@@ -76,7 +77,10 @@ them.
 `VCF_DOCTOR_TEST_FIXTURES` (and `VCF_DOCTOR_FIXTURES_DIR`, which points it
 at a different sample set) exist for the test suite and the CI smoke test
 only: they allow a connection backed by bundled sample data instead of a
-vCenter. Never set them on a real deployment.
+vCenter. Never set them on a real deployment. When `VCF_DOCTOR_TEST_FIXTURES`
+is off, startup pauses enabled schedules on leftover fixture connections
+and logs a warning if any were paused. The connections remain visible on
+Connections for the operator to remove; live vCenter schedules are unaffected.
 
 ## Rotating the encryption key
 

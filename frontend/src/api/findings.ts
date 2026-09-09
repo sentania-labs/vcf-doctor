@@ -22,7 +22,7 @@ export function getFindingRelated(findingId: string, connectionId?: string | nul
     const changes = (estate?.changes ?? []).filter(c => near.has(c.resource_id) || c.significance === 'high').slice(0, 12)
     return delay({
       finding_id: findingId, connection_id: estate?.connection.id ?? '', resource_ids: [...near],
-      window: { basis: 'first_observed', since, until: null, first_observed: since, scans_present: Math.min(3, snaps.length), capped: false },
+      window: { basis: 'first_observed', since, until: null, first_observed: since, scans_present: Math.min(3, snaps.length), capped: false, log_starts_at: null },
       changes,
     }, 300)
   }
