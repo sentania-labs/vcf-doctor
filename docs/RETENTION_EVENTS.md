@@ -62,8 +62,8 @@ describe that era. Both readers say so rather than showing an empty window:
   the newest differing pair when retention has pruned one of those two
   (`"pre_log_differing_pair"`), and lists the logged rows about the finding's
   neighbourhood after that diff as a separate block, then caps the combined list.
-  Later logged occurrences remain visible even when their summaries match
-  changes in the bracketing interval.
+  Logged occurrences remain visible even when their summaries match the
+  snapshot diff, including when the fallback diff overlaps a logged interval.
 - the Overview feed recovers the part of its 24 h window that predates the log
   by diffing the snapshots that do cover it, newest first and bounded. Recovered
   changes use the newer snapshot's observation time when ranked alongside

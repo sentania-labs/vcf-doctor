@@ -589,7 +589,8 @@ def test_bracketing_parent_change_survives_a_full_page_of_logged_object_changes(
     assert all(c["resource_id"] == vm.id for c in body["changes"][1:])
 
 
-def test_bracketing_disconnect_keeps_a_later_logged_disconnect(client):
+@pytest.mark.parametrize("pruned", [False, True], ids=["bracketing", "fallback"])
+def test_snapshot_diff_keeps_distinct_logged_disconnects(client, pruned):
     cid = _connection(client, 0)
     host = Resource(
         id="host:parent", type="host", name="parent", source="test",
@@ -603,27 +604,38 @@ def test_bracketing_disconnect_keeps_a_later_logged_disconnect(client):
     )
     previous = store.save_snapshot(cid, [host, vm], "before", scheduled=True)
     store.save_findings(previous.id, [])
-    for i, state in enumerate(("disconnected", "connected", "disconnected")):
+    before_id = previous.id
+    states = ("disconnected", "connected", "disconnected")
+    if pruned:
+        states = ("connected", "connected", *states)
+    for i, state in enumerate(states):
         host = host.model_copy(deep=True)
         host.properties["connectionState"] = state
         snap = store.save_snapshot(cid, [host, vm], state, scheduled=True)
         store.save_findings(snap.id, [finding])
-        if i > 0:
+        if i >= (2 if pruned else 1):
             store.save_changes(
                 cid, previous.id, snap.id, snap.created_at,
                 scheduler.compute_changes(previous.resources, snap.resources),
             )
         previous = snap
 
+    if pruned:
+        assert store.delete_snapshots([before_id]) == 1
+
     response = client.get(f"/api/findings/{finding.id}/related?connection_id={cid}")
     assert response.status_code == 200
     body = response.json()
-    assert body["window"]["basis"] == "pre_log_bracketing_pair"
-    assert [c["summary"] for c in body["changes"]] == [
+    expected_basis = "pre_log_differing_pair" if pruned else "pre_log_bracketing_pair"
+    assert body["window"]["basis"] == expected_basis
+    expected = [
         "connectionState connected -> disconnected",
         "connectionState disconnected -> connected",
         "connectionState connected -> disconnected",
     ]
+    if pruned:
+        expected.insert(1, "connectionState connected -> disconnected")
+    assert [c["summary"] for c in body["changes"]] == expected
 
 
 def test_newer_recovered_change_survives_overview_cap_across_connections(client, monkeypatch):
