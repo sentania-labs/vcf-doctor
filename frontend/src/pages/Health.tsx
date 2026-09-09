@@ -80,12 +80,9 @@ function describeScope(scope: RelatedWindow): string {
   if (scope.basis === 'first_observed' && scope.since) {
     const scans = `${scope.scans_present} ${scope.scans_present === 1 ? 'scan' : 'scans'}`
     const capped = scope.capped ? ', capped' : ''
-    // The change log can start later than the finding (a database upgraded to the change-log
-    // release mid-life, issue #41): say so, or "0 changes" reads as "nothing happened".
-    const late = scope.log_starts_at ? `; the change log only starts ${formatDateTime(scope.log_starts_at)}` : ''
     return scope.first_observed && scope.first_observed !== scope.since
-      ? `Since ${formatDateTime(scope.since)} (first seen ${formatDateTime(scope.first_observed)}, ${scans}${capped})${late}`
-      : `Since the first snapshot ${formatDateTime(scope.since)} (${scans}${capped})${late}`
+      ? `Since ${formatDateTime(scope.since)} (first seen ${formatDateTime(scope.first_observed)}, ${scans}${capped})`
+      : `Since the first snapshot ${formatDateTime(scope.since)} (${scans}${capped})`
   }
   if (scope.basis === 'pre_log_bracketing_pair' || scope.basis === 'pre_log_differing_pair') {
     const from = scope.log_starts_at ? `The change log only starts ${formatDateTime(scope.log_starts_at)}, after this finding appeared` : 'The change log starts after this finding appeared'

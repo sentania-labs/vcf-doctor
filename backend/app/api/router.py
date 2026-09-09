@@ -153,8 +153,8 @@ def _recent_changes(connection_id: str | None, min_significance: str | None) -> 
     floor = _resolve_min_significance(min_significance)
     since = store.now() - timedelta(hours=24)
     out: list = []
-    log_since = store.log_since()
     for conn in _target_connections(connection_id):
+        log_since = store.log_since(conn.id)
         if log_since is not None:
             out.extend(_logged_changes(conn.id, since, floor))
             out.extend(_at_least(_pre_log_changes(conn.id, log_since, since), floor))

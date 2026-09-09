@@ -1,12 +1,13 @@
 """GET /api/findings/{id}/related walks back past identical snapshots (issue #5)."""
 
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app import db, scheduler
 from app.api import findings_related as fr
+from app.api.router import _recent_changes
 from app.main import app
 from app.models import Resource
 from app.models.change import Change
@@ -152,7 +153,7 @@ def _forget_the_change_log(cid: str) -> None:
     no record of the log ever having started."""
     with db.transaction() as c:
         c.execute("DELETE FROM changes WHERE connection_id = ?", (cid,))
-        c.execute("DELETE FROM settings WHERE key = ?", (store.LOG_SINCE_KEY,))
+        c.execute("DELETE FROM settings WHERE key = ?", (f"{store.LOG_SINCE_KEY}:{cid}",))
 
 
 def test_no_log_falls_back_to_latest_differing_pair(client):
@@ -302,7 +303,9 @@ def _scan_with_another_host_powered_off(cid: str) -> None:
     latest = store.latest_snapshot(cid)
     resources = [r.model_copy(deep=True) for r in latest.resources]
     other = next(
-        r for r in resources if r.type == "host" and r.properties.get("connectionState") == "connected"
+        r
+        for r in resources
+        if r.type == "host" and r.properties.get("connectionState") == "connected"
     )
     other.properties["powerState"] = "poweredOff"
     snap = store.save_snapshot(cid, resources, "power event", scheduled=True)
@@ -320,7 +323,7 @@ def _restart_log_at_the_newest_interval(client, cid: str) -> dict:
     _forget_the_change_log(cid)
     _scan_with_another_host_powered_off(cid)
     snaps = store.list_snapshots(cid)  # newest first
-    assert store.log_since() == snaps[1].created_at
+    assert store.log_since(cid) == snaps[1].created_at
     unrelated = Change(
         change_type="modified",
         resource_id=f"datastore:{cid}:datastore-99",
@@ -444,7 +447,7 @@ def test_a_quiet_estate_is_not_mistaken_for_a_late_change_log(client):
         assert diff == []
         store.save_changes(cid, previous.id, snap.id, snap.created_at, diff)
         previous = snap
-    assert store.log_since() == s1.created_at
+    assert store.log_since(cid) == s1.created_at
     assert store.count_changes(cid) == 0
     _scan_with_another_host_powered_off(cid)
     assert store.count_changes(cid) > 0
@@ -463,12 +466,12 @@ def test_startup_backfills_log_since_from_the_oldest_surviving_row(client):
     cid = _connection(client, 3)
     snaps = store.list_snapshots(cid)
     with db.transaction() as c:
-        c.execute("DELETE FROM settings WHERE key = ?", (store.LOG_SINCE_KEY,))
-    assert store.log_since() is None
+        c.execute("DELETE FROM settings WHERE key = ?", (f"{store.LOG_SINCE_KEY}:{cid}",))
+    assert store.log_since(cid) is None
 
-    assert store.backfill_log_since() == snaps[2].created_at
-    assert store.log_since() == snaps[2].created_at
-    assert store.backfill_log_since() == snaps[2].created_at
+    assert store.backfill_log_since() == {cid: snaps[2].created_at}
+    assert store.log_since(cid) == snaps[2].created_at
+    assert store.backfill_log_since() == {cid: snaps[2].created_at}
 
     assert "log_since" not in client.get("/api/settings").json()
     finding = _finding(client, cid, "HOST_DISCONNECTED")
@@ -514,3 +517,72 @@ def test_prefilter_matches_the_finding_id_exactly(client):
     assert store.snapshot_ids_with_finding(cid, finding["id"] + "-EXTRA") == set()
     wildcarded = finding["id"].replace("_", "%")
     assert store.snapshot_ids_with_finding(cid, wildcarded) == set()
+
+
+def test_connection_coverage_is_independent_of_scan_order(client, monkeypatch):
+    start = datetime(2026, 9, 9, 10, tzinfo=UTC)
+    monkeypatch.setattr(store, "now", lambda: start)
+    a = _connection(client, 1)
+    monkeypatch.setattr(store, "now", lambda: start + timedelta(minutes=1))
+    b = _connection(client, 1)
+    monkeypatch.setattr(store, "now", lambda: start + timedelta(minutes=10))
+    _scan(client, b, 1)
+    monkeypatch.setattr(store, "now", lambda: start + timedelta(minutes=15))
+    _scan(client, a, 1)
+
+    assert store.log_since(a) == start
+    assert store.log_since(b) == start + timedelta(minutes=1)
+    finding = _finding(client, a, "HOST_DISCONNECTED")
+    body = client.get(f"/api/findings/{finding['id']}/related?connection_id={a}").json()
+    assert body["window"]["basis"] == "first_observed"
+    assert body["window"]["log_starts_at"] is None
+    feed = _recent_changes(a, "medium")
+    logged = store.list_change_log(a, min_significance="medium")
+    assert sorted(c.summary for c in feed) == sorted(c.summary for c in logged)
+
+    with db.transaction() as c:
+        c.execute("DELETE FROM settings WHERE key IN (?, ?)", (
+            f"{store.LOG_SINCE_KEY}:{a}", f"{store.LOG_SINCE_KEY}:{b}",
+        ))
+    db.set_setting(store.LOG_SINCE_KEY, (start + timedelta(minutes=1)).isoformat())
+    expected = {a: start, b: start + timedelta(minutes=1)}
+    assert store.backfill_log_since() == expected
+    assert store.backfill_log_since() == expected
+    assert store.log_since(a) == start
+    assert store.log_since(b) == expected[b]
+    assert not any(k.startswith("log_since") for k in client.get("/api/settings").json())
+
+
+def test_bracketing_parent_change_survives_a_full_page_of_logged_object_changes(client):
+    cid = _connection(client, 0)
+    host = Resource(
+        id="host:parent", type="host", name="parent", source="test",
+        properties={"connectionState": "connected"},
+    )
+    vm = Resource(id="vm:child", type="vm", name="child", source="test", parent_id=host.id)
+    finding = Finding(
+        id="test:parent", check_id="TEST", severity="warning", title="Parent failed", summary="Host disconnected",
+        resource_id=vm.id, resource_type="vm", resource_name=vm.name,
+    )
+    before = store.save_snapshot(cid, [host, vm], "before", scheduled=True)
+    store.save_findings(before.id, [])
+    host.properties["connectionState"] = "disconnected"
+    after = store.save_snapshot(cid, [host, vm], "after", scheduled=True)
+    store.save_findings(after.id, [finding])
+    latest = store.save_snapshot(cid, [host, vm], "latest", scheduled=True)
+    store.save_findings(latest.id, [finding])
+    rows = [
+        Change(
+            change_type="modified", resource_id=vm.id, resource_type="vm",
+            resource_name=vm.name, significance="high", summary=f"Later flap {i}",
+        )
+        for i in range(fr.MAX_CHANGES + 2)
+    ]
+    store.save_changes(cid, after.id, latest.id, latest.created_at, rows)
+
+    body = client.get(f"/api/findings/{finding.id}/related?connection_id={cid}").json()
+    assert body["window"]["basis"] == "pre_log_bracketing_pair"
+    assert len(body["changes"]) == fr.MAX_CHANGES
+    assert body["changes"][0]["resource_id"] == host.id
+    assert body["changes"][0]["summary"] == "connectionState connected -> disconnected"
+    assert all(c["resource_id"] == vm.id for c in body["changes"][1:])

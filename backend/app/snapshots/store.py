@@ -706,9 +706,9 @@ def save_changes(
     """Persist one scan's diff(previous, current). Every significance is
     stored; readers filter. An empty diff still marks the log as covering
     this interval (see log_since)."""
-    if log_since() is None:
+    if log_since(connection_id) is None:
         previous = snapshot_summary(from_snapshot_id)
-        _set_log_since(previous.created_at if previous is not None else observed_at)
+        _set_log_since(connection_id, previous.created_at if previous is not None else observed_at)
     if not changes:
         return 0
     with db.transaction() as c:
@@ -799,42 +799,34 @@ def count_changes_by_significance(
 LOG_SINCE_KEY = "log_since"
 
 
-def log_since() -> datetime | None:
-    """When the change log started covering this database: the snapshot the
-    first ever diff was taken from. None until the first diff runs.
-
-    Rows alone cannot say this, because a quiet interval writes no row and
-    retention prunes old ones; a database upgraded to the change-log release
-    mid-life has snapshots older than this stamp and no log for that era
-    (issue #41). Internal marker, not an operator setting.
-    """
-    raw = db.get_setting(LOG_SINCE_KEY)
+def log_since(connection_id: str) -> datetime | None:
+    """First covered interval for this connection, including empty diffs."""
+    raw = db.get_setting(f"{LOG_SINCE_KEY}:{connection_id}")
     return datetime.fromisoformat(raw) if raw else None
 
 
-def _set_log_since(at: datetime) -> None:
-    db.set_setting(LOG_SINCE_KEY, at.isoformat())
+def _set_log_since(connection_id: str, at: datetime) -> None:
+    db.set_setting(f"{LOG_SINCE_KEY}:{connection_id}", at.isoformat())
 
 
-def backfill_log_since() -> datetime | None:
-    """Startup: a database that already has change rows but no marker gets one
-    from its oldest surviving row (the snapshot that row diffed from, or the
-    row itself when that snapshot is gone). Conservative: rows pruned before
-    the marker existed make the log look younger than it was."""
-    current = log_since()
-    if current is not None:
-        return current
-    row = db.fetchone("SELECT observed_at FROM changes ORDER BY observed_at ASC LIMIT 1")
-    if row is None:
-        return None
-    observed = datetime.fromisoformat(row["observed_at"])
-    previous = db.fetchone(
-        "SELECT created_at FROM snapshots WHERE created_at < ? ORDER BY created_at DESC LIMIT 1",
-        (row["observed_at"],),
-    )
-    start = datetime.fromisoformat(previous["created_at"]) if previous is not None else observed
-    _set_log_since(start)
-    return start
+def backfill_log_since() -> dict[str, datetime]:
+    """Recover each connection's coverage from its oldest surviving change."""
+    starts = {}
+    for connection in db.fetchall("SELECT DISTINCT connection_id FROM changes"):
+        cid = connection["connection_id"]
+        start = log_since(cid)
+        if start is None:
+            row = db.fetchone(
+                "SELECT c.observed_at, s.created_at FROM changes c "
+                "LEFT JOIN snapshots s ON s.id = c.from_snapshot_id "
+                "AND s.connection_id = c.connection_id "
+                "WHERE c.connection_id = ? ORDER BY c.observed_at ASC LIMIT 1",
+                (cid,),
+            )
+            start = datetime.fromisoformat(row["created_at"] or row["observed_at"])
+            _set_log_since(cid, start)
+        starts[cid] = start
+    return starts
 
 
 def count_changes(connection_id: str) -> int:
