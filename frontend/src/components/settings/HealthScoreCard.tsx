@@ -22,7 +22,7 @@ function problem(w: HealthWeights): string | null {
 type RawWeights = Record<HealthSeverity, string>
 
 const toRaw = (w: HealthWeights): RawWeights => ({ critical: String(w.critical), warning: String(w.warning), info: String(w.info) })
-// Empty or non-numeric text parses to NaN, which problem() below already rejects as "not a whole number".
+// Keep empty input invalid so clearing a field cannot silently save a zero weight.
 const toWeight = (v: string): number => (v.trim() === '' ? NaN : Number(v))
 
 // Health score weights. Saves on its own (separate endpoint from the main Settings form)

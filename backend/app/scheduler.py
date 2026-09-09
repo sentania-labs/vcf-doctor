@@ -61,8 +61,7 @@ def disable_stale_fixture_schedules() -> list[str]:
 
 
 def startup_maintenance() -> None:
-    """Once per process start: compress legacy snapshot rows, then apply
-    retention to every connection so a long-stopped instance catches up."""
+    """Catch up persisted state after downtime before scheduled scans resume."""
     from app.events import store as events_store
 
     events_store.ensure_schema()

@@ -75,7 +75,10 @@ them.
 `VCF_DOCTOR_TEST_FIXTURES` (and `VCF_DOCTOR_FIXTURES_DIR`, which points it
 at a different sample set) exist for the test suite and the CI smoke test
 only: they allow a connection backed by bundled sample data instead of a
-vCenter. Never set them on a real deployment.
+vCenter. Never set them on a real deployment. When `VCF_DOCTOR_TEST_FIXTURES`
+is off, startup pauses enabled schedules on leftover fixture connections
+and logs a warning if any were paused. The connections remain visible on
+Connections for the operator to remove; live vCenter schedules are unaffected.
 
 ## Verifying a pulled image
 
