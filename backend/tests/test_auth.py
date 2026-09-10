@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
 
 
-def _client(tmp_path, monkeypatch, **env):
+def _client(tmp_path, monkeypatch, bootstrap=True, **env):
     from app import auth, db
     from app.config import settings
 
@@ -14,7 +14,8 @@ def _client(tmp_path, monkeypatch, **env):
     import app.main as main
 
     importlib.reload(main)
-    auth.bootstrap_from_env()
+    if bootstrap:
+        auth.bootstrap_from_env()
     return TestClient(main.app)
 
 
@@ -104,6 +105,28 @@ def test_env_seed_and_auth_off(tmp_path, monkeypatch):
         monkeypatch.setattr(s2, "auth", "off")
         assert c.get("/api/auth/status").json()["enabled"] is False
         assert c.get("/api/connections").status_code == 200
+
+
+def test_env_seed_wins_before_background_bootstrap(tmp_path, monkeypatch):
+    from app import auth, scheduler
+
+    monkeypatch.setattr(scheduler, "start", lambda: None)
+    monkeypatch.setattr(scheduler, "shutdown", lambda: None)
+    with _client(
+        tmp_path,
+        monkeypatch,
+        bootstrap=False,
+        VCF_DOCTOR_ADMIN_PASSWORD="seeded password",
+    ) as c:
+        ready = c.get("/api/health/ready")
+        assert ready.status_code == 200
+        assert ready.json()["database"] is True
+        assert auth.configured() is False
+
+        response = c.post("/api/auth/setup", json={"password": "visitor password"})
+        assert response.status_code == 409
+        assert auth.verify_password("seeded password") is True
+        assert auth.verify_password("visitor password") is False
 
 
 def test_every_issued_token_validates(tmp_path, monkeypatch):

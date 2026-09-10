@@ -537,20 +537,9 @@ def put_schedule(connection_id: str, body: ScheduleUpdate):
 # --- settings ------------------------------------------------------------
 
 
-class EventPolicyValues(BaseModel):
-    retention_hours: int
-    row_cap: int
-
-
-class EventPolicyDefaultLimit(BaseModel):
-    configured: EventPolicyValues
-    effective: EventPolicyValues
-
-
 class AppSettings(BaseModel):
     retention_policy: RetentionPolicy
     event_policy: EventPolicy
-    event_policy_default_limit: EventPolicyDefaultLimit | None = None
     min_interval_minutes: int
     scheduler_running: bool
     changes_min_significance: str
@@ -571,11 +560,9 @@ class AppSettingsUpdate(BaseModel):
 def get_settings():
     from app.events import store as events_store
 
-    event_policy = events_store.event_policy()
     return AppSettings(
         retention_policy=scheduler.retention_policy(),
-        event_policy=event_policy,
-        event_policy_default_limit=events_store.default_event_policy_limit(event_policy),
+        event_policy=events_store.event_policy(),
         min_interval_minutes=settings.min_interval_minutes,
         scheduler_running=scheduler.running(),
         changes_min_significance=changes_min_significance(),

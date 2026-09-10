@@ -1,11 +1,11 @@
 import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react'
 import { AlertTriangle, CheckCircle2, Database, KeyRound, ShieldCheck } from 'lucide-react'
-import type { AssistantSettings, EventPolicy, EventPolicyDefaultLimit, RetentionPolicy, Settings, Significance } from '@/types'
+import type { AssistantSettings, EventPolicy, RetentionPolicy, Settings, Significance } from '@/types'
 import { getSettings, updateSettings, getAssistantStatus, changePassword, getAssistantModels, type AssistantModel } from '@/api'
 import { ApiError } from '@/api/client'
 import { useAuth } from '@/state/AuthState'
 import { useAsync } from '@/hooks/useAsync'
-import { eventPolicyDefaultLimitMessage, withRefreshedKeyState } from './settingsForm'
+import { withRefreshedKeyState } from './settingsForm'
 import { Badge, Button, Card, CardHeader, ErrorState, Field, Input, PageHeader, Select, Skeleton, Toggle } from '@/components/ui'
 import HealthScoreCard from '@/components/settings/HealthScoreCard'
 import EncryptionCard from '@/components/settings/EncryptionCard'
@@ -158,7 +158,7 @@ function eventProblem(p: EventPolicy): { field: keyof EventPolicy; message: stri
   return null
 }
 
-function EventsRetentionCard({ value, defaultLimit, onChange }: { value: EventPolicy; defaultLimit: EventPolicyDefaultLimit | null; onChange: (p: EventPolicy) => void }) {
+function EventsRetentionCard({ value, onChange }: { value: EventPolicy; onChange: (p: EventPolicy) => void }) {
   const problem = eventProblem(value)
   const set = (k: keyof EventPolicy) => (e: ChangeEvent<HTMLInputElement>) => onChange({ ...value, [k]: e.target.value === '' ? 0 : Math.floor(Number(e.target.value)) })
   return (
@@ -175,7 +175,6 @@ function EventsRetentionCard({ value, defaultLimit, onChange }: { value: EventPo
           </Field>
         </div>
         {problem ? <p className="text-sm text-critical bg-critical-bg rounded-md px-3 py-2" role="alert">{problem.message}</p> : null}
-        {defaultLimit ? <p className="text-sm text-muted bg-surface-2 rounded-md px-3 py-2">{eventPolicyDefaultLimitMessage(defaultLimit)}</p> : null}
         <div className="flex items-start gap-2 text-xs text-faint bg-surface-2 rounded-md px-3 py-2">
           <Database size={14} className="mt-0.5 shrink-0" />
           <span>Rows past these limits are deleted after a scan. PostgreSQL reclaims the space on its own, so there is nothing to run here.</span>
@@ -190,7 +189,6 @@ export default function SettingsPage() {
   const status = useAsync(() => getAssistantStatus(), [s.data])
   const [retention, setRetention] = useState<RetentionPolicy>(DEFAULT_RETENTION)
   const [eventPolicy, setEventPolicy] = useState<EventPolicy>(DEFAULT_EVENTS)
-  const [eventPolicyDefaultLimit, setEventPolicyDefaultLimit] = useState<EventPolicyDefaultLimit | null>(null)
   const [minSig, setMinSig] = useState<Significance>('low')
   const [assistant, setAssistant] = useState<AssistantSettings>({ enabled: true, provider: 'anthropic', model: 'claude-opus-5', api_key_set: false })
   const [models, setModels] = useState<AssistantModel[]>([])
@@ -205,8 +203,8 @@ export default function SettingsPage() {
   const [saved, setSaved] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
-  useEffect(() => { if (s.data) { setRetention(s.data.retention_policy ?? DEFAULT_RETENTION); setEventPolicy(s.data.event_policy ?? DEFAULT_EVENTS); setEventPolicyDefaultLimit(s.data.event_policy_default_limit ?? null); setAssistant(s.data.assistant); setMinSig(s.data.changes_min_significance ?? 'low') } }, [s.data])
-  const apply = (d: Settings) => { setRetention(d.retention_policy ?? DEFAULT_RETENTION); setEventPolicy(d.event_policy ?? DEFAULT_EVENTS); setEventPolicyDefaultLimit(d.event_policy_default_limit ?? null); setAssistant(d.assistant); setMinSig(d.changes_min_significance ?? 'low'); setApiKey('') }
+  useEffect(() => { if (s.data) { setRetention(s.data.retention_policy ?? DEFAULT_RETENTION); setEventPolicy(s.data.event_policy ?? DEFAULT_EVENTS); setAssistant(s.data.assistant); setMinSig(s.data.changes_min_significance ?? 'low') } }, [s.data])
+  const apply = (d: Settings) => { setRetention(d.retention_policy ?? DEFAULT_RETENTION); setEventPolicy(d.event_policy ?? DEFAULT_EVENTS); setAssistant(d.assistant); setMinSig(d.changes_min_significance ?? 'low'); setApiKey('') }
   const retentionInvalid = retentionProblem(retention) !== null || eventProblem(eventPolicy) !== null
 
   const save = async () => {
@@ -239,7 +237,7 @@ export default function SettingsPage() {
       {!s.data ? <div className="space-y-5"><Skeleton className="h-40 rounded-xl" /><Skeleton className="h-72 rounded-xl" /></div> : (
         <div className="space-y-5">
           <RetentionCard value={retention} onChange={setRetention} />
-          <EventsRetentionCard value={eventPolicy} defaultLimit={eventPolicyDefaultLimit} onChange={setEventPolicy} />
+          <EventsRetentionCard value={eventPolicy} onChange={setEventPolicy} />
           <HealthScoreCard />
 
           <Card>

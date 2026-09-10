@@ -66,7 +66,7 @@ def test_a_lock_in_another_database_is_not_reported_here():
     finally:
         if other is not None:
             other.close()
-        admin.execute(sql.SQL("DROP DATABASE {}").format(sql.Identifier(database_name)))
+        admin.execute(sql.SQL("DROP DATABASE {} WITH (FORCE)").format(sql.Identifier(database_name)))
         admin.close()
 
 

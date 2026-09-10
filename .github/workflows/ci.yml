@@ -303,8 +303,6 @@ jobs:
           # Liveness and readiness disagree while the database is down, which is
           # the whole point: nothing restarts the container, and nothing routes
           # traffic to it either.
-          health_checks_before=$(docker inspect --format '{{len .State.Health.Log}}' smoke)
-          health_check_before=$(docker inspect --format '{{range .State.Health.Log}}{{.End}}{{"\n"}}{{end}}' smoke | tail -n 1)
           docker stop smoke-db
           test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8000/api/health/live)" = 200
           # The older name still answers liveness, so a manifest that has not
@@ -312,6 +310,8 @@ jobs:
           test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8000/api/health)" = 200
           test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8000/api/health/ready)" = 503
           curl -s localhost:8000/api/health/ready | grep -q '"database":false'
+          health_checks_before=$(docker inspect --format '{{len .State.Health.Log}}' smoke)
+          health_check_before=$(docker inspect --format '{{range .State.Health.Log}}{{.End}}{{"\n"}}{{end}}' smoke | tail -n 1)
           health=
           health_check_exit=
           for i in $(seq 1 65); do
@@ -320,7 +320,9 @@ jobs:
             health_checks=$(docker inspect --format '{{len .State.Health.Log}}' smoke)
             health_check=$(docker inspect --format '{{range .State.Health.Log}}{{.End}}{{"\n"}}{{end}}' smoke | tail -n 1)
             if [ "$health_checks" -gt "$health_checks_before" ] || [ "$health_check" != "$health_check_before" ]; then
-              health_check_exit=$(docker inspect --format '{{range .State.Health.Log}}{{.ExitCode}}{{"\n"}}{{end}}' smoke | tail -n 1)
+              health_observation=$(docker inspect --format '{{.State.Health.Status}}{{range .State.Health.Log}} {{.ExitCode}}{{end}}' smoke)
+              health=${health_observation%% *}
+              health_check_exit=${health_observation##* }
               break
             fi
             sleep 1

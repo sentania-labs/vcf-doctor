@@ -35,7 +35,6 @@ def test_defaults_come_from_config_and_old_count_is_ignored(client):
         "timezone": default_timezone,
     }
     assert body["event_policy"] == {"retention_hours": 48, "row_cap": 250000}
-    assert body["event_policy_default_limit"] is None
     # PostgreSQL's autovacuum reclaims space, so there is no maintenance card.
     assert "event_maintenance" not in body
     assert db.get_setting("event_policy") == {"retention_hours": 48, "row_cap": 250000}
@@ -97,29 +96,6 @@ def test_event_policy_partial_update_persists_and_validates(client):
 
     for bad in ({"retention_hours": 0}, {"row_cap": 999}, {"row_cap": True}):
         assert client.put("/api/settings", json={"event_policy": bad}).status_code == 400
-
-
-def test_clamped_event_default_is_visible_until_an_operator_saves(client, monkeypatch):
-    from app.events import store as events_store
-
-    monkeypatch.setattr(settings, "event_retention_hours", 100_000)
-    monkeypatch.setattr(settings, "event_row_cap", 500)
-    db.set_setting(events_store.EVENT_POLICY_KEY, None)
-    events_store.seed_defaults()
-
-    body = client.get("/api/settings").json()
-    assert body["event_policy"] == {"retention_hours": 8760, "row_cap": 1000}
-    assert body["event_policy_default_limit"] == {
-        "configured": {"retention_hours": 100_000, "row_cap": 500},
-        "effective": {"retention_hours": 8760, "row_cap": 1000},
-    }
-
-    saved = client.put(
-        "/api/settings",
-        json={"event_policy": {"retention_hours": 72, "row_cap": 1000}},
-    ).json()
-    assert saved["event_policy_default_limit"] is None
-    assert client.get("/api/settings").json()["event_policy_default_limit"] is None
 
 
 def test_timezone_is_stored_with_an_explicit_default(client):
