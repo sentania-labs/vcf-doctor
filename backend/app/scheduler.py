@@ -36,7 +36,6 @@ _leader = False
 # Compared against the stored schedules by reconcile_jobs().
 _scheduled_state: dict[str, tuple[int, bool]] = {}
 _startup_pending: frozenset[str] = frozenset()
-_startup_failures: tuple[str, ...] = ()
 _retention_completed: set[str] = set()
 RECONCILE_SECONDS = 60
 STARTUP_RETRY_SECONDS = 5
@@ -167,10 +166,9 @@ def startup_maintenance() -> bool:
     Runs on every worker. Everything it does is idempotent, so N workers
     starting together repeat work rather than corrupt any.
     """
-    global _startup_pending, _startup_failures
+    global _startup_pending
 
     pending = set(_startup_pending)
-    failures: set[str] = set()
     blocked = False
     for identifier, action in _STARTUP_STEPS:
         if identifier not in pending:
@@ -181,27 +179,22 @@ def startup_maintenance() -> bool:
             if db.is_connection_unavailable(exc):
                 blocked = True
             else:
-                failures.add(identifier)
                 log.exception("deferred startup step %s failed; retrying next interval", identifier)
         else:
-            if result.failed:
-                failures.add(identifier)
             if result.blocked:
                 blocked = True
             if not result.failed and not result.blocked:
                 pending.remove(identifier)
 
     _startup_pending = frozenset(pending)
-    _startup_failures = tuple(sorted(failures))
     if blocked:
         log.info("deferred startup work is waiting for the database")
     return blocked
 
 
 def _begin_startup() -> None:
-    global _startup_pending, _startup_failures
+    global _startup_pending
     _startup_pending = frozenset(identifier for identifier, _ in _STARTUP_STEPS)
-    _startup_failures = ()
     _retention_completed.clear()
 
 
@@ -468,14 +461,11 @@ def _leadership_job() -> None:
 
 
 def _maintenance_job() -> None:
-    global _startup_failures
     if _startup_pending:
         blocked = False
         try:
             blocked = startup_maintenance()
         except Exception as exc:
-            # Last resort for a pass-level failure, which is logged rather than published.
-            _startup_failures = ()
             if db.is_connection_unavailable(exc):
                 blocked = True
                 log.info("deferred startup work is waiting for the database")
@@ -523,20 +513,15 @@ def start() -> None:
 
 
 def shutdown() -> None:
-    global _scheduler, _leader, _startup_pending, _startup_failures
+    global _scheduler, _leader, _startup_pending
     if _scheduler is not None:
         _scheduler.shutdown(wait=False)
         _scheduler = None
     _scheduled_state.clear()
     _leader = False
     _startup_pending = frozenset()
-    _startup_failures = ()
     _retention_completed.clear()
     db.release_scheduler_lock()
-
-
-def startup_status() -> tuple[bool, tuple[str, ...]]:
-    return not _startup_pending, _startup_failures
 
 
 def running() -> bool:

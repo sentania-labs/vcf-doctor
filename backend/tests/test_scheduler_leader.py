@@ -203,10 +203,6 @@ def test_startup_failures_are_isolated_and_do_not_stop_scheduled_scans(monkeypat
     scheduler._maintenance_job()
     scheduler._maintenance_job()
 
-    assert scheduler.startup_status() == (
-        False,
-        ("retention", "scan_reconciliation", "vault_rekey"),
-    )
     assert calls["vault_rekey"] == 2
     assert calls["scan_reconciliation"] == 4
     for name in (
@@ -241,44 +237,6 @@ def test_startup_failures_are_isolated_and_do_not_stop_scheduled_scans(monkeypat
         scan = client.post("/api/scan", json={"connection_id": retained.id})
         assert scan.status_code == 200
         assert scan.json()[0]["status"] == "ok"
-
-
-def test_startup_names_server_errors_but_not_connection_failures(monkeypatch):
-    from app import vault
-
-    def connection_lost():
-        raise psycopg.OperationalError("connection lost")
-
-    def disk_full():
-        raise psycopg.errors.DiskFull("disk full")
-
-    monkeypatch.setattr(vault, "rekey_at_startup", connection_lost)
-    monkeypatch.setattr(vault, "migrate_plaintext", disk_full)
-    monkeypatch.setattr(scheduler, "scheduler_enabled", lambda: False)
-    fake_scheduler = _FakeScheduler()
-    monkeypatch.setattr(scheduler, "_scheduler", fake_scheduler)
-    scheduler._begin_startup()
-
-    scheduler._maintenance_job()
-
-    assert scheduler.startup_status() == (False, ("vault_plaintext",))
-    assert fake_scheduler.maintenance_intervals == [5.0]
-
-
-def test_pass_level_failure_is_logged_without_a_public_step(monkeypatch):
-    def pass_failure():
-        raise RuntimeError("pass failed")
-
-    monkeypatch.setattr(scheduler, "startup_maintenance", pass_failure)
-    monkeypatch.setattr(scheduler, "scheduler_enabled", lambda: False)
-    fake_scheduler = _FakeScheduler()
-    monkeypatch.setattr(scheduler, "_scheduler", fake_scheduler)
-    scheduler._begin_startup()
-
-    scheduler._maintenance_job()
-
-    assert scheduler.startup_status() == (False, ())
-    assert fake_scheduler.maintenance_intervals == [60.0]
 
 
 def test_leadership_classifies_database_waits_without_hiding_failures(monkeypatch, caplog):

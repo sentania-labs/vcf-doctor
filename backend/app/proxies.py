@@ -27,13 +27,11 @@ SETTING_KEY = "trusted_proxies"
 
 Network = ipaddress.IPv4Network | ipaddress.IPv6Network
 
-# The stored list is read by the outermost middleware on every request, and
-# against PostgreSQL that is a network round trip rather than a local page read.
-# The liveness answer sits behind this middleware and has to be given while the
-# database is unreachable, so no request ever waits for the read: the answer
-# comes from memory and a missing or expired entry is refreshed on a background
-# thread. A cold cache trusts nobody, which is the safe default and costs at
-# most one visitor sharing the ingress's login lockout until the refresh lands.
+# The stored list is read by the outermost middleware on every request. Health
+# paths always answer from memory and refresh in the background, so a database
+# outage cannot stall liveness. Other paths perform one bounded read when the
+# cache is cold, preserving the Secure cookie flag and HSTS behind a stored
+# trusted proxy. If that read times out, the request trusts nobody instead.
 CACHE_TTL = 5.0
 _cache: list[str] | None = None
 _cached_at = 0.0
@@ -62,20 +60,21 @@ def _remember(value: list[str], expected_generation: int | None = None) -> None:
         _cache_generation += 1
 
 
+def _read_stored() -> list[str]:
+    try:
+        return parse_list(db.get_setting(SETTING_KEY, timeout=db.PROBE_TIMEOUT) or [])
+    except ValueError:
+        return []
+    except Exception:  # noqa: BLE001  a database that cannot be read trusts nobody
+        log.warning("trusted proxies unreadable; trusting nobody until the database returns")
+        return []
+
+
 def _refresh_stored(generation: int) -> None:
-    """Read the list and remember it, off the request path. A failed read is
-    remembered as "trust nobody" like any other answer, so an outage cannot make
-    the next request wait; the read is retried once the entry expires."""
+    """Read the list and remember it off the request path."""
     global _refreshing
     try:
-        try:
-            value = parse_list(db.get_setting(SETTING_KEY, timeout=db.PROBE_TIMEOUT) or [])
-        except ValueError:
-            value = []
-        except Exception:  # noqa: BLE001  a database that cannot be read trusts nobody
-            log.warning("trusted proxies unreadable; trusting nobody until the database returns")
-            value = []
-        _remember(value, expected_generation=generation)
+        _remember(_read_stored(), expected_generation=generation)
     finally:
         with _cache_guard:
             _refreshing = False
@@ -133,25 +132,28 @@ def env_problem() -> str | None:
     return None
 
 
-def stored_value() -> list[str]:
-    """The saved list, answered from memory and never by waiting.
+def stored_value(wait_on_cold: bool = False) -> list[str]:
+    """The saved list, normally answered from memory.
 
-    This runs in the outermost middleware, on every request including the health
-    endpoints and the login page, so it returns what is remembered and starts a
-    refresh in the background when that is missing or older than CACHE_TTL.
-    Nothing here can block a response, which is what lets liveness answer in
-    milliseconds while PostgreSQL is unreachable, and an unreachable database
-    trusts nobody rather than turning every response into a 500. A save on this
-    worker supersedes any older refresh that is still in flight.
+    A non-health request may request one bounded database read when the cache is
+    cold. Health requests return immediately and start a background refresh.
+    Expired warm entries always remain usable while refreshing. A save on this
+    worker supersedes any older read that is still in flight.
     """
     global _refreshing
     with _cache_guard:
         value = _cache
-        expired = value is None or time.monotonic() - _cached_at >= CACHE_TTL
-        refresh = expired and not _refreshing
+        cold = value is None
+        generation = _cache_generation
+        sync = cold and wait_on_cold
+        expired = cold or time.monotonic() - _cached_at >= CACHE_TTL
+        refresh = expired and not sync and not _refreshing
         if refresh:
             _refreshing = True
-            generation = _cache_generation
+    if sync:
+        _remember(_read_stored(), expected_generation=generation)
+        with _cache_guard:
+            return _cache if _cache is not None else []
     if refresh:
         threading.Thread(
             target=_refresh_stored,
@@ -162,12 +164,12 @@ def stored_value() -> list[str]:
     return value if value is not None else []
 
 
-def effective() -> tuple[list[str], str]:
+def effective(wait_on_cold: bool = False) -> tuple[list[str], str]:
     """(networks, source) where source is "env" or "settings"."""
     env = env_value()
     if env is not None:
         return env, "env"
-    return stored_value(), "settings"
+    return stored_value(wait_on_cold=wait_on_cold), "settings"
 
 
 def set_stored(raw: Any) -> list[str]:
@@ -177,8 +179,8 @@ def set_stored(raw: Any) -> list[str]:
     return value
 
 
-def networks() -> list[Network]:
-    return [ipaddress.ip_network(n) for n in effective()[0]]
+def networks(wait_on_cold: bool = False) -> list[Network]:
+    return [ipaddress.ip_network(n) for n in effective(wait_on_cold=wait_on_cold)[0]]
 
 
 def is_trusted(host: str | None, nets: list[Network]) -> bool:
@@ -242,10 +244,9 @@ def resolve_client(peer: str | None, forwarded_for: list[str], nets: list[Networ
 class ForwardedHeadersMiddleware:
     """Pure ASGI: rewrite scope["client"] and scope["scheme"] from the
     forwarded headers, but only when the TCP peer is a trusted proxy. Takes the
-    setting from stored_value, which answers from memory and refreshes in the
-    background, so a change in Settings applies within seconds and without a
-    restart and no request ever waits on the database here. Replaces uvicorn's
-    --proxy-headers, which trusted everyone."""
+    setting from stored_value, which refreshes in the background except for one
+    bounded read when a non-health request reaches a cold cache. Replaces
+    uvicorn's --proxy-headers, which trusted everyone."""
 
     def __init__(self, app):
         self.app = app
@@ -255,7 +256,8 @@ class ForwardedHeadersMiddleware:
             return await self.app(scope, receive, send)
         client = scope.get("client")
         peer = client[0] if client else None
-        nets = networks()
+        path = scope.get("path", "")
+        nets = networks(wait_on_cold=not path.startswith("/api/health"))
         trusted = bool(peer) and is_trusted(peer, nets)
         # Keep the TCP peer and the trust decision for the Settings page:
         # scope["client"] is about to be rewritten when the peer is trusted.

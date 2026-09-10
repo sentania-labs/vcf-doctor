@@ -24,7 +24,6 @@ from app.config import settings
 
 log = logging.getLogger("vcf_doctor")
 _readiness_database_state: tuple[bool, str | None] | None = None
-_readiness_startup_state: tuple[bool, bool, tuple[str, ...]] | None = None
 _readiness_state_guard = threading.Lock()
 
 
@@ -159,35 +158,9 @@ def _log_database_transition(database: bool, detail: str | None) -> None:
         log.info("readiness: the database is usable again")
 
 
-def _log_startup_transition(
-    database: bool, startup_complete: bool, startup_failures: tuple[str, ...]
-) -> None:
-    global _readiness_startup_state
-    state = (database, startup_complete, startup_failures)
-    with _readiness_state_guard:
-        previous = _readiness_startup_state
-        if state == previous:
-            return
-        _readiness_startup_state = state
-    if not database:
-        return
-    if not startup_complete:
-        if startup_failures:
-            log.warning(
-                "readiness: deferred startup steps are failing: %s",
-                ", ".join(startup_failures),
-            )
-        else:
-            log.warning("readiness: deferred startup work is incomplete")
-    elif previous is not None and not previous[1]:
-        log.info("readiness: deferred startup work completed")
-
-
 def _readiness() -> tuple[dict, int]:
     database, detail = db.healthy()
     _log_database_transition(database, detail)
-    startup_complete, startup_failures = scheduler.startup_status()
-    _log_startup_transition(database, startup_complete, startup_failures)
     ready = database
     body = {
         "status": "ok" if ready else "degraded",

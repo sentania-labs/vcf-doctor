@@ -254,6 +254,24 @@ def test_trusted_proxies_from_settings_page_apply_live(tmp_path):
         assert r.status_code == 200
 
 
+def test_cold_stored_proxy_preserves_https_login_security(tmp_path):
+    app = _app(tmp_path)
+    auth.set_initial_password("correct horse")
+    proxies.set_stored(["10.0.0.1"])
+    proxies.reset_cache()
+
+    with TestClient(app, client=("10.0.0.1", 5000)) as c:
+        response = c.post(
+            "/api/auth/login",
+            json={"password": "correct horse"},
+            headers={"X-Forwarded-Proto": "https"},
+        )
+
+    assert response.status_code == 200
+    assert "; Secure" in response.headers["set-cookie"]
+    assert response.headers["strict-transport-security"] == "max-age=31536000"
+
+
 def test_settings_reads_saved_proxies_instead_of_the_fail_closed_cache(tmp_path):
     app = _app(tmp_path)
     with TestClient(app, client=("10.0.0.1", 5000)) as c:
