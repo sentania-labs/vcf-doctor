@@ -15,7 +15,7 @@ import os
 from pathlib import Path
 
 from psycopg.conninfo import conninfo_to_dict
-from pydantic import AliasChoices, Field
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Where compose mounts its secret and where the Kubernetes manifest mounts
@@ -34,12 +34,8 @@ def _retention_timezone_default() -> str:
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="VCF_DOCTOR_", extra="ignore")
 
-    # libpq URL without a password. `DATABASE_URL` is honoured unprefixed so a
-    # generic Postgres environment works unchanged.
-    database_url: str = Field(
-        default="postgresql://vcf_doctor@postgres:5432/vcf_doctor",
-        validation_alias=AliasChoices("VCF_DOCTOR_DATABASE_URL", "DATABASE_URL"),
-    )
+    # libpq URL without a password.
+    database_url: str = "postgresql://vcf_doctor@postgres:5432/vcf_doctor"
     # File holding the database password. Missing file means no password is
     # sent, which is what a trust-authenticated local server wants.
     db_password_file: str = DEFAULT_DB_PASSWORD_FILE
@@ -109,8 +105,8 @@ def database_url_without_password(url: str | None = None) -> str:
     raw = settings.database_url if url is None else url
     if "password" in conninfo_to_dict(raw):
         raise PasswordInUrl(
-            "the database password must not be part of VCF_DOCTOR_DATABASE_URL or "
-            f"DATABASE_URL; put it in the file named by VCF_DOCTOR_DB_PASSWORD_FILE "
+            "the database password must not be part of VCF_DOCTOR_DATABASE_URL; "
+            f"put it in the file named by VCF_DOCTOR_DB_PASSWORD_FILE "
             f"(currently {settings.db_password_file or 'unset'})"
         )
     return raw

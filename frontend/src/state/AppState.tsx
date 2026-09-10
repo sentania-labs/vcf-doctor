@@ -20,7 +20,6 @@ interface AppState {
   backend: BackendStatus
   backendError: string | null
   databaseHealthy: boolean | null
-  maintenanceFailures: string[]
   scans: ScanRun[]
   lastScan: string | null
   scanning: boolean
@@ -43,7 +42,6 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const [backend, setBackend] = useState<BackendStatus>('checking')
   const [backendError, setBackendError] = useState<string | null>(null)
   const [databaseHealthy, setDatabaseHealthy] = useState<boolean | null>(null)
-  const [maintenanceFailures, setMaintenanceFailures] = useState<string[]>([])
   const [scans, setScans] = useState<ScanRun[]>([])
   const [scanError, setScanError] = useState<string | null>(null)
   const [scanning, setScanning] = useState(false)
@@ -67,9 +65,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       setBackend(health.backend)
       setBackendError(health.backendError)
       setDatabaseHealthy(health.databaseHealthy)
-      setMaintenanceFailures(health.maintenanceFailures)
     } catch (e) {
-      setBackend('down'); setBackendError(e instanceof Error ? e.message : String(e)); setDatabaseHealthy(null); setMaintenanceFailures([])
+      setBackend('down'); setBackendError(e instanceof Error ? e.message : String(e)); setDatabaseHealthy(null)
     }
   }, [])
 
@@ -95,7 +92,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   // Backend heartbeat; faster while unavailable so recovery is noticed quickly.
   useInterval(
     () => { void checkBackend() },
-    backend === 'up' || backend === 'maintenance' ? 20000 : 5000,
+    backend === 'up' ? 20000 : 5000,
   )
   // Any API call that fails at the network level triggers an immediate check so the banner shows within a second.
   useEffect(() => {
@@ -140,7 +137,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
   const value: AppState = {
     connections, connectionsLoading, selectedId, connectionId, selected, setSelectedId,
-    backend, backendError, databaseHealthy, maintenanceFailures, scans, lastScan, scanning, scanNow, scanError,
+    backend, backendError, databaseHealthy, scans, lastScan, scanning, scanNow, scanError,
     refreshKey, refreshAll: () => setRefreshKey(k => k + 1), reloadConnections,
   }
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>

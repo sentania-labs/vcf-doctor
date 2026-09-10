@@ -194,11 +194,12 @@ def _readiness() -> tuple[dict, int]:
         "version": app.version,
         "scheduler": scheduler.running(),
         "database": database,
-        "startup_failures": startup_failures,
     }
     return body, 200 if ready else 503
 
 
+# /api/health is a compatibility alias for liveness. It retires when the probes
+# are repointed, as tracked under "Owed to the deployment repo" in STATUS.md.
 @app.get("/api/health/live")
 @app.get("/api/health")
 async def health_live() -> dict:

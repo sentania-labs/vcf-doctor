@@ -18,7 +18,7 @@ only whether the database is reachable.
 | Image | `ghcr.io/sentania-labs/vcf-doctor:<tag>` where tag is `vX.Y.Z` (release), `sha-<7>` or `latest` |
 | Port | `8000` (HTTP) |
 | Liveness | `GET /api/health/live` (and `GET /api/health`, the same body under the older name), 200 whenever the process is answering. Reads nothing, so it answers in milliseconds during a database outage. The container's `HEALTHCHECK` uses this. |
-| Readiness | `GET /api/health/ready`, 200 when the database is reachable and migrated, 503 otherwise. Reports `database`, `scheduler`, and stable identifiers for persistently failing maintenance steps in `startup_failures`. Maintenance failures never gate readiness. Exception details stay in the server log. |
+| Readiness | `GET /api/health/ready`, 200 when the database is reachable and migrated, 503 otherwise. Reports `database` and `scheduler`. Exception details and deferred maintenance failures stay in the server log. |
 | Build identity | `GET /api/version` returns the [build identity fields](../backend/app/_version.py); `GET /api/health` reports the same version |
 | Database | PostgreSQL 14 or newer, reached over `VCF_DOCTOR_DATABASE_URL`. Apply schema migrations before the console with `python3 -m app.migrate upgrade`. |
 | Database password | A file, never an environment variable. `VCF_DOCTOR_DB_PASSWORD_FILE`, default `/run/secrets/vcf-doctor-db-password`. |
@@ -68,8 +68,8 @@ outage worse, so nothing should restart on the database.
 **Readiness** is whether this instance can serve. `GET /api/health/ready` is
 503 while the database is unreachable or a migration is pending. Sign-in and
 every page behind it need the database, so an instance that cannot use it is
-one to take out of rotation, not one to send visitors to. Persistent maintenance
-failures are reported in the body and interface, but they never gate traffic.
+one to take out of rotation, not one to send visitors to. Deferred maintenance
+never gates traffic, and failures are written to the server log.
 
 `GET /api/health` is the older name for the liveness answer and returns the same
 body, so a manifest that has not been repointed yet keeps behaving as it does
@@ -120,7 +120,7 @@ The console begins serving without waiting on PostgreSQL. Once it is listening,
 each worker uses the scheduler's existing retry interval to rotate and migrate
 stored secrets, recover change-log coverage and interrupted scans, seed the
 operator password and event policy, pause stale fixture schedules, and apply
-retention. Persistent failures are reported without gating readiness. If
+retention. Failures are logged without gating readiness. If
 PostgreSQL is unavailable, liveness stays green and the same work retries until
 the database returns, without restarting the process.
 
@@ -236,7 +236,7 @@ about a minute. Explicit libpq URL parameters override each default.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `VCF_DOCTOR_DATABASE_URL` | `postgresql://vcf_doctor@postgres:5432/vcf_doctor` | PostgreSQL connection, without a password. `DATABASE_URL` is read when this is unset. A URL carrying a password is refused. |
+| `VCF_DOCTOR_DATABASE_URL` | `postgresql://vcf_doctor@postgres:5432/vcf_doctor` | PostgreSQL connection, without a password. A URL carrying a password is refused. |
 | `VCF_DOCTOR_DB_PASSWORD_FILE` | `/run/secrets/vcf-doctor-db-password` | File holding the database password. Missing file means none is sent. |
 | `VCF_DOCTOR_DB_POOL_MAX_SIZE` | `10` | Pooled connections per worker process. Multiply by the worker count when sizing the server's `max_connections`; a running scan holds its lock on its own connection outside the pool, so scans cannot consume it. |
 | `VCF_DOCTOR_DB_POOL_MIN_SIZE` | `1` | Connections kept open per worker process |

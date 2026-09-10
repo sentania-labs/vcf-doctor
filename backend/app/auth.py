@@ -102,7 +102,7 @@ def bootstrap_from_env() -> None:
 
 
 def _secret() -> bytes:
-    s = db.get_setting(_SECRET_KEY, timeout=db.PROBE_TIMEOUT)
+    s = db.get_setting(_SECRET_KEY)
     if not s:
         s = secrets.token_hex(32)
         db.set_setting(_SECRET_KEY, s)

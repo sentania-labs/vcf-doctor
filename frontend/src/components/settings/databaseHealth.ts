@@ -12,7 +12,7 @@ export function databaseHealthPresentation(healthy: boolean | null): DatabaseHea
     return {
       label: 'Healthy',
       tone: 'ok',
-      message: 'The connection is set by whoever deployed this instance and is not editable here.',
+      message: 'The database connection is not editable here.',
     }
   }
   return {

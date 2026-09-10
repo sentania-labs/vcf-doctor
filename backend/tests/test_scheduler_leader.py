@@ -211,11 +211,6 @@ def test_startup_failures_are_isolated_and_do_not_stop_scheduled_scans(monkeypat
         assert ready.status_code == 200
         assert ready.json()["status"] == "ok"
         assert ready.json()["database"] is True
-        assert ready.json()["startup_failures"] == [
-            "retention",
-            "scan_reconciliation",
-            "vault_rekey",
-        ]
         assert "key volume is read-only" not in ready.text
         assert ready.json()["scheduler"] is True
         assert client.get("/api/health/live").status_code == 200

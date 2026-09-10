@@ -180,7 +180,6 @@ def test_cold_start_serves_liveness_then_recovers_readiness(monkeypatch, caplog)
         status, ready = _http_json(f"{base}/api/health/ready")
         assert status == 503
         assert ready["status"] == "degraded" and ready["database"] is False
-        assert ready["startup_failures"] == []
 
         deadline = time.monotonic() + 10
         while (
@@ -197,7 +196,6 @@ def test_cold_start_serves_liveness_then_recovers_readiness(monkeypatch, caplog)
         assert status == 200
         assert ready["status"] == "ok"
         assert ready["database"] is True
-        assert ready["startup_failures"] == []
         deadline = time.monotonic() + 10
         while not scheduler.startup_status()[0] and time.monotonic() < deadline:
             time.sleep(0.05)
@@ -205,13 +203,11 @@ def test_cold_start_serves_liveness_then_recovers_readiness(monkeypatch, caplog)
         status, ready = _http_json(f"{base}/api/health/ready")
         assert status == 200
         assert ready["status"] == "ok" and ready["database"] is True
-        assert ready["startup_failures"] == []
         assert set(ready) == {
             "status",
             "version",
             "scheduler",
             "database",
-            "startup_failures",
         }
     finally:
         server.should_exit = True
@@ -389,7 +385,7 @@ def test_readiness_is_red_while_a_migration_is_pending(tmp_path, monkeypatch, ca
         assert client.get("/api/health/live").status_code == 200
 
 
-def test_readiness_reports_deferred_startup_without_gating_traffic(monkeypatch, caplog):
+def test_readiness_logs_deferred_startup_without_gating_traffic(monkeypatch, caplog):
     import logging
 
     from fastapi.testclient import TestClient
@@ -407,20 +403,17 @@ def test_readiness_reports_deferred_startup_without_gating_traffic(monkeypatch, 
             assert body.status_code == 200
             assert body.json()["status"] == "ok"
             assert body.json()["database"] is True
-            assert body.json()["startup_failures"] == []
             assert set(body.json()) == {
                 "status",
                 "version",
                 "scheduler",
                 "database",
-                "startup_failures",
             }
             assert caplog.messages.count("readiness: deferred startup work is incomplete") == 1
 
             startup[0] = (False, ("vault_rekey",))
-            failing = client.get("/api/health/ready")
             client.get("/api/health/ready")
-            assert failing.json()["startup_failures"] == ["vault_rekey"]
+            client.get("/api/health/ready")
             assert sum(
                 "deferred startup steps are failing" in msg for msg in caplog.messages
             ) == 1

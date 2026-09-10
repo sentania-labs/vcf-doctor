@@ -19,8 +19,8 @@ file-backed fallback; `app/db.py` is the only place that opens a connection.
   have a single writer takes a PostgreSQL advisory lock (`db.try_advisory_lock`,
   `db.lock_in_transaction`, `db.acquire_scheduler_lock`), never a process lock.
 - The database password is never an environment variable. It is read from
-  `VCF_DOCTOR_DB_PASSWORD_FILE`; a `DATABASE_URL` carrying one is refused at
-  startup.
+  `VCF_DOCTOR_DB_PASSWORD_FILE`; a `VCF_DOCTOR_DATABASE_URL` carrying one is
+  refused at startup.
 
 ## Running the tests
 

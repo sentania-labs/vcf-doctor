@@ -192,7 +192,7 @@ jobs:
       # one-shot run of the same image before the console starts.
       - name: Smoke test (fixture collector, no vCenter)
         env:
-          DATABASE_URL: postgresql://vcf_doctor@smoke-db:5432/vcf_doctor
+          SMOKE_DATABASE_URL: postgresql://vcf_doctor@smoke-db:5432/vcf_doctor
         run: |
           docker network create smoke-net
           # One copy of the password per reader, each owned by that reader and
@@ -217,7 +217,7 @@ jobs:
           done
           # The one-shot migration step, exactly as compose runs it.
           docker run --rm --network smoke-net \
-            -e VCF_DOCTOR_DATABASE_URL="$DATABASE_URL" \
+            -e VCF_DOCTOR_DATABASE_URL="$SMOKE_DATABASE_URL" \
             -e VCF_DOCTOR_DB_PASSWORD_FILE=/run/secrets/db-password \
             -v "$RUNNER_TEMP/secrets:/run/secrets:ro" \
             vcf-doctor:ci python3 -m app.migrate upgrade | tee migrate.log
@@ -227,7 +227,7 @@ jobs:
           docker run -d --name smoke --network smoke-net -p 8000:8000 \
             -e VCF_DOCTOR_TEST_FIXTURES=1 -e VCF_DOCTOR_ADMIN_PASSWORD=smoke-test-pass \
             -e VCF_DOCTOR_TRUSTED_PROXIES=172.16.0.0/12 \
-            -e VCF_DOCTOR_DATABASE_URL="$DATABASE_URL" \
+            -e VCF_DOCTOR_DATABASE_URL="$SMOKE_DATABASE_URL" \
             -e VCF_DOCTOR_DB_PASSWORD_FILE=/run/secrets/db-password \
             -v "$RUNNER_TEMP/secrets:/run/secrets:ro" \
             -v smoke-data:/data \
