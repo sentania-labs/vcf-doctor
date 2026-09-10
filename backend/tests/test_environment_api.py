@@ -24,7 +24,7 @@ def _conn(name: str) -> dict:
 
 @pytest.fixture()
 def client(tmp_path):
-    db.reset_for_tests(str(tmp_path / "t.db"))
+    db.reset_for_tests()
     with TestClient(app) as c:
         yield c
 
@@ -36,13 +36,13 @@ def _scan(client, cid: str, times: int = 1) -> None:
 
 def _shift(cid: str, delta: timedelta) -> None:
     """Move every snapshot and change row of a connection back in time."""
-    snaps = db.fetchall("SELECT id, created_at FROM snapshots WHERE connection_id = ?", (cid,))
+    snaps = db.fetchall("SELECT id, created_at FROM snapshots WHERE connection_id = %s", (cid,))
     with db.transaction() as c:
         for s in snaps:
             moved = (store._dt(s["created_at"]) + delta).isoformat()
-            c.execute("UPDATE snapshots SET created_at = ? WHERE id = ?", (moved, s["id"]))
+            c.execute("UPDATE snapshots SET created_at = %s WHERE id = %s", (moved, s["id"]))
             c.execute(
-                "UPDATE changes SET observed_at = ? WHERE to_snapshot_id = ?", (moved, s["id"])
+                "UPDATE changes SET observed_at = %s WHERE to_snapshot_id = %s", (moved, s["id"])
             )
 
 
@@ -226,7 +226,7 @@ def test_findings_delta_needs_cached_findings_on_both_ends(client):
     assert sec["findings"] is not None and len(sec["findings"]["appeared"]) == 5
     baseline = sec["findings"]["baseline_snapshot_id"]
     with db.transaction() as c:
-        c.execute("DELETE FROM findings WHERE snapshot_id = ?", (baseline,))
+        c.execute("DELETE FROM findings WHERE snapshot_id = %s", (baseline,))
     body = client.get("/api/environment/changes").json()
     assert _section(body, a)["findings"] is None
     assert body["totals"]["findings_appeared"] == 0

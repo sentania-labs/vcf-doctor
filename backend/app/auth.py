@@ -3,7 +3,7 @@
 Deliberately simple: one password, hashed with PBKDF2 and stored in the
 settings table; sessions are HMAC-signed timestamps in an HttpOnly cookie.
 The signing secret is generated once and kept in the settings table, so it
-survives restarts on the /data volume. VCF_DOCTOR_AUTH=off disables all of
+survives restarts and is the same in every worker. VCF_DOCTOR_AUTH=off disables all of
 it for deployments that front the app with ingress authentication.
 """
 
@@ -48,13 +48,23 @@ def _hash(password: str, salt: bytes) -> str:
     return f"pbkdf2${base64.b64encode(salt).decode()}${base64.b64encode(dk).decode()}"
 
 
+def _password_settings(password: str) -> dict[str, str]:
+    if len(password) < MIN_PASSWORD:
+        raise HTTPException(400, f"password must be at least {MIN_PASSWORD} characters")
+    return {
+        _HASH_KEY: _hash(password, secrets.token_bytes(16)),
+        _SECRET_KEY: secrets.token_hex(32),
+    }
+
+
 def set_password(password: str) -> None:
     """Store the password and rotate the signing secret so every existing
     session (including one on a lost laptop) stops working."""
-    if len(password) < MIN_PASSWORD:
-        raise HTTPException(400, f"password must be at least {MIN_PASSWORD} characters")
-    db.set_setting(_HASH_KEY, _hash(password, secrets.token_bytes(16)))
-    db.set_setting(_SECRET_KEY, secrets.token_hex(32))
+    db.set_settings(_password_settings(password))
+
+
+def set_initial_password(password: str) -> bool:
+    return db.initialize_settings(_HASH_KEY, _password_settings(password))
 
 
 def verify_password(password: str) -> bool:
@@ -83,7 +93,7 @@ def bootstrap_from_env() -> None:
             MIN_PASSWORD,
         )
     elif seed:
-        set_password(seed)
+        set_initial_password(seed)
         return
     log.warning(
         "no operator password set; the first visitor to the UI will be asked to set one. "
@@ -144,11 +154,11 @@ def requires_auth(path: str) -> bool:
 # an exponential wait capped at a minute. On top of that a process-wide ceiling: more than
 # GLOBAL_LIMIT failures across every address inside GLOBAL_WINDOW seconds
 # pauses logins for everyone, so a guesser rotating addresses still gets no
-# more throughput than that. Everything is in memory; the deployment is a
-# single replica and a restart simply forgives everyone.
+# more throughput than that. Everything is in memory, so both counters are per
+# worker process: N workers means a guesser gets N times these allowances
+# before the backoff bites. A restart simply forgives everyone.
 
 _fail_lock = threading.Lock()
-setup_lock = threading.Lock()
 _BACKOFF_AFTER = 5
 _BACKOFF_MAX = 60
 # Bounded store: at most MAX_TRACKED addresses, oldest evicted first, and an

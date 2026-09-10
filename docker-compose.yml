@@ -1,12 +1,110 @@
-# Local development convenience only. Deployment is owned by the lab
-# deployment repo and Argo CD; see README "Deployment contract".
+# Local development convenience only. Deployment is owned by the lab deployment
+# repo and Argo CD; see docs/DEPLOYMENT.md.
+#
+# `docker compose up` is self-contained: it brings up PostgreSQL on a named
+# volume, generates a database password into a second named volume, applies the
+# schema migrations in a one-shot service, and only then starts the console with
+# two uvicorn workers.
+#
+# The password is a file, never an environment variable, and it reaches both
+# containers as a read-only mount at /run/secrets. A Kubernetes manifest mounts
+# its Secret at the same path, so the application code path is identical. The
+# password lives with the database it opens, so `docker compose down -v` drops
+# both together and the next `up` generates a new pair.
+#
+# One copy per reader, each owned by that reader and readable by nobody else:
+# the console runs as uid 10001 (see the Dockerfile) and the postgres image
+# runs as uid 999, so a single shared file would have to be world readable.
+name: vcf-doctor
+
+x-database-url: &database-url postgresql://vcf_doctor@postgres:5432/vcf_doctor
+
 services:
+  # Writes the database password on the first run and leaves it alone after
+  # that. Runs as root because a fresh named volume belongs to root, and
+  # because only root can hand each copy to a different uid; nothing else in
+  # this file runs as root.
+  db-password:
+    image: postgres:16
+    user: root
+    volumes:
+      - vcf-doctor-secrets:/secrets
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        test -s /secrets/db-password ||
+          head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' > /secrets/db-password
+        cp /secrets/db-password /secrets/postgres-password
+        chown 10001:10001 /secrets/db-password
+        chmod 0400 /secrets/db-password
+        chown 999:999 /secrets/postgres-password
+        chmod 0400 /secrets/postgres-password
+        ls -l /secrets
+    restart: "no"
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: vcf_doctor
+      POSTGRES_DB: vcf_doctor
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres-password
+    volumes:
+      - vcf-doctor-db:/var/lib/postgresql/data
+      - vcf-doctor-secrets:/run/secrets:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vcf_doctor -d vcf_doctor"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+    depends_on:
+      db-password:
+        condition: service_completed_successfully
+
+  # One-shot: applies pending schema migrations and exits before the console
+  # starts, keeping a migration failure in its own visible step.
+  # Same image as the console, named so it is built once rather than twice.
+  migrate:
+    build: .
+    image: vcf-doctor:compose
+    command: ["python3", "-m", "app.migrate", "upgrade"]
+    environment:
+      VCF_DOCTOR_DATABASE_URL: *database-url
+      VCF_DOCTOR_DB_PASSWORD_FILE: /run/secrets/db-password
+    volumes:
+      - vcf-doctor-secrets:/run/secrets:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
   vcf-doctor:
     build: .
+    image: vcf-doctor:compose
     ports: ["8000:8000"]
+    # More than one worker is the point of the PostgreSQL move: one of them
+    # takes the scheduler advisory lock, all of them serve the API.
+    command:
+      - uvicorn
+      - app.main:app
+      - --host=0.0.0.0
+      - --port=8000
+      - --no-proxy-headers
+      - --workers=2
     environment:
+      VCF_DOCTOR_DATABASE_URL: *database-url
+      VCF_DOCTOR_DB_PASSWORD_FILE: /run/secrets/db-password
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
     volumes:
+      # The volume now holds only the generated encryption key file.
       - vcf-doctor-data:/data
+      - vcf-doctor-secrets:/run/secrets:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
 volumes:
+  vcf-doctor-db:
   vcf-doctor-data:
+  vcf-doctor-secrets:

@@ -33,7 +33,7 @@ class EncryptionStatus(BaseModel):
     key_env_var: str = vault.ENV_KEY
     key_previous_env_var: str = vault.ENV_PREVIOUS_KEY
     key_file: str | None = None  # path only; the key itself is never returned
-    # A generated key file still sitting next to the database while an env key
+    # A generated key file still sitting on the volume while an env key
     # is active: the previous key, available for a one-click rotation. Path only.
     previous_key_file: str | None = None
     # Set when no usable key exists (corrupt or unreadable key file, malformed

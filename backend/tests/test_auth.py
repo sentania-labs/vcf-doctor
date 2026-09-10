@@ -1,11 +1,11 @@
 from fastapi.testclient import TestClient
 
 
-def _client(tmp_path, monkeypatch, **env):
-    from app import db
+def _client(tmp_path, monkeypatch, bootstrap=True, **env):
+    from app import auth, db
     from app.config import settings
 
-    db.reset_for_tests(str(tmp_path / "t.db"))
+    db.reset_for_tests()
     monkeypatch.setattr(settings, "auth", "on")
     for k, v in env.items():
         monkeypatch.setenv(k, v)
@@ -14,6 +14,8 @@ def _client(tmp_path, monkeypatch, **env):
     import app.main as main
 
     importlib.reload(main)
+    if bootstrap:
+        auth.bootstrap_from_env()
     return TestClient(main.app)
 
 
@@ -46,6 +48,43 @@ def test_first_run_setup_login_logout_change(tmp_path, monkeypatch):
         assert c.post("/api/auth/login", json={"password": "new password"}).status_code == 200
 
 
+def test_concurrent_first_run_setup_has_one_winner(tmp_path, monkeypatch):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    import app.main as main
+    from app import auth
+
+    first_checks = threading.Barrier(2)
+    configured = auth.configured
+
+    def synchronized_configured():
+        result = configured()
+        first_checks.wait(timeout=2)
+        return result
+
+    with _client(tmp_path, monkeypatch) as first, TestClient(main.app) as second:
+        monkeypatch.setattr(auth, "configured", synchronized_configured)
+        passwords = ("first password", "second password")
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            responses = list(
+                executor.map(
+                    lambda pair: (
+                        pair[0],
+                        pair[1].post("/api/auth/setup", json={"password": pair[0]}),
+                    ),
+                    zip(passwords, (first, second), strict=True),
+                )
+            )
+
+    assert sorted(response.status_code for _, response in responses) == [200, 409]
+    accepted, winner = next(pair for pair in responses if pair[1].status_code == 200)
+    rejected = next(password for password, response in responses if response.status_code == 409)
+    assert auth.verify_password(accepted) is True
+    assert auth.verify_password(rejected) is False
+    assert auth.token_valid(winner.cookies.get(auth.COOKIE)) is True
+
+
 def test_forged_cookie_is_rejected(tmp_path, monkeypatch):
     with _client(tmp_path, monkeypatch) as c:
         c.post("/api/auth/setup", json={"password": "correct horse"})
@@ -68,11 +107,33 @@ def test_env_seed_and_auth_off(tmp_path, monkeypatch):
         assert c.get("/api/connections").status_code == 200
 
 
+def test_env_seed_wins_before_background_bootstrap(tmp_path, monkeypatch):
+    from app import auth, scheduler
+
+    monkeypatch.setattr(scheduler, "start", lambda: None)
+    monkeypatch.setattr(scheduler, "shutdown", lambda: None)
+    with _client(
+        tmp_path,
+        monkeypatch,
+        bootstrap=False,
+        VCF_DOCTOR_ADMIN_PASSWORD="seeded password",
+    ) as c:
+        ready = c.get("/api/health/ready")
+        assert ready.status_code == 200
+        assert ready.json()["database"] is True
+        assert auth.configured() is False
+
+        response = c.post("/api/auth/setup", json={"password": "visitor password"})
+        assert response.status_code == 409
+        assert auth.verify_password("seeded password") is True
+        assert auth.verify_password("visitor password") is False
+
+
 def test_every_issued_token_validates(tmp_path, monkeypatch):
     """Regression: raw HMAC bytes containing 0x2E used to break delimiter parsing."""
     from app import auth, db
 
-    db.reset_for_tests(str(tmp_path / "t.db"))
+    db.reset_for_tests()
     for _ in range(300):
         assert auth.token_valid(auth.issue_token())
 

@@ -2,9 +2,8 @@
 the retention policy and the persisted change log.
 
 Every row is keyed by connection_id. Timestamps are ISO 8601 UTC strings in
-SQLite and timezone-aware datetimes in Python. Snapshot resource lists are
-stored gzip-compressed in snapshots.resources_gz; the legacy text column is
-read as a fallback and emptied by migrate_legacy_snapshots().
+PostgreSQL and timezone-aware datetimes in Python. Snapshot resource lists are
+stored gzip-compressed in snapshots.resources_gz.
 """
 
 import gzip
@@ -40,7 +39,7 @@ HOUR = timedelta(hours=1)
 DAY = timedelta(days=1)
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 _SIG_ORDER = ("high", "medium", "low")
-_SQL_CHUNK = 500  # ids per IN (...) clause; well under SQLite's variable limit
+_DELETE_CHUNK = 500  # ids deleted per transaction, so one prune is not one huge write
 
 
 def now() -> datetime:
@@ -114,7 +113,7 @@ def list_connections() -> list[Connection]:
 
 
 def get_connection(connection_id: str) -> Connection | None:
-    row = db.fetchone(_CONN_SELECT + " WHERE c.id = ?", (connection_id,))
+    row = db.fetchone(_CONN_SELECT + " WHERE c.id = %s", (connection_id,))
     return _row_to_connection(row) if row else None
 
 
@@ -124,21 +123,22 @@ def create_connection(data: ConnectionCreate) -> Connection:
     with db.transaction() as c:
         c.execute(
             "INSERT INTO connections(id, name, host, username, password, verify_tls, kind, "
-            "created_at) VALUES(?,?,?,?,?,?,?,?)",
+            "created_at) VALUES(%s,%s,%s,%s,%s,%s,%s,%s)",
             (
                 cid,
                 data.name,
                 data.host,
                 data.username,
                 vault.encrypt(data.password),
-                int(data.verify_tls),
+                bool(data.verify_tls),
                 data.kind,
                 created.isoformat(),
             ),
         )
         c.execute(
-            "INSERT INTO schedules(connection_id, interval_minutes, enabled) VALUES(?,?,?)",
-            (cid, data.interval_minutes, int(data.enabled)),
+            "INSERT INTO schedules(connection_id, interval_minutes, enabled) "
+            "VALUES(%s,%s,%s)",
+            (cid, data.interval_minutes, bool(data.enabled)),
         )
     return get_connection(cid)
 
@@ -155,21 +155,21 @@ def update_connection(connection_id: str, fields: dict) -> Connection | None:
     if "password" in updates:
         updates["password"] = vault.encrypt(updates["password"])
     if "verify_tls" in updates:
-        updates["verify_tls"] = int(updates["verify_tls"])
+        updates["verify_tls"] = bool(updates["verify_tls"])
     with db.transaction() as c:
         if updates:
-            sets = ", ".join(f"{k} = ?" for k in updates)
+            sets = ", ".join(f"{k} = %s" for k in updates)
             c.execute(
-                f"UPDATE connections SET {sets} WHERE id = ?",
+                f"UPDATE connections SET {sets} WHERE id = %s",
                 (*updates.values(), connection_id),
             )
         sched = {k: fields[k] for k in ("interval_minutes", "enabled") if fields.get(k) is not None}
         if sched:
             if "enabled" in sched:
-                sched["enabled"] = int(sched["enabled"])
-            sets = ", ".join(f"{k} = ?" for k in sched)
+                sched["enabled"] = bool(sched["enabled"])
+            sets = ", ".join(f"{k} = %s" for k in sched)
             c.execute(
-                f"UPDATE schedules SET {sets} WHERE connection_id = ?",
+                f"UPDATE schedules SET {sets} WHERE connection_id = %s",
                 (*sched.values(), connection_id),
             )
     return get_connection(connection_id)
@@ -179,17 +179,17 @@ def delete_connection(connection_id: str) -> bool:
     with db.transaction() as c:
         c.execute(
             "DELETE FROM findings WHERE snapshot_id IN "
-            "(SELECT id FROM snapshots WHERE connection_id = ?)",
+            "(SELECT id FROM snapshots WHERE connection_id = %s)",
             (connection_id,),
         )
-        c.execute("DELETE FROM snapshots WHERE connection_id = ?", (connection_id,))
-        c.execute("DELETE FROM changes WHERE connection_id = ?", (connection_id,))
-        c.execute("DELETE FROM scan_runs WHERE connection_id = ?", (connection_id,))
-        c.execute("DELETE FROM schedules WHERE connection_id = ?", (connection_id,))
-        cur = c.execute("DELETE FROM connections WHERE id = ?", (connection_id,))
-        removed = cur.rowcount > 0
-    # Events live in their own lazily created table; drop them alongside the
-    # change log so a deleted connection leaves nothing behind.
+        c.execute("DELETE FROM snapshots WHERE connection_id = %s", (connection_id,))
+        c.execute("DELETE FROM changes WHERE connection_id = %s", (connection_id,))
+        c.execute("DELETE FROM scan_runs WHERE connection_id = %s", (connection_id,))
+        c.execute("DELETE FROM schedules WHERE connection_id = %s", (connection_id,))
+        c.execute("DELETE FROM connections WHERE id = %s", (connection_id,))
+        removed = c.rowcount > 0
+    # Events are owned by app/events; drop them alongside the change log so a
+    # deleted connection leaves nothing behind.
     events_store.delete_events(connection_id)
     return removed
 
@@ -198,7 +198,7 @@ def delete_connection(connection_id: str) -> bool:
 
 
 def get_schedule(connection_id: str) -> Schedule | None:
-    row = db.fetchone("SELECT * FROM schedules WHERE connection_id = ?", (connection_id,))
+    row = db.fetchone("SELECT * FROM schedules WHERE connection_id = %s", (connection_id,))
     if row is None:
         return None
     return Schedule(
@@ -225,7 +225,7 @@ def update_schedule(
     if interval_minutes is not None:
         sets["interval_minutes"] = interval_minutes
     if enabled is not None:
-        sets["enabled"] = int(enabled)
+        sets["enabled"] = bool(enabled)
     if last_run is not None:
         sets["last_run"] = _iso(last_run)
     if next_run is not None:
@@ -235,10 +235,10 @@ def update_schedule(
     if last_status is not None:
         sets["last_status"] = last_status
     if sets:
-        cols = ", ".join(f"{k} = ?" for k in sets)
+        cols = ", ".join(f"{k} = %s" for k in sets)
         with db.transaction() as c:
             c.execute(
-                f"UPDATE schedules SET {cols} WHERE connection_id = ?",
+                f"UPDATE schedules SET {cols} WHERE connection_id = %s",
                 (*sets.values(), connection_id),
             )
     return get_schedule(connection_id)
@@ -265,7 +265,8 @@ def create_run(connection_id: str, trigger: str, status: str = "running") -> Sca
     started = now()
     with db.transaction() as c:
         c.execute(
-            "INSERT INTO scan_runs(id, connection_id, started, status, trigger) VALUES(?,?,?,?,?)",
+            "INSERT INTO scan_runs(id, connection_id, started, status, trigger) "
+            "VALUES(%s,%s,%s,%s,%s)",
             (rid, connection_id, started.isoformat(), status, trigger),
         )
     return get_run(rid)
@@ -276,8 +277,8 @@ def finish_run(
 ) -> ScanRun:
     with db.transaction() as c:
         c.execute(
-            "UPDATE scan_runs SET finished = ?, status = ?, error = ?, snapshot_id = ? "
-            "WHERE id = ?",
+            "UPDATE scan_runs SET finished = %s, status = %s, error = %s, snapshot_id = %s "
+            "WHERE id = %s",
             (now().isoformat(), status, error, snapshot_id, run_id),
         )
     return get_run(run_id)
@@ -285,29 +286,42 @@ def finish_run(
 
 def reconcile_interrupted_runs() -> int:
     """Mark runs left in 'running' by a crash or restart as errors.
-    Called once at startup; returns how many were reconciled."""
-    with db.transaction() as c:
-        cur = c.execute(
-            "UPDATE scan_runs SET finished = ?, status = 'error', "
-            "error = 'interrupted by restart' WHERE status = 'running'",
-            (now().isoformat(),),
-        )
-        return cur.rowcount
+
+    A scan in flight holds its connection's scan lock; a row whose connection
+    lock is free belongs to a process that is gone. Returns how many were
+    reconciled.
+    """
+    reconciled = 0
+    stuck = db.fetchall("SELECT DISTINCT connection_id FROM scan_runs WHERE status = 'running'")
+    for row in stuck:
+        connection_id = row["connection_id"]
+        with db.try_advisory_lock(db.SCAN_LOCK, connection_id) as idle:
+            if not idle:
+                continue  # someone is scanning this connection right now
+            with db.transaction() as c:
+                c.execute(
+                    "UPDATE scan_runs SET finished = %s, status = 'error', "
+                    "error = 'interrupted by restart' "
+                    "WHERE status = 'running' AND connection_id = %s",
+                    (now().isoformat(), connection_id),
+                )
+                reconciled += c.rowcount
+    return reconciled
 
 
 def get_run(run_id: str) -> ScanRun | None:
-    row = db.fetchone("SELECT * FROM scan_runs WHERE id = ?", (run_id,))
+    row = db.fetchone("SELECT * FROM scan_runs WHERE id = %s", (run_id,))
     return _row_to_run(row) if row else None
 
 
 def list_runs(connection_id: str | None = None, limit: int = 100) -> list[ScanRun]:
     if connection_id:
         rows = db.fetchall(
-            "SELECT * FROM scan_runs WHERE connection_id = ? ORDER BY started DESC LIMIT ?",
+            "SELECT * FROM scan_runs WHERE connection_id = %s ORDER BY started DESC LIMIT %s",
             (connection_id, limit),
         )
     else:
-        rows = db.fetchall("SELECT * FROM scan_runs ORDER BY started DESC LIMIT ?", (limit,))
+        rows = db.fetchall("SELECT * FROM scan_runs ORDER BY started DESC LIMIT %s", (limit,))
     return [_row_to_run(r) for r in rows]
 
 
@@ -392,19 +406,9 @@ def _encode_resources(resources: list[Resource]) -> bytes:
 
 def _decode_resources(row) -> list[Resource]:
     blob = row["resources_gz"]
-    if blob is not None:
-        raw = gzip.decompress(blob)
-    else:
-        raw = row["resources"]
-        if not raw:
-            return []
-    return [Resource.model_validate(r) for r in json.loads(raw)]
-
-
-def _legacy_text_placeholder() -> str | None:
-    """Databases created before the gzip change declared `resources` NOT NULL,
-    so '' stands in for NULL there; new databases store NULL."""
-    return None if db.column_is_nullable("snapshots", "resources") else ""
+    if not blob:
+        return []
+    return [Resource.model_validate(r) for r in json.loads(gzip.decompress(bytes(blob)))]
 
 
 def save_snapshot(
@@ -416,15 +420,14 @@ def save_snapshot(
     with db.transaction() as c:
         c.execute(
             "INSERT INTO snapshots(id, connection_id, created_at, label, scheduled, "
-            "resource_count, resources, resources_gz) VALUES(?,?,?,?,?,?,?,?)",
+            "resource_count, resources_gz) VALUES(%s,%s,%s,%s,%s,%s,%s)",
             (
                 sid,
                 connection_id,
                 created.isoformat(),
                 label,
-                int(scheduled),
+                bool(scheduled),
                 len(resources),
-                _legacy_text_placeholder(),
                 _encode_resources(resources),
             ),
         )
@@ -441,43 +444,11 @@ def save_snapshot(
     )
 
 
-def migrate_legacy_snapshots(batch_size: int = 200) -> int:
-    """Compress rows still holding JSON text in `resources`. Runs in batches,
-    each under the write lock, so API reads interleave. Idempotent."""
-    placeholder = _legacy_text_placeholder()
-    total = 0
-    while True:
-        with db.transaction() as c:
-            rows = c.execute(
-                "SELECT id, resources FROM snapshots WHERE resources_gz IS NULL "
-                "AND resources IS NOT NULL AND resources != '' LIMIT ?",
-                (batch_size,),
-            ).fetchall()
-            if not rows:
-                break
-            c.executemany(
-                "UPDATE snapshots SET resources_gz = ?, resources = ? WHERE id = ?",
-                [
-                    (
-                        gzip.compress(r["resources"].encode("utf-8"), compresslevel=6),
-                        placeholder,
-                        r["id"],
-                    )
-                    for r in rows
-                ],
-            )
-        total += len(rows)
-        log.info("compressed %d legacy snapshot rows (%d so far)", len(rows), total)
-    if total:
-        log.info("legacy snapshot migration complete: %d rows compressed", total)
-    return total
-
-
 def list_snapshots(connection_id: str | None = None) -> list[SnapshotSummary]:
     q = f"SELECT {_SUMMARY_COLS} FROM snapshots"
     args: tuple = ()
     if connection_id:
-        q += " WHERE connection_id = ?"
+        q += " WHERE connection_id = %s"
         args = (connection_id,)
     q += " ORDER BY created_at DESC"
     policy, at = retention_policy(), now()
@@ -488,13 +459,13 @@ def count_snapshots(
     connection_id: str, since: datetime | None = None, until: datetime | None = None
 ) -> int:
     """Snapshots for a connection, optionally only those created inside [since, until]."""
-    q = "SELECT COUNT(*) AS n FROM snapshots WHERE connection_id = ?"
+    q = "SELECT COUNT(*) AS n FROM snapshots WHERE connection_id = %s"
     args: list[object] = [connection_id]
     if since is not None:
-        q += " AND created_at >= ?"
+        q += " AND created_at >= %s"
         args.append(since.isoformat())
     if until is not None:
-        q += " AND created_at <= ?"
+        q += " AND created_at <= %s"
         args.append(until.isoformat())
     return int(db.fetchone(q, tuple(args))["n"])
 
@@ -504,13 +475,13 @@ def snapshot_summary_at(
 ) -> SnapshotSummary | None:
     """The newest snapshot created strictly before `before`, or at or before
     `at_or_before` (one of the two). Used to find window boundaries."""
-    q = f"SELECT {_SUMMARY_COLS} FROM snapshots WHERE connection_id = ?"
+    q = f"SELECT {_SUMMARY_COLS} FROM snapshots WHERE connection_id = %s"
     args: list[object] = [connection_id]
     if before is not None:
-        q += " AND created_at < ?"
+        q += " AND created_at < %s"
         args.append(before.isoformat())
     if at_or_before is not None:
-        q += " AND created_at <= ?"
+        q += " AND created_at <= %s"
         args.append(at_or_before.isoformat())
     row = db.fetchone(q + " ORDER BY created_at DESC LIMIT 1", tuple(args))
     return _row_to_summary(row) if row is not None else None
@@ -520,10 +491,10 @@ def earliest_snapshot_summary_since(
     connection_id: str, since: datetime, until: datetime | None = None
 ) -> SnapshotSummary | None:
     """The oldest snapshot created at or after `since` (and at or before `until`)."""
-    q = f"SELECT {_SUMMARY_COLS} FROM snapshots WHERE connection_id = ? AND created_at >= ?"
+    q = f"SELECT {_SUMMARY_COLS} FROM snapshots WHERE connection_id = %s AND created_at >= %s"
     args: list[object] = [connection_id, since.isoformat()]
     if until is not None:
-        q += " AND created_at <= ?"
+        q += " AND created_at <= %s"
         args.append(until.isoformat())
     row = db.fetchone(q + " ORDER BY created_at ASC LIMIT 1", tuple(args))
     return _row_to_summary(row) if row is not None else None
@@ -532,24 +503,20 @@ def earliest_snapshot_summary_since(
 def existing_snapshot_ids(snapshot_ids: list[str]) -> set[str]:
     """Which of the given ids still have a snapshot row (change rows outlive pruning)."""
     ids = sorted(set(snapshot_ids))
-    found: set[str] = set()
-    for i in range(0, len(ids), _SQL_CHUNK):
-        chunk = ids[i : i + _SQL_CHUNK]
-        rows = db.fetchall(
-            f"SELECT id FROM snapshots WHERE id IN ({','.join('?' * len(chunk))})", tuple(chunk)
-        )
-        found.update(r["id"] for r in rows)
-    return found
+    if not ids:
+        return set()
+    rows = db.fetchall("SELECT id FROM snapshots WHERE id = ANY(%s)", (ids,))
+    return {r["id"] for r in rows}
 
 
 def snapshot_summary(snapshot_id: str) -> SnapshotSummary | None:
     """One snapshot's summary without decoding its resources."""
-    row = db.fetchone(f"SELECT {_SUMMARY_COLS} FROM snapshots WHERE id = ?", (snapshot_id,))
+    row = db.fetchone(f"SELECT {_SUMMARY_COLS} FROM snapshots WHERE id = %s", (snapshot_id,))
     return _row_to_summary(row) if row is not None else None
 
 
 def get_snapshot(snapshot_id: str) -> Snapshot | None:
-    row = db.fetchone("SELECT * FROM snapshots WHERE id = ?", (snapshot_id,))
+    row = db.fetchone("SELECT * FROM snapshots WHERE id = %s", (snapshot_id,))
     if row is None:
         return None
     summary = _row_to_summary(row)
@@ -559,8 +526,8 @@ def get_snapshot(snapshot_id: str) -> Snapshot | None:
 def latest_snapshots(connection_id: str, n: int = 2) -> list[Snapshot]:
     """Newest first. Used for "latest" and "previous" lookups."""
     rows = db.fetchall(
-        f"SELECT {_SUMMARY_COLS} FROM snapshots WHERE connection_id = ? "
-        "ORDER BY created_at DESC LIMIT ?",
+        f"SELECT {_SUMMARY_COLS} FROM snapshots WHERE connection_id = %s "
+        "ORDER BY created_at DESC LIMIT %s",
         (connection_id, n),
     )
     return [get_snapshot(r["id"]) for r in rows]
@@ -573,21 +540,21 @@ def latest_snapshot(connection_id: str) -> Snapshot | None:
 
 def delete_snapshot(snapshot_id: str) -> bool:
     with db.transaction() as c:
-        c.execute("DELETE FROM findings WHERE snapshot_id = ?", (snapshot_id,))
-        cur = c.execute("DELETE FROM snapshots WHERE id = ?", (snapshot_id,))
-        return cur.rowcount > 0
+        c.execute("DELETE FROM findings WHERE snapshot_id = %s", (snapshot_id,))
+        c.execute("DELETE FROM snapshots WHERE id = %s", (snapshot_id,))
+        return c.rowcount > 0
 
 
 def delete_snapshots(snapshot_ids: list[str]) -> int:
     """Delete snapshots and their cached findings. Change rows are kept on
     purpose: the log outlives the snapshots it was computed from."""
     deleted = 0
-    for i in range(0, len(snapshot_ids), _SQL_CHUNK):
-        chunk = snapshot_ids[i : i + _SQL_CHUNK]
-        marks = ",".join("?" * len(chunk))
+    for i in range(0, len(snapshot_ids), _DELETE_CHUNK):
+        chunk = snapshot_ids[i : i + _DELETE_CHUNK]
         with db.transaction() as c:
-            c.execute(f"DELETE FROM findings WHERE snapshot_id IN ({marks})", chunk)
-            deleted += c.execute(f"DELETE FROM snapshots WHERE id IN ({marks})", chunk).rowcount
+            c.execute("DELETE FROM findings WHERE snapshot_id = ANY(%s)", (chunk,))
+            c.execute("DELETE FROM snapshots WHERE id = ANY(%s)", (chunk,))
+            deleted += c.rowcount
     return deleted
 
 
@@ -648,7 +615,7 @@ def apply_retention(
     policy = policy or retention_policy()
     at = at or now()
     rows = db.fetchall(
-        "SELECT id, created_at FROM snapshots WHERE connection_id = ? AND scheduled = 1 "
+        "SELECT id, created_at FROM snapshots WHERE connection_id = %s AND scheduled "
         "ORDER BY created_at",
         (connection_id,),
     )
@@ -658,17 +625,15 @@ def apply_retention(
     event_policy = events_store.event_policy()
     events_gone = events_store.prune_events(connection_id, event_policy.retention_hours, now=at)
     over_cap = events_store.enforce_row_cap(connection_id, event_policy.row_cap)
-    maintenance = events_store.bounded_maintenance(at=at)
     if deleted or expired or events_gone or over_cap:
         log.info(
             "retention for %s: pruned %d snapshot(s), expired %d change row(s), "
-            "%d old event(s), %d over-cap event(s), reclaimed %d page(s)",
+            "%d old event(s), %d over-cap event(s)",
             connection_id,
             deleted,
             expired,
             events_gone,
             over_cap,
-            maintenance.pages_reclaimed,
         )
     return deleted
 
@@ -718,15 +683,16 @@ def save_changes(
     if not changes:
         if mark is not None:
             with db.transaction() as c:
-                c.execute(_SETTING_UPSERT, mark)
+                c.execute(_LOG_SINCE_INSERT, mark)
         return 0
     with db.transaction() as c:
         if mark is not None:
-            c.execute(_SETTING_UPSERT, mark)
+            c.execute(_LOG_SINCE_INSERT, mark)
         c.executemany(
             "INSERT INTO changes(id, connection_id, from_snapshot_id, to_snapshot_id, "
             "observed_at, resource_id, resource_type, resource_name, change_type, "
-            "significance, summary, property_changes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+            "significance, summary, property_changes) "
+            "VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             [
                 (
                     new_id(),
@@ -762,25 +728,25 @@ def list_change_log(
     where: list[str] = []
     args: list[object] = []
     if connection_id:
-        where.append("connection_id = ?")
+        where.append("connection_id = %s")
         args.append(connection_id)
     if since is not None:
-        where.append("observed_at >= ?")
+        where.append("observed_at >= %s")
         args.append(since.isoformat())
     if until is not None:
-        where.append("observed_at <= ?")
+        where.append("observed_at <= %s")
         args.append(until.isoformat())
     if resource_id:
-        where.append("resource_id = ?")
+        where.append("resource_id = %s")
         args.append(resource_id)
     allowed = _SIG_ORDER[: _SIG_ORDER.index(min_significance) + 1]
-    where.append(f"significance IN ({','.join('?' * len(allowed))})")
-    args.extend(allowed)
+    where.append("significance = ANY(%s)")
+    args.append(list(allowed))
     sig_rank = "CASE significance WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END"
     q = (
         "SELECT * FROM changes WHERE "
         + " AND ".join(where)
-        + f" ORDER BY observed_at DESC, {sig_rank}, resource_type, resource_name LIMIT ?"
+        + f" ORDER BY observed_at DESC, {sig_rank}, resource_type, resource_name LIMIT %s"
     )
     args.append(limit)
     return [_row_to_change(r) for r in db.fetchall(q, tuple(args))]
@@ -792,13 +758,13 @@ def count_changes_by_significance(
     until: datetime | None = None,
 ) -> dict[str, int]:
     """{"high": n, "medium": n, "low": n} for the rows observed inside [since, until]."""
-    q = "SELECT significance, COUNT(*) AS n FROM changes WHERE connection_id = ?"
+    q = "SELECT significance, COUNT(*) AS n FROM changes WHERE connection_id = %s"
     args: list[object] = [connection_id]
     if since is not None:
-        q += " AND observed_at >= ?"
+        q += " AND observed_at >= %s"
         args.append(since.isoformat())
     if until is not None:
-        q += " AND observed_at <= ?"
+        q += " AND observed_at <= %s"
         args.append(until.isoformat())
     out = {level: 0 for level in _SIG_ORDER}
     for row in db.fetchall(q + " GROUP BY significance", tuple(args)):
@@ -826,7 +792,7 @@ def _oldest_change_row(connection_id: str):
         "AND source.connection_id = c.connection_id "
         "LEFT JOIN snapshots target ON target.id = c.to_snapshot_id "
         "AND target.connection_id = c.connection_id "
-        "WHERE c.connection_id = ? ORDER BY c.observed_at ASC LIMIT 1",
+        "WHERE c.connection_id = %s ORDER BY c.observed_at ASC LIMIT 1",
         (connection_id,),
     )
 
@@ -861,11 +827,16 @@ def effective_log_coverage(connection_id: str) -> LogCoverage:
     return LogCoverage(since, pair)
 
 
-# The marker is a settings row, written through save_changes' own transaction so
-# it commits with the rows it describes; db.set_setting would commit on its own.
-_SETTING_UPSERT = (
-    "INSERT INTO settings(key, value) VALUES(?, ?) "
-    "ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+# Both markers are settings rows written through their caller's own transaction
+# so they commit with the rows they describe; db.set_setting commits on its own.
+#
+# log_since is set once and never moved, so a second writer racing the first
+# must not overwrite it. log_retained_since only ever moves forward, so the
+# comparison is done in SQL rather than read-then-write in Python.
+_LOG_SINCE_INSERT = "INSERT INTO settings(key, value) VALUES(%s, %s) ON CONFLICT(key) DO NOTHING"
+_RETAINED_SINCE_UPSERT = (
+    "INSERT INTO settings(key, value) VALUES(%s, %s) "
+    "ON CONFLICT(key) DO UPDATE SET value = GREATEST(settings.value, excluded.value)"
 )
 
 
@@ -888,22 +859,21 @@ def backfill_log_since() -> dict[str, datetime]:
 
 
 def count_changes(connection_id: str) -> int:
-    row = db.fetchone("SELECT COUNT(*) AS n FROM changes WHERE connection_id = ?", (connection_id,))
+    row = db.fetchone(
+        "SELECT COUNT(*) AS n FROM changes WHERE connection_id = %s", (connection_id,)
+    )
     return int(row["n"])
 
 
 def prune_changes(connection_id: str, before: datetime) -> int:
     with db.transaction() as c:
         key = f"{LOG_RETAINED_SINCE_KEY}:{connection_id}"
-        row = c.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
-        previous = datetime.fromisoformat(json.loads(row["value"])) if row else before
-        retained_since = max(previous, before)
-        c.execute(_SETTING_UPSERT, (key, json.dumps(retained_since.isoformat())))
-        cur = c.execute(
-            "DELETE FROM changes WHERE connection_id = ? AND observed_at < ?",
+        c.execute(_RETAINED_SINCE_UPSERT, (key, json.dumps(before.isoformat())))
+        c.execute(
+            "DELETE FROM changes WHERE connection_id = %s AND observed_at < %s",
             (connection_id, before.isoformat()),
         )
-        return cur.rowcount
+        return c.rowcount
 
 
 # --- findings cache -------------------------------------------------------
@@ -913,7 +883,7 @@ def save_findings(snapshot_id: str, findings: list[Finding]) -> None:
     payload = json.dumps([f.model_dump(mode="json") for f in findings])
     with db.transaction() as c:
         c.execute(
-            "INSERT INTO findings(snapshot_id, findings) VALUES(?, ?) "
+            "INSERT INTO findings(snapshot_id, findings) VALUES(%s, %s) "
             "ON CONFLICT(snapshot_id) DO UPDATE SET findings = excluded.findings",
             (snapshot_id, payload),
         )
@@ -921,7 +891,9 @@ def save_findings(snapshot_id: str, findings: list[Finding]) -> None:
 
 def findings_cached(snapshot_id: str) -> bool:
     """True when a findings row exists for the snapshot (an empty list still counts)."""
-    return db.fetchone("SELECT 1 FROM findings WHERE snapshot_id = ?", (snapshot_id,)) is not None
+    return (
+        db.fetchone("SELECT 1 FROM findings WHERE snapshot_id = %s", (snapshot_id,)) is not None
+    )
 
 
 def _like_literal(value: str) -> str:
@@ -943,14 +915,14 @@ def snapshot_ids_with_finding(connection_id: str, finding_id: str) -> set[str]:
     rows = db.fetchall(
         "SELECT f.snapshot_id AS snapshot_id FROM findings f "
         "JOIN snapshots s ON s.id = f.snapshot_id "
-        "WHERE s.connection_id = ? AND f.findings LIKE ? ESCAPE '\\'",
+        "WHERE s.connection_id = %s AND f.findings LIKE %s ESCAPE '\\'",
         (connection_id, pattern),
     )
     return {r["snapshot_id"] for r in rows}
 
 
 def get_findings(snapshot_id: str) -> list[Finding]:
-    row = db.fetchone("SELECT findings FROM findings WHERE snapshot_id = ?", (snapshot_id,))
+    row = db.fetchone("SELECT findings FROM findings WHERE snapshot_id = %s", (snapshot_id,))
     if row is None:
         return []
     return [Finding.model_validate(f) for f in json.loads(row["findings"])]

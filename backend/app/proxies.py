@@ -5,7 +5,7 @@ ingress, not the person at the keyboard. The ingress adds X-Forwarded-For
 and X-Forwarded-Proto, but so can anyone who reaches the pod directly, so
 those headers are only believed when the peer is in the trusted list.
 
-The list is edited on the Settings page (stored in SQLite) and can be
+The list is edited on the Settings page (stored in the database) and can be
 pinned by VCF_DOCTOR_TRUSTED_PROXIES (comma-separated IPs or CIDRs), which
 wins over the stored value. Default: empty, trust nobody. With nothing
 trusted every request behind the ingress looks like it comes from the
@@ -14,7 +14,11 @@ ingress, which is today's behaviour: one login bucket shared by everyone.
 
 import ipaddress
 import logging
+import threading
+import time
 from typing import Any
+
+from starlette.concurrency import run_in_threadpool
 
 from app import db
 from app.config import settings
@@ -24,6 +28,58 @@ log = logging.getLogger("vcf_doctor.proxies")
 SETTING_KEY = "trusted_proxies"
 
 Network = ipaddress.IPv4Network | ipaddress.IPv6Network
+
+# The stored list is read by the outermost middleware on every request. Health
+# paths always answer from memory and refresh in the background, so a database
+# outage cannot stall liveness. Other paths perform one bounded read when the
+# cache is cold, preserving the Secure cookie flag and HSTS behind a stored
+# trusted proxy. If that read times out, the request trusts nobody instead.
+CACHE_TTL = 5.0
+_cache: list[str] | None = None
+_cached_at = 0.0
+_refreshing = False
+_cache_generation = 0
+_cache_guard = threading.Lock()
+
+
+def reset_cache() -> None:
+    """Forget the cached list. Called when the test database is rebuilt under a
+    running process."""
+    global _cache, _cached_at, _cache_generation
+    with _cache_guard:
+        _cache = None
+        _cached_at = 0.0
+        _cache_generation += 1
+
+
+def _remember(value: list[str], expected_generation: int | None = None) -> None:
+    global _cache, _cached_at, _cache_generation
+    with _cache_guard:
+        if expected_generation is not None and expected_generation != _cache_generation:
+            return
+        _cache = value
+        _cached_at = time.monotonic()
+        _cache_generation += 1
+
+
+def _read_stored() -> list[str]:
+    try:
+        return parse_list(db.get_setting(SETTING_KEY, timeout=db.PROBE_TIMEOUT) or [])
+    except ValueError:
+        return []
+    except Exception:  # noqa: BLE001  a database that cannot be read trusts nobody
+        log.warning("trusted proxies unreadable; trusting nobody until the database returns")
+        return []
+
+
+def _refresh_stored(generation: int) -> None:
+    """Read the list and remember it off the request path."""
+    global _refreshing
+    try:
+        _remember(_read_stored(), expected_generation=generation)
+    finally:
+        with _cache_guard:
+            _refreshing = False
 
 
 def parse_list(raw: Any) -> list[str]:
@@ -78,29 +134,55 @@ def env_problem() -> str | None:
     return None
 
 
-def stored_value() -> list[str]:
-    try:
-        return parse_list(db.get_setting(SETTING_KEY) or [])
-    except ValueError:
-        return []
+def stored_value(wait_on_cold: bool = False) -> list[str]:
+    """The saved list, normally answered from memory.
+
+    A non-health request may request one bounded database read when the cache is
+    cold. Health requests return immediately and start a background refresh.
+    Expired warm entries always remain usable while refreshing. A save on this
+    worker supersedes any older read that is still in flight.
+    """
+    global _refreshing
+    with _cache_guard:
+        value = _cache
+        cold = value is None
+        generation = _cache_generation
+        sync = cold and wait_on_cold
+        expired = cold or time.monotonic() - _cached_at >= CACHE_TTL
+        refresh = expired and not sync and not _refreshing
+        if refresh:
+            _refreshing = True
+    if sync:
+        _remember(_read_stored(), expected_generation=generation)
+        with _cache_guard:
+            return _cache if _cache is not None else []
+    if refresh:
+        threading.Thread(
+            target=_refresh_stored,
+            args=(generation,),
+            name="trusted-proxies",
+            daemon=True,
+        ).start()
+    return value if value is not None else []
 
 
-def effective() -> tuple[list[str], str]:
+def effective(wait_on_cold: bool = False) -> tuple[list[str], str]:
     """(networks, source) where source is "env" or "settings"."""
     env = env_value()
     if env is not None:
         return env, "env"
-    return stored_value(), "settings"
+    return stored_value(wait_on_cold=wait_on_cold), "settings"
 
 
 def set_stored(raw: Any) -> list[str]:
     value = parse_list(raw)
     db.set_setting(SETTING_KEY, value)
+    _remember(value)
     return value
 
 
-def networks() -> list[Network]:
-    return [ipaddress.ip_network(n) for n in effective()[0]]
+def networks(wait_on_cold: bool = False) -> list[Network]:
+    return [ipaddress.ip_network(n) for n in effective(wait_on_cold=wait_on_cold)[0]]
 
 
 def is_trusted(host: str | None, nets: list[Network]) -> bool:
@@ -163,10 +245,10 @@ def resolve_client(peer: str | None, forwarded_for: list[str], nets: list[Networ
 
 class ForwardedHeadersMiddleware:
     """Pure ASGI: rewrite scope["client"] and scope["scheme"] from the
-    forwarded headers, but only when the TCP peer is a trusted proxy. Reads
-    the live setting on every request so a change in Settings applies
-    without a restart. Replaces uvicorn's --proxy-headers, which trusted
-    everyone."""
+    forwarded headers, but only when the TCP peer is a trusted proxy. Takes the
+    setting from stored_value, which refreshes in the background except for one
+    bounded read when a non-health request reaches a cold cache. Replaces
+    uvicorn's --proxy-headers, which trusted everyone."""
 
     def __init__(self, app):
         self.app = app
@@ -176,7 +258,11 @@ class ForwardedHeadersMiddleware:
             return await self.app(scope, receive, send)
         client = scope.get("client")
         peer = client[0] if client else None
-        nets = networks()
+        path = scope.get("path", "")
+        if path.startswith("/api/health"):
+            nets = networks()
+        else:
+            nets = await run_in_threadpool(networks, True)
         trusted = bool(peer) and is_trusted(peer, nets)
         # Keep the TCP peer and the trust decision for the Settings page:
         # scope["client"] is about to be rewritten when the peer is trusted.

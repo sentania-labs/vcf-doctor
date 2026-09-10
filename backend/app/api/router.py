@@ -18,7 +18,6 @@ from app.models import (
     ConnectionCreate,
     ConnectionPublic,
     ConnectionResult,
-    EventMaintenanceStatus,
     EventPolicy,
     Finding,
     Resource,
@@ -541,7 +540,6 @@ def put_schedule(connection_id: str, body: ScheduleUpdate):
 class AppSettings(BaseModel):
     retention_policy: RetentionPolicy
     event_policy: EventPolicy
-    event_maintenance: EventMaintenanceStatus
     min_interval_minutes: int
     scheduler_running: bool
     changes_min_significance: str
@@ -565,20 +563,11 @@ def get_settings():
     return AppSettings(
         retention_policy=scheduler.retention_policy(),
         event_policy=events_store.event_policy(),
-        event_maintenance=events_store.maintenance_status(),
         min_interval_minutes=settings.min_interval_minutes,
         scheduler_running=scheduler.running(),
         changes_min_significance=changes_min_significance(),
         assistant=assistant_settings.get_settings(),
     )
-
-
-@router.post("/settings/events/compaction-migration", response_model=EventMaintenanceStatus)
-def run_compaction_migration():
-    from app.events import store as events_store
-
-    db.migrate_compaction()
-    return events_store.bounded_maintenance()
 
 
 _TIER_KEYS = ("recent_days", "hourly_days", "daily_days", "timezone")

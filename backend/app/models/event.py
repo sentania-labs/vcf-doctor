@@ -30,9 +30,15 @@ class Event(BaseModel):
     resource_type: str | None = None
 
 
+EVENT_RETENTION_HOURS_MIN = 1
+EVENT_RETENTION_HOURS_MAX = 8760
+EVENT_ROW_CAP_MIN = 1000
+EVENT_ROW_CAP_MAX = 10_000_000
+
+
 class EventPolicy(BaseModel):
-    retention_hours: int = Field(ge=1, le=8760)
-    row_cap: int = Field(ge=1000, le=10_000_000)
+    retention_hours: int = Field(ge=EVENT_RETENTION_HOURS_MIN, le=EVENT_RETENTION_HOURS_MAX)
+    row_cap: int = Field(ge=EVENT_ROW_CAP_MIN, le=EVENT_ROW_CAP_MAX)
 
 
 class IncompleteInterval(BaseModel):
@@ -50,10 +56,3 @@ class EventCaptureStatus(BaseModel):
     last_complete_end: datetime | None = None
     task_history_unavailable: bool = False
     incomplete_intervals: list[IncompleteInterval] = Field(default_factory=list)
-
-
-class EventMaintenanceStatus(BaseModel):
-    migration_required: bool = False
-    last_run: datetime | None = None
-    last_error: str | None = None
-    pages_reclaimed: int = 0

@@ -28,7 +28,7 @@ FIXTURE_CONN = {
 
 @pytest.fixture()
 def client(tmp_path):
-    db.reset_for_tests(str(tmp_path / "t.db"))
+    db.reset_for_tests()
     with TestClient(app) as c:
         yield c
 
@@ -264,8 +264,8 @@ def _forget_the_change_log(cid: str) -> None:
     """Make the database look like one from before the change log: no rows and
     no record of the log ever having started."""
     with db.transaction() as c:
-        c.execute("DELETE FROM changes WHERE connection_id = ?", (cid,))
-        c.execute("DELETE FROM settings WHERE key = ?", (f"{store.LOG_SINCE_KEY}:{cid}",))
+        c.execute("DELETE FROM changes WHERE connection_id = %s", (cid,))
+        c.execute("DELETE FROM settings WHERE key = %s", (f"{store.LOG_SINCE_KEY}:{cid}",))
 
 
 def test_no_log_falls_back_to_latest_differing_pair(client):
@@ -578,7 +578,7 @@ def test_startup_backfills_log_since_from_the_oldest_surviving_row(client):
     cid = _connection(client, 3)
     snaps = store.list_snapshots(cid)
     with db.transaction() as c:
-        c.execute("DELETE FROM settings WHERE key = ?", (f"{store.LOG_SINCE_KEY}:{cid}",))
+        c.execute("DELETE FROM settings WHERE key = %s", (f"{store.LOG_SINCE_KEY}:{cid}",))
     assert store.log_since(cid) is None
 
     assert store.backfill_log_since() == {cid: snaps[2].created_at}
@@ -642,7 +642,7 @@ def test_pruned_backfill_source_does_not_replay_the_first_logged_change(client, 
     )
     assert store.delete_snapshots([s1.id]) == 1
     with db.transaction() as c:
-        c.execute("DELETE FROM settings WHERE key = ?", (f"{store.LOG_SINCE_KEY}:{cid}",))
+        c.execute("DELETE FROM settings WHERE key = %s", (f"{store.LOG_SINCE_KEY}:{cid}",))
     assert store.backfill_log_since() == {cid: s2.created_at}
     monkeypatch.setattr(store, "now", lambda: now)
 
@@ -760,7 +760,7 @@ def test_connection_coverage_is_independent_of_scan_order(client, monkeypatch):
     assert sorted(c.summary for c in feed) == sorted(c.summary for c in logged)
 
     with db.transaction() as c:
-        c.execute("DELETE FROM settings WHERE key IN (?, ?)", (
+        c.execute("DELETE FROM settings WHERE key IN (%s, %s)", (
             f"{store.LOG_SINCE_KEY}:{a}", f"{store.LOG_SINCE_KEY}:{b}",
         ))
     db.set_setting(store.LOG_SINCE_KEY, (start + timedelta(minutes=1)).isoformat())
@@ -906,8 +906,8 @@ def test_a_failed_row_write_does_not_leave_the_coverage_marker_set(client):
     cid = _connection(client, 2)
     snaps = store.list_snapshots(cid)  # newest first
     with db.transaction() as c:
-        c.execute("DELETE FROM changes WHERE connection_id = ?", (cid,))
-        c.execute("DELETE FROM settings WHERE key = ?", (f"{store.LOG_SINCE_KEY}:{cid}",))
+        c.execute("DELETE FROM changes WHERE connection_id = %s", (cid,))
+        c.execute("DELETE FROM settings WHERE key = %s", (f"{store.LOG_SINCE_KEY}:{cid}",))
     assert store.log_since(cid) is None
 
     change = Change(
@@ -942,8 +942,8 @@ def test_an_empty_diff_still_marks_coverage_atomically(client):
     cid = _connection(client, 2)
     snaps = store.list_snapshots(cid)
     with db.transaction() as c:
-        c.execute("DELETE FROM changes WHERE connection_id = ?", (cid,))
-        c.execute("DELETE FROM settings WHERE key = ?", (f"{store.LOG_SINCE_KEY}:{cid}",))
+        c.execute("DELETE FROM changes WHERE connection_id = %s", (cid,))
+        c.execute("DELETE FROM settings WHERE key = %s", (f"{store.LOG_SINCE_KEY}:{cid}",))
 
     assert store.save_changes(cid, snaps[1].id, snaps[0].id, snaps[0].created_at, []) == 0
 

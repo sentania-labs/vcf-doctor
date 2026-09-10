@@ -5,7 +5,7 @@ from datetime import UTC
 import pytest
 from fastapi.testclient import TestClient
 
-from app import db, timezones
+from app import db, scheduler, timezones
 from app.config import Settings, settings
 from app.main import app
 from app.snapshots import store
@@ -13,7 +13,9 @@ from app.snapshots import store
 
 @pytest.fixture()
 def client(tmp_path):
-    db.reset_for_tests(str(tmp_path / "t.db"))
+    db.reset_for_tests()
+    scheduler._begin_startup()
+    scheduler.startup_maintenance()
     with TestClient(app) as c:
         yield c
 
@@ -33,7 +35,8 @@ def test_defaults_come_from_config_and_old_count_is_ignored(client):
         "timezone": default_timezone,
     }
     assert body["event_policy"] == {"retention_hours": 48, "row_cap": 250000}
-    assert body["event_maintenance"]["last_run"] is None
+    # PostgreSQL's autovacuum reclaims space, so there is no maintenance card.
+    assert "event_maintenance" not in body
     assert db.get_setting("event_policy") == {"retention_hours": 48, "row_cap": 250000}
     assert "retention" not in body
 

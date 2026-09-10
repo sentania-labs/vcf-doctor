@@ -124,7 +124,7 @@ def test_ipv4_mapped_ipv6_peer_matches_ipv4_network():
 
 
 def _app(tmp_path):
-    db.reset_for_tests(str(tmp_path / "t.db"))
+    db.reset_for_tests()
     import importlib
 
     import app.main as main
@@ -252,6 +252,39 @@ def test_trusted_proxies_from_settings_page_apply_live(tmp_path):
             headers={"X-Forwarded-For": "203.0.113.6"},
         )
         assert r.status_code == 200
+
+
+def test_cold_stored_proxy_preserves_https_login_security(tmp_path):
+    app = _app(tmp_path)
+    auth.set_initial_password("correct horse")
+    proxies.set_stored(["10.0.0.1"])
+    proxies.reset_cache()
+
+    with TestClient(app, client=("10.0.0.1", 5000)) as c:
+        response = c.post(
+            "/api/auth/login",
+            json={"password": "correct horse"},
+            headers={"X-Forwarded-Proto": "https"},
+        )
+
+    assert response.status_code == 200
+    assert "; Secure" in response.headers["set-cookie"]
+    assert response.headers["strict-transport-security"] == "max-age=31536000"
+
+
+def test_settings_reads_saved_proxies_instead_of_the_fail_closed_cache(tmp_path):
+    app = _app(tmp_path)
+    with TestClient(app, client=("10.0.0.1", 5000)) as c:
+        c.post("/api/auth/setup", json={"password": "correct horse"})
+        saved = ["172.16.0.0/12"]
+        assert c.put(
+            "/api/settings/trusted-proxies", json={"trusted_proxies": saved}
+        ).status_code == 200
+
+        proxies._remember([])
+        body = c.get("/api/settings/trusted-proxies")
+        assert body.status_code == 200
+        assert body.json()["stored"] == saved
 
 
 def test_trusted_proxies_validation_and_env_override(tmp_path, monkeypatch):

@@ -1,12 +1,14 @@
 """FastAPI entrypoint, middleware, and router registration."""
 
 import logging
+import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 
 from app import auth, db, proxies, scheduler, vault
 from app._version import BUILD_INFO
@@ -19,36 +21,23 @@ from app.api.health_score_router import router as health_score_router
 from app.api.proxies_router import router as proxies_router
 from app.api.router import router as api_router
 from app.config import settings
-from app.snapshots import store
 
 log = logging.getLogger("vcf_doctor")
+_readiness_database_state: tuple[bool, str | None] | None = None
+_readiness_state_guard = threading.Lock()
 
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
-    db.connect()
     try:
-        # Rotation first: a secret still under the previous key must move to
-        # the current one before migrate_plaintext can judge what is plaintext.
-        vault.rekey_at_startup()
+        scheduler.start()
     except Exception:
-        log.exception("startup: encryption key rotation failed; stored secrets are unchanged")
-    try:
-        vault.migrate_plaintext()
-    except Exception:
-        log.exception("startup: secret migration failed; plaintext rows are still readable")
-    for cid, start in store.backfill_log_since().items():
-        log.info("change log coverage for %s starts %s", cid, start.isoformat())
-    interrupted = store.reconcile_interrupted_runs()
-    if interrupted:
-        log.warning("marked %d interrupted scan run(s) as error", interrupted)
-    auth.bootstrap_from_env()
-    scheduler.startup_maintenance()
-    scheduler.start()
+        log.exception("startup: the scheduler did not start; scheduled scans are not running")
     try:
         yield
     finally:
         scheduler.shutdown()
+        db.close()
 
 
 app = FastAPI(
@@ -63,7 +52,9 @@ app = FastAPI(
 
 @app.middleware("http")
 async def require_session(request: Request, call_next):
-    if auth.requires_auth(request.url.path) and not auth.is_authenticated(request):
+    if auth.requires_auth(request.url.path) and not await run_in_threadpool(
+        auth.is_authenticated, request
+    ):
         return JSONResponse({"detail": "authentication required"}, status_code=401)
     return await call_next(request)
 
@@ -132,13 +123,72 @@ async def key_unavailable(request: Request, exc: vault.KeyUnavailable):
     return JSONResponse({"detail": str(exc)}, status_code=503)
 
 
-@app.get("/api/health")
-def health() -> dict:
-    return {
-        "status": "ok",
+# Liveness and readiness are different questions and they are answered
+# separately, because they lead to opposite actions.
+#
+# Liveness: is this process alive. It performs no input or output at all, so it
+# answers just as fast while PostgreSQL is unreachable. Restarting a console
+# whose database is down fixes nothing and a restart loop makes the outage
+# worse, and a livenessProbe defaults to a one-second timeout, so anything on
+# this path that can wait on the database turns an outage into a restart loop.
+#
+# Readiness: can this instance actually serve. It goes red the moment the
+# database is unreachable or a migration is pending, so an orchestrator takes
+# the pod out of rotation instead of routing people to pages that cannot work.
+# Sign-in and everything behind it need the database, so "reachable API, dead
+# database" is not a state to send traffic to.
+#
+# /api/health is the older name for the liveness answer, so a manifest that has
+# not been repointed yet behaves as it always has instead of restart-looping
+# through an outage. Whether scheduled scans are running can now only be learned
+# from the database, so it is reported by readiness alone.
+
+
+def _log_database_transition(database: bool, detail: str | None) -> None:
+    global _readiness_database_state
+    state = (database, detail)
+    with _readiness_state_guard:
+        previous = _readiness_database_state
+        if state == previous:
+            return
+        _readiness_database_state = state
+    if not database:
+        log.warning("readiness: the database is not usable: %s", detail)
+    elif previous is not None and not previous[0]:
+        log.info("readiness: the database is usable again")
+
+
+def _readiness() -> tuple[dict, int]:
+    database, detail = db.healthy()
+    _log_database_transition(database, detail)
+    ready = database
+    body = {
+        "status": "ok" if ready else "degraded",
         "version": app.version,
         "scheduler": scheduler.running(),
+        "database": database,
     }
+    return body, 200 if ready else 503
+
+
+# /api/health is a compatibility alias for liveness. It retires when the probes
+# are repointed, as tracked under "Owed to the deployment repo" in STATUS.md.
+@app.get("/api/health/live")
+@app.get("/api/health")
+async def health_live() -> dict:
+    """Public liveness, under the current name and the older one. 200 while the
+    process is answering, whatever the database is doing, and it reads nothing
+    to say so. This is what the container HEALTHCHECK and a Kubernetes
+    livenessProbe should use."""
+    return {"status": "ok", "version": app.version}
+
+
+@app.get("/api/health/ready")
+def health_ready() -> JSONResponse:
+    """Public readiness. 503 while the database is unreachable or a migration
+    is pending. This is what a Kubernetes readinessProbe should use."""
+    body, status = _readiness()
+    return JSONResponse(body, status_code=status)
 
 
 @app.get("/api/version")

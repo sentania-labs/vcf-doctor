@@ -13,7 +13,7 @@ from app.snapshots import store
 
 @pytest.fixture()
 def client(tmp_path):
-    db.reset_for_tests(str(tmp_path / "t.db"))
+    db.reset_for_tests()
     with TestClient(app) as c:
         yield c
 
@@ -148,20 +148,22 @@ def test_test_connection_endpoint(client):
     assert r.status_code == 200 and r.json()["ok"] is True
 
 
-def test_health_reports_scheduler_off_under_pytest(client):
-    h = client.get("/api/health").json()
+def test_readiness_reports_scheduler_off_under_pytest(client):
+    """Whether scheduled scans are running can only be learned from the
+    database, so readiness reports it and liveness does not."""
+    h = client.get("/api/health/ready").json()
     assert h["status"] == "ok" and h["scheduler"] is False
+    assert "scheduler" not in client.get("/api/health").json()
 
 
 def test_scan_lock_skips_overlapping_run(tmp_path):
-    db.reset_for_tests(str(tmp_path / "t.db"))
+    db.reset_for_tests()
     conn = store.create_connection(ConnectionCreate(**FIXTURE_CONN))
-    lock = scheduler._lock_for(conn.id)
-    lock.acquire()
-    try:
+    # The scan lock is a PostgreSQL advisory lock, so holding it from anywhere,
+    # including another worker or pod, is what makes the next scan skip.
+    with db.try_advisory_lock(db.SCAN_LOCK, conn.id) as held:
+        assert held
         run = scheduler.run_scan(conn.id, "scheduled")
-    finally:
-        lock.release()
     assert run.status == "skipped"
     assert "still active" in run.error
     assert store.get_schedule(conn.id).last_status == "skipped"
@@ -171,7 +173,7 @@ def test_scan_lock_skips_overlapping_run(tmp_path):
 
 def test_scan_lock_under_real_concurrency(tmp_path):
     """Two threads scanning the same connection: exactly one ok, one skipped."""
-    db.reset_for_tests(str(tmp_path / "t.db"))
+    db.reset_for_tests()
     conn = store.create_connection(ConnectionCreate(**FIXTURE_CONN))
     barrier = threading.Barrier(2)
     results = []
@@ -186,6 +188,42 @@ def test_scan_lock_under_real_concurrency(tmp_path):
     for t in threads:
         t.join()
     assert sorted(results) in (["ok", "ok"], ["ok", "skipped"])
+
+
+def test_overlapping_scans_cannot_starve_the_connection_pool(monkeypatch):
+    """A scan holds its lock for its whole run and needs the pool for its own
+    work, so if the lock sat on a pooled connection then as many overlapping
+    scans as the pool is wide would hold every connection and starve each
+    other. More scans than the pool can hold must still all complete."""
+    from app.config import settings as cfg
+
+    db.reset_for_tests()
+    pool_size = 2
+    conns = [
+        store.create_connection(ConnectionCreate(**{**FIXTURE_CONN, "name": f"Fixture {i}"}))
+        for i in range(pool_size + 2)
+    ]
+    monkeypatch.setattr(cfg, "db_pool_max_size", pool_size)
+    monkeypatch.setattr(cfg, "db_pool_min_size", 1)
+    monkeypatch.setattr(cfg, "db_pool_timeout", 3.0)
+    db.close()
+    barrier = threading.Barrier(len(conns))
+    results: dict[str, str] = {}
+
+    def go(connection_id: str):
+        barrier.wait()
+        try:
+            results[connection_id] = scheduler.run_scan(connection_id, "scheduled").status
+        except Exception as exc:  # noqa: BLE001  a starved scan is the failure under test
+            results[connection_id] = f"raised {exc.__class__.__name__}"
+
+    threads = [threading.Thread(target=go, args=(c.id,)) for c in conns]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    db.close()
+    assert sorted(results.values()) == ["ok"] * len(conns), results
 
 
 def test_fixture_kind_never_hijacks_live_connections():

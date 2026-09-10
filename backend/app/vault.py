@@ -11,8 +11,8 @@ Key source, in order:
      SealedSecret, so it survives redeploys). A 44 character Fernet key is
      used as is; any other string is stretched with scrypt so a passphrase
      works too.
-  2. A key file next to the SQLite database (<db name>.key, mode 0600),
-     generated on first start so a fresh install runs with no setup.
+  2. A generated key file at <VCF_DOCTOR_DATA_DIR>/vcf-doctor.key (mode 0600),
+     created on first start so a fresh install runs with no setup.
 
 Losing the key means the stored passwords cannot be read. The app keeps
 running: those connections are flagged as needing credentials and the
@@ -76,14 +76,18 @@ class KeyUnavailable(Exception):
 
 
 _lock = threading.Lock()
-# (env value, db path) -> (Fernet, source, key file path). Re-derived when either
-# input changes, which is what tests do when they point db at a temp file.
+# (env value, data dir) -> (Fernet, source, key file path). Re-derived when
+# either input changes, which is what tests do when they point the data
+# directory at a temp path.
 _cache: dict[tuple[str, str], tuple[Fernet, KeySource, Path | None]] = {}
+
+KEY_FILE_NAME = "vcf-doctor.key"
 
 
 def key_file_path() -> Path:
-    db = Path(cfg.db_path)
-    return db.with_name(db.stem + ".key")
+    """The generated key lives on the persistent volume, not in the database:
+    a database an attacker copies must not carry the key that opens it."""
+    return Path(cfg.data_dir) / KEY_FILE_NAME
 
 
 def _normalise(raw: str) -> bytes:
@@ -133,13 +137,13 @@ def _read_key_file(path: Path, remedy: str = _ACTIVE_KEY_REMEDY) -> bytes:
 def _load_or_create_key_file(path: Path) -> bytes:
     if path.exists():
         return _read_key_file(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
     key = Fernet.generate_key()
     # Write a private temp file, fsync it, then link it into place. The link
     # is atomic and exclusive, so a crash mid-write never leaves a half key
     # file behind and two processes racing at first boot agree on one key.
     tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     try:
+        path.parent.mkdir(parents=True, exist_ok=True)
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(fd, "w") as fh:
             fh.write(key.decode() + "\n")
@@ -150,7 +154,10 @@ def _load_or_create_key_file(path: Path) -> bytes:
         except FileExistsError:
             return _read_key_file(path)
     except OSError as exc:
-        raise KeyUnavailable(f"cannot create encryption key file {path}: {exc}") from exc
+        raise KeyUnavailable(
+            f"cannot create encryption key file {path}: {exc}. Point VCF_DOCTOR_DATA_DIR at a "
+            "writable directory, or set VCF_DOCTOR_SECRET_KEY and no file is needed."
+        ) from exc
     finally:
         tmp.unlink(missing_ok=True)
     log.warning(
@@ -163,7 +170,7 @@ def _load_or_create_key_file(path: Path) -> bytes:
 
 def _resolve() -> tuple[Fernet, KeySource, Path | None]:
     env = os.environ.get(ENV_KEY, "")
-    ident = (env, cfg.db_path)
+    ident = (env, cfg.data_dir)
     with _lock:
         if ident in _cache:
             return _cache[ident]
@@ -253,15 +260,18 @@ def migrate_plaintext() -> int:
 
     rewritten = 0
     with db.transaction() as c:
+        # Every worker and every pod runs this at startup. The lock makes them
+        # take turns, so the second one sees rows the first already rewrote.
+        db.lock_in_transaction(c, "vault", "rewrite")
         for row in c.execute("SELECT id, password FROM connections").fetchall():
             if needs_encrypting(row["password"]):
                 c.execute(
-                    "UPDATE connections SET password = ? WHERE id = ?",
+                    "UPDATE connections SET password = %s WHERE id = %s",
                     (encrypt(row["password"]), row["id"]),
                 )
                 rewritten += 1
         row = c.execute(
-            "SELECT value FROM settings WHERE key = ?", ("assistant_api_key",)
+            "SELECT value FROM settings WHERE key = %s", ("assistant_api_key",)
         ).fetchone()
         if row is not None:
             try:
@@ -270,16 +280,12 @@ def migrate_plaintext() -> int:
                 value = None
             if isinstance(value, str) and value and needs_encrypting(value):
                 c.execute(
-                    "UPDATE settings SET value = ? WHERE key = ?",
+                    "UPDATE settings SET value = %s WHERE key = %s",
                     (json.dumps(encrypt(value)), "assistant_api_key"),
                 )
                 rewritten += 1
         if first_run:
-            c.execute(
-                "INSERT INTO settings(key, value) VALUES(?, ?) "
-                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-                (MIGRATED_KEY, json.dumps(1)),
-            )
+            c.execute(db.SETTING_UPSERT, (MIGRATED_KEY, json.dumps(1)))
     if rewritten:
         log.info("encrypted %d plaintext secret row(s)", rewritten)
     return rewritten
@@ -366,15 +372,16 @@ def rekey(previous_key: str, source: str, *, always_record: bool = False) -> Rek
         return encrypt(plain)
 
     with db.transaction() as c:
+        # Same lock as migrate_plaintext: one rewrite of the stored secrets at
+        # a time, whichever worker or pod starts it.
+        db.lock_in_transaction(c, "vault", "rewrite")
         for row in c.execute("SELECT id, password FROM connections").fetchall():
             value = moved(row["password"])
             if value is not None:
-                c.execute(
-                    "UPDATE connections SET password = ? WHERE id = ?", (value, row["id"])
-                )
+                c.execute("UPDATE connections SET password = %s WHERE id = %s", (value, row["id"]))
                 rewritten += 1
         row = c.execute(
-            "SELECT value FROM settings WHERE key = ?", ("assistant_api_key",)
+            "SELECT value FROM settings WHERE key = %s", ("assistant_api_key",)
         ).fetchone()
         if row is not None:
             try:
@@ -385,7 +392,7 @@ def rekey(previous_key: str, source: str, *, always_record: bool = False) -> Rek
                 value = moved(stored)
                 if value is not None:
                     c.execute(
-                        "UPDATE settings SET value = ? WHERE key = ?",
+                        "UPDATE settings SET value = %s WHERE key = %s",
                         (json.dumps(value), "assistant_api_key"),
                     )
                     rewritten += 1
@@ -408,11 +415,7 @@ def rekey(previous_key: str, source: str, *, always_record: bool = False) -> Rek
         # Recorded in the same transaction as the rows it describes, so the
         # card never reports a rotation that was rolled back.
         if always_record or rewritten or unreadable:
-            c.execute(
-                "INSERT INTO settings(key, value) VALUES(?, ?) "
-                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-                (REKEY_KEY, json.dumps(asdict(outcome))),
-            )
+            c.execute(db.SETTING_UPSERT, (REKEY_KEY, json.dumps(asdict(outcome))))
     if rewritten:
         log.info(
             "re-encrypted %d stored secret(s) under the current key (previous key from %s)",
@@ -438,7 +441,7 @@ def last_rekey() -> RekeyOutcome | None:
 
 
 def previous_key_file() -> Path | None:
-    """The generated key file left next to the database after a deployment has
+    """The generated key file left on the volume after a deployment has
     moved to an env key. Offered as a one-click rotation in Settings so moving
     to a sealed secret costs no re-entry, but never applied on its own: an env
     key set by mistake must stay recoverable by unsetting it again.
@@ -455,7 +458,7 @@ def read_previous_key_file() -> str:
     path = previous_key_file()
     if path is None:
         raise KeyUnavailable(
-            "there is no generated key file next to the database to rotate from"
+            "there is no generated key file on the volume to rotate from"
         )
     return _read_key_file(path, _PREVIOUS_KEY_REMEDY).decode()
 

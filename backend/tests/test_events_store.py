@@ -1,5 +1,6 @@
 """events table: dedup, filters, pruning, and the capture service."""
 
+import logging
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -18,7 +19,7 @@ NOW = datetime(2026, 8, 31, 12, 0, 0, tzinfo=UTC)
 
 @pytest.fixture(autouse=True)
 def _fresh_db(tmp_path):
-    db.reset_for_tests(str(tmp_path / "events.db"))
+    db.reset_for_tests()
     yield
 
 
@@ -119,6 +120,28 @@ def test_event_retention_is_independent_from_snapshot_policy(monkeypatch):
     events_store.set_event_policy(EventPolicy(retention_hours=72, row_cap=250_000))
     store.set_retention_policy(RetentionPolicy(recent_days=14, hourly_days=30, daily_days=90))
     assert service.retention_hours() == 72
+
+
+@pytest.mark.parametrize(
+    ("retention_hours", "row_cap", "expected"),
+    [
+        (0, 500, (1, 1000)),
+        (9000, 20_000_000, (8760, 10_000_000)),
+    ],
+)
+def test_event_policy_defaults_are_clamped_and_logged_once(
+    monkeypatch, caplog, retention_hours, row_cap, expected
+):
+    monkeypatch.setattr(cfg, "event_retention_hours", retention_hours)
+    monkeypatch.setattr(cfg, "event_row_cap", row_cap)
+
+    with caplog.at_level(logging.WARNING, logger="vcf_doctor.events"):
+        first = events_store.default_event_policy()
+        second = events_store.default_event_policy()
+
+    assert (first.retention_hours, first.row_cap) == expected
+    assert second == first
+    assert caplog.text.count("event policy defaults clamped") == 1
 
 
 def test_apply_retention_prunes_events_without_a_capture():

@@ -12,7 +12,11 @@ capped at a minute, reported back as `Retry-After` and counted down on the
 login page. The Settings password change re-checks the current password, so
 it shares that one counter and a wrong guess in one place pauses the other.
 A process-wide ceiling (30 failures a minute across every address)
-backstops guessing from many addresses. The client address is the TCP peer
+backstops guessing from many addresses. Both counters are in memory and so are
+per worker process: a deployment running N workers or N pods gives a guesser N
+times those allowances before the backoff bites. That is a consequence of
+running more than one replica (#59) and is tracked in #74; front the console
+with ingress rate limiting if it is exposed anywhere that matters. The client address is the TCP peer
 unless that peer is a trusted proxy (Settings, or
 `VCF_DOCTOR_TRUSTED_PROXIES`), in which case the rightmost untrusted
 `X-Forwarded-For` hop is used. Nothing is trusted by default, so behind an
@@ -29,12 +33,34 @@ authentication.
 ## Secrets at rest
 
 vCenter passwords and the Anthropic key (when entered via the GUI) are
-encrypted (Fernet, authenticated) before they reach SQLite. The encryption
+encrypted (Fernet, authenticated) before they reach PostgreSQL. The encryption
 key comes from `VCF_DOCTOR_SECRET_KEY` when set (in the lab a sealed
 Kubernetes secret, so it survives redeploys); otherwise the app generates
-`vcf-doctor.key` next to the database on first start, owner-only
-permissions, and reuses it. Rows written by older builds are encrypted on
-the next startup. Settings shows which key source is active, never the key.
+`vcf-doctor.key` in `VCF_DOCTOR_DATA_DIR` on the persistent volume on first
+start, owner-only permissions, and reuses it. It is deliberately not in the
+database it protects: a copied database must not carry the key that opens it.
+Rows written by older builds are encrypted on the next startup. Settings shows
+which key source is active, never the key.
+
+## The database password
+
+The database password is never an environment variable on any supported path.
+`VCF_DOCTOR_DATABASE_URL` carrying one is refused at startup, because an
+environment variable is readable from a process listing, a container inspect
+and any crash dump that captures the environment. It is read from the file
+named by `VCF_DOCTOR_DB_PASSWORD_FILE`, which is a mounted Kubernetes Secret
+in the cluster and a mounted file under docker compose, so the code path is
+the same in both.
+
+That file is readable by the console's uid and nothing else: mode `0400` owned
+by uid `10001` in compose, `defaultMode: 0440` with `fsGroup: 10001` in
+Kubernetes. PostgreSQL gets its own copy owned by its own uid rather than
+sharing one world-readable file. See
+[the database](DEPLOYMENT.md#the-password) for the manifest.
+
+The connection itself (host, database, user) is a deployment binding rather
+than a product setting. It has no field in Settings; the interface reports only
+whether the database is reachable, and where to change it is the deployment.
 
 Losing the key means re-entering the vCenter passwords and the API key,
 nothing worse: affected connections are flagged "Needs password" on the
@@ -107,7 +133,7 @@ gates are the release discipline.
 ## What ships
 
 Base images are pinned by digest and `uv` by version. The container runs as
-uid 10001 and declares a `HEALTHCHECK` on `/api/health`. The published image
+uid 10001 and declares a `HEALTHCHECK` on `/api/health/live`. The published image
 index carries a max-mode SLSA provenance attestation and an SPDX SBOM, and
 the digest is signed keyless with cosign. See [Deployment](DEPLOYMENT.md)
 for the verification commands.

@@ -5,7 +5,9 @@ wiki.
 
 ## Run it locally
 
-Prerequisites: Python 3.14+, [uv](https://docs.astral.sh/uv/), Node 22+.
+Prerequisites: Python 3.14+, [uv](https://docs.astral.sh/uv/), Node 22+, and
+Docker. Nothing needs PostgreSQL installed: the targets below start disposable
+`postgres:16` containers.
 
 ```bash
 make setup          # backend venv via uv, frontend npm ci
@@ -13,6 +15,17 @@ make lint           # ruff (backend) and tsc (frontend)
 make test           # backend pytest and frontend Node tests
 make run            # builds the frontend, serves everything on :8000
 ```
+
+`make test` starts a throwaway PostgreSQL, runs the suite against it and removes
+it. The suite drops and rebuilds the schema between tests, so it refuses to run
+unless `VCF_DOCTOR_TEST_DATABASE_URL` names the database it may do that to;
+`make test` sets it. Point that variable at a server of your own to skip the
+container.
+
+`make run` and `make dev-backend` use a second container, `vcf-doctor-dev-pg`,
+which keeps its data in a named volume so the connections you add survive a
+restart. `make dev-db-stop` stops it. `docker compose up` is the other way to
+run the whole stack, and is what a user runs.
 
 For hot reload use two terminals: `make dev-backend` (:8000) and
 `make dev-frontend` (:5173, proxies `/api`). `make scan` runs the same
@@ -78,8 +91,11 @@ deployment repositories pin the exact version or digest they run.
 
 ## Where things live
 
-Backend: `backend/app` (FastAPI, SQLite, APScheduler; checks in
-`diagnostics/checks`, diff engine in `diff`, collectors in `collectors`).
+Backend: `backend/app` (FastAPI, PostgreSQL via psycopg, APScheduler; checks in
+`diagnostics/checks`, diff engine in `diff`, collectors in `collectors`). The
+schema is numbered `.sql` files in `app/migrations`, applied by `app/migrate.py`;
+adding one is dropping in the next-numbered file. `app/db.py` is the only place
+that opens a connection.
 Frontend: `frontend/src` (React, Vite, Tailwind; pages in `pages`, Settings
 cards in `components/settings`). Contracts: [docs/PROPERTIES.md](docs/PROPERTIES.md)
 and [docs/RETENTION_EVENTS.md](docs/RETENTION_EVENTS.md).

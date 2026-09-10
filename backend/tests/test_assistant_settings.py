@@ -8,7 +8,7 @@ SECRET = "sk-ant-test-not-a-real-key-0000"
 
 @pytest.fixture(autouse=True)
 def fresh_db(tmp_path, monkeypatch):
-    db.reset_for_tests(str(tmp_path / "s.db"))
+    db.reset_for_tests()
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
 

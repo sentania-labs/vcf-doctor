@@ -181,7 +181,7 @@ def test_every_check_has_coverage_and_findings_never_exceed_it():
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     monkeypatch.delenv("VCF_DOCTOR_HEALTH_WEIGHTS", raising=False)
-    db.reset_for_tests(str(tmp_path / "t.db"))
+    db.reset_for_tests()
     from app.main import app
 
     with TestClient(app) as c:
@@ -245,7 +245,7 @@ def test_overview_before_first_scan_is_all_not_evaluated(client):
 
 
 def test_env_seed_for_defaults(monkeypatch, tmp_path):
-    db.reset_for_tests(str(tmp_path / "e.db"))
+    db.reset_for_tests()
     monkeypatch.setenv("VCF_DOCTOR_HEALTH_WEIGHTS", "critical=50, warning=bad, nope=3")
     assert scoring.default_weights() == {"critical": 50, "warning": 15, "info": 0}
     assert scoring.get_weights()["critical"] == 50

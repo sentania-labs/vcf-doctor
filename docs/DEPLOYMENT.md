@@ -4,7 +4,12 @@ This repository is **not** responsible for deployment. It publishes a
 container image; whoever deploys it (in the lab, the deployment repository
 and Argo CD) owns everything else. Nothing about a specific vCenter belongs
 in a manifest: connections, schedules, retention and assistant settings are
-application state set through the GUI and stored on the volume.
+application state set through the GUI and stored in PostgreSQL.
+
+The console needs a PostgreSQL database. It is the only supported one; there
+is no SQLite mode and no file-backed fallback. The database connection is a
+deployment binding, so it is set here and never in Settings, which reports
+only whether the database is reachable.
 
 ## Contract
 
@@ -12,10 +17,13 @@ application state set through the GUI and stored on the volume.
 |---|---|
 | Image | `ghcr.io/sentania-labs/vcf-doctor:<tag>` where tag is `vX.Y.Z` (release), `sha-<7>` or `latest` |
 | Port | `8000` (HTTP) |
-| Health | `GET /api/health` (the container also declares a `HEALTHCHECK` on it) |
+| Liveness | `GET /api/health/live` (and `GET /api/health`, the same body under the older name), 200 whenever the process is answering. Reads nothing, so it answers in milliseconds during a database outage. The container's `HEALTHCHECK` uses this. |
+| Readiness | `GET /api/health/ready`, 200 when the database is reachable and migrated, 503 otherwise. Reports `database` and `scheduler`. Exception details and deferred maintenance failures stay in the server log. |
 | Build identity | `GET /api/version` returns the [build identity fields](../backend/app/_version.py); `GET /api/health` reports the same version |
-| Persistent volume | `/data` (SQLite at `/data/vcf-doctor.db`, encryption key file next to it) |
-| Replicas | **exactly 1**, `strategy: Recreate`. Two pods would double-scan and contend for SQLite. |
+| Database | PostgreSQL 14 or newer, reached over `VCF_DOCTOR_DATABASE_URL`. Apply schema migrations before the console with `python3 -m app.migrate upgrade`. |
+| Database password | A file, never an environment variable. `VCF_DOCTOR_DB_PASSWORD_FILE`, default `/run/secrets/vcf-doctor-db-password`. |
+| Persistent volume | `/data`, holding only the generated encryption key file. A deployment that sets `VCF_DOCTOR_SECRET_KEY` needs no volume at all. |
+| Replicas | More than one is supported. PostgreSQL owns concurrency, and one worker takes an advisory lock that makes it the only one running scheduled scans. |
 | User | runs as uid `10001`; set `fsGroup: 10001` so the volume is writable |
 
 Every published digest first passes the checks, repository scan, image scan and
@@ -47,16 +55,194 @@ checkout SHA, and an unknown build time because there was no image build.
 Follow [Cut a release](../CONTRIBUTING.md#cut-a-release) for the annotated-tag
 procedure and version pinning guidance.
 
+## Liveness and readiness
+
+They are different questions and they lead to opposite actions, so they are
+answered separately.
+
+**Liveness** is whether the process is alive. `GET /api/health/live` touches
+nothing external and stays 200 while PostgreSQL is unreachable. Restarting a
+console whose database is down fixes nothing and a restart loop makes the
+outage worse, so nothing should restart on the database.
+
+**Readiness** is whether this instance can serve. `GET /api/health/ready` is
+503 while the database is unreachable or a migration is pending. Sign-in and
+every page behind it need the database, so an instance that cannot use it is
+one to take out of rotation, not one to send visitors to. Deferred maintenance
+never gates traffic, and failures are written to the server log.
+
+`GET /api/health` is the older name for the liveness answer and returns the same
+body, so a manifest that has not been repointed yet keeps behaving as it does
+today rather than restart-looping through a database outage. Point the probes at
+the two specific paths; the old name is compatibility, not a third answer.
+Whether scheduled scans are running is on the readiness body only, because the
+answer can only be read from the database.
+
+```yaml
+        livenessProbe:
+          httpGet: { path: /api/health/live, port: 8000 }
+        readinessProbe:
+          httpGet: { path: /api/health/ready, port: 8000 }
+          timeoutSeconds: 5
+```
+
+Liveness needs no `timeoutSeconds` raise: nothing on that path reads the
+database, not the handler and not the forwarded-headers middleware ahead of it,
+which answers from memory and refreshes in the background. It stays inside the
+one-second default during an outage, which is what makes an un-repointed
+manifest safe.
+
+Readiness gets `timeoutSeconds: 5` because it does read the database, and while
+that is unreachable it answers in about three seconds rather than stalling on
+the ten-second connection pool timeout.
+
+Both are public: they need no session, and they are the only endpoints that
+stay useful during a database outage.
+
+## The database
+
+### Schema migrations
+
+The schema lives in numbered `.sql` files under
+[`backend/app/migrations`](../backend/app/migrations), applied in order and
+recorded in a `schema_migrations` table. Run `python3 -m app.migrate upgrade`
+before the console. It is the one-shot `migrate` service in
+`docker-compose.yml`, and a Kubernetes deployment should run the same command
+in a `Job` or an `initContainer`. Migration runners take the same PostgreSQL
+advisory lock, so concurrent runners migrate once rather than racing.
+
+`python3 -m app.migrate status` prints what is applied and what is pending. A
+reachable database with a pending migration reports as unhealthy on
+`GET /api/health/ready` and on the Settings database panel, because a server
+missing its tables is not a working database.
+
+The console begins serving without waiting on PostgreSQL. Once it is listening,
+each worker uses the scheduler's existing retry interval to rotate and migrate
+stored secrets, recover change-log coverage and interrupted scans, seed the
+operator password and event policy, pause stale fixture schedules, and apply
+retention. Failures are logged without gating readiness. If
+PostgreSQL is unavailable, liveness stays green and the same work retries until
+the database returns, without restarting the process.
+
+Adding the next migration is dropping in `0002_<what_it_does>.sql`. Nothing
+else is registered and no shipped file is ever edited.
+
+### The password
+
+No supported path carries the database password in an environment variable.
+`VCF_DOCTOR_DATABASE_URL` must not contain one; a URL that does is refused at
+startup with a message naming the file to use instead. The password is read
+from `VCF_DOCTOR_DB_PASSWORD_FILE`, a path that is a mounted file in one shape
+and a mounted Kubernetes Secret in the other, so the application does the same
+thing in both. No file means no password is sent, which is what a
+trust-authenticated local server wants.
+
+Give the file to the console's uid and nobody else. `defaultMode: 0440` with
+`fsGroup: 10001` leaves it owned by root with group `10001`, readable by the
+console and by no other process in the pod. The PostgreSQL side gets its own
+copy, owned by its own uid; one shared file would have to be world readable,
+because the two run as different users.
+
+```yaml
+# Kubernetes: the Secret arrives at the same path compose mounts.
+      securityContext:
+        fsGroup: 10001
+      containers:
+        - name: vcf-doctor
+          env:
+            - name: VCF_DOCTOR_DATABASE_URL
+              value: postgresql://vcf_doctor@vcf-doctor-db:5432/vcf_doctor
+            - name: VCF_DOCTOR_DB_PASSWORD_FILE
+              value: /run/secrets/vcf-doctor-db-password
+          volumeMounts:
+            - name: db-password
+              mountPath: /run/secrets
+              readOnly: true
+      volumes:
+        - name: db-password
+          secret:
+            secretName: vcf-doctor-db
+            defaultMode: 0440
+            items: [{ key: password, path: vcf-doctor-db-password }]
+```
+
+### Standalone and docker
+
+`docker-compose.yml` in this repository is self-contained: `docker compose up`
+brings up `postgres:16` on a named volume, generates a database password into a
+second volume, applies the migrations in the one-shot `migrate` service, and
+starts the console with two uvicorn workers. There is no
+external dependency to install first. The password is written twice, once for
+each reader, each copy mode `0400` and owned by the uid that reads it.
+
+### Kubernetes, single pod
+
+One PostgreSQL pod with one PVC. In the sentania lab that is Longhorn with
+best-effort locality and two replicas: in-cluster, node-survivable (the volume
+reattaches when the pod is rescheduled), roughly a minute of downtime on node
+loss, and no read replicas. The console is unchanged; it only takes a
+`VCF_DOCTOR_DATABASE_URL`.
+
+This is where a lab starts. It is enough for a single-estate console and it is
+one object to reason about.
+
+### Kubernetes, HA with CloudNativePG
+
+A CloudNativePG `Cluster`: a primary and standbys spread across nodes, streaming
+replication, automated failover, and in-cluster WAL archiving for
+point-in-time recovery. Each instance can sit on fast local or single-replica
+storage, because the redundancy is in PostgreSQL rather than in the block layer.
+Synchronous block replication under a database pays a cross-node fsync on every
+commit; streaming replication does not.
+
+Nothing in the application changes between the two shapes. Point
+`VCF_DOCTOR_DATABASE_URL` at the CloudNativePG read-write service, mount its
+generated Secret at the password path above, and restart. Pooled connections
+that break during a failover are checked on the way out of the pool, so a
+failover costs a retry rather than an error.
+
+### Upgrading a lab that is still on SQLite
+
+The old volume's `vcf-doctor.db` is imported once, into a database that has no
+history yet:
+
+```bash
+python3 -m app.migrate upgrade
+python3 -m app.import_sqlite --path /data/vcf-doctor.db
+```
+
+Connections, schedules, scan runs, snapshots, findings, changes, events and
+capture state all come across. Integer flags become real booleans, and a
+snapshot still held as JSON text by a pre-gzip build is compressed on the way.
+The old deployment's settings win, so its operator password, retention policy
+and health score weights survive; the encryption key must come across too, or
+the vCenter passwords need re-entering exactly as they would after any key loss.
+
+It refuses a target that already holds history, so a second accidental run
+cannot double one; import into an empty, migrated database instead. Nothing
+writes back to the SQLite file, so the old volume stays a rollback option until
+you delete it.
+
 ## Environment variables
 
 All optional. Anything an operator would change day to day has a GUI
 control in Settings; these only set deployment-time defaults or override
 them.
 
+Unless the database URL sets them, connections use a 5-second connect timeout,
+a 60-second TCP user timeout, and TCP keepalives after 20 idle seconds at
+10-second intervals for 3 attempts. This abandons a dead database socket in
+about a minute. Explicit libpq URL parameters override each default.
+
 | Variable | Default | Purpose |
 |---|---|---|
-| `VCF_DOCTOR_DB_PATH` | `/data/vcf-doctor.db` | SQLite location |
-| `VCF_DOCTOR_SECRET_KEY` | unset | Key for encrypting vCenter passwords and the Anthropic key at rest. Unset: a key file is generated next to the database. See [Security](SECURITY.md). |
+| `VCF_DOCTOR_DATABASE_URL` | `postgresql://vcf_doctor@postgres:5432/vcf_doctor` | PostgreSQL connection, without a password. A URL carrying a password is refused. |
+| `VCF_DOCTOR_DB_PASSWORD_FILE` | `/run/secrets/vcf-doctor-db-password` | File holding the database password. Missing file means none is sent. |
+| `VCF_DOCTOR_DB_POOL_MAX_SIZE` | `10` | Pooled connections per worker process. Multiply by the worker count when sizing the server's `max_connections`; a running scan holds its lock on its own connection outside the pool, so scans cannot consume it. |
+| `VCF_DOCTOR_DB_POOL_MIN_SIZE` | `1` | Connections kept open per worker process |
+| `VCF_DOCTOR_DB_POOL_TIMEOUT` | `10` | Seconds a request waits for a free pooled connection |
+| `VCF_DOCTOR_DATA_DIR` | `/data` | Writable directory for the generated encryption key file. Nothing else is written there. |
+| `VCF_DOCTOR_SECRET_KEY` | unset | Key for encrypting vCenter passwords and the Anthropic key at rest. Unset: a key file is generated in `VCF_DOCTOR_DATA_DIR`. See [Security](SECURITY.md). |
 | `VCF_DOCTOR_SECRET_KEY_PREVIOUS` | unset | Previous encryption key for startup rotation. See [rotating the encryption key](#rotating-the-encryption-key) for the procedure in each deployment shape. |
 | `ANTHROPIC_API_KEY` | unset | Enables the Claude assistant. A key entered in Settings takes precedence. |
 | `VCF_DOCTOR_AUTH` | `on` | `off` disables the login page (use only behind ingress authentication) |
@@ -67,8 +253,8 @@ them.
 | `VCF_DOCTOR_RETENTION_HOURLY_DAYS` | `30` | Between recent and this age, one scheduled snapshot per hour is kept |
 | `VCF_DOCTOR_RETENTION_DAILY_DAYS` | `365` | Between hourly and this age, one per day is kept; older scheduled snapshots and change-log rows are pruned. Manual snapshots are never pruned. (`VCF_DOCTOR_DEFAULT_RETENTION`, the old snapshot count, is ignored.) |
 | `VCF_DOCTOR_RETENTION_TIMEZONE` | `TZ`, then `UTC` | Seeds the daily tier and Snapshots grouping timezone when no saved policy exists; see the [retention contract](RETENTION_EVENTS.md#retention-policy-settings-kv-retention_policy-gui-on-settings). |
-| `VCF_DOCTOR_EVENT_RETENTION_HOURS` | [Configuration default](../backend/app/config.py) | Seeds the independent event history window; saved Settings values take precedence. See [event retention](RETENTION_EVENTS.md#events-and-tasks). |
-| `VCF_DOCTOR_EVENT_ROW_CAP` | [Configuration default](../backend/app/config.py) | Seeds the maximum event rows per connection; saved Settings values take precedence. See [event retention](RETENTION_EVENTS.md#events-and-tasks). |
+| `VCF_DOCTOR_EVENT_RETENTION_HOURS` | [Configuration default](../backend/app/config.py) | Seeds the independent event history window, accepted range 1 to 8,760 hours; out-of-range defaults are clamped. Saved Settings values take precedence. See [event retention](RETENTION_EVENTS.md#events-and-tasks). |
+| `VCF_DOCTOR_EVENT_ROW_CAP` | [Configuration default](../backend/app/config.py) | Seeds the maximum event rows per connection, accepted range 1,000 to 10,000,000 rows; out-of-range defaults are clamped. Saved Settings values take precedence. See [event retention](RETENTION_EVENTS.md#events-and-tasks). |
 | `VCF_DOCTOR_HEALTH_WEIGHTS` | `critical=40,warning=15,info=0` | Deployment default for the health score weights; the values saved in Settings take precedence |
 | `VCF_DOCTOR_MIN_INTERVAL_MINUTES` | `5` | Floor for scan intervals |
 | `VCF_DOCTOR_SCHEDULER` | `on` | `off` disables scheduled scans (Scan Now still works) |
@@ -210,19 +396,29 @@ docker buildx imagetools inspect ghcr.io/sentania-labs/vcf-doctor:<tag> --format
 
 ## Local convenience
 
-`docker-compose.yml` builds and runs the image with a named volume for
-laptop use. It is not a deployment artifact.
+`docker-compose.yml` builds and runs the whole stack for laptop use. It is not
+a deployment artifact.
 
 ## Recovery
 
-- **Lost volume**: history is gone; connections and settings must be
-  re-entered. Nothing in vCenter is affected.
-- **Lost encryption key, volume intact**: history is intact; re-enter each
+- **Lost database**: history is gone; connections and settings must be
+  re-entered. Nothing in vCenter is affected. Back up PostgreSQL the way you
+  back up any other database; the container volume no longer holds history.
+- **Database unreachable**: liveness stays green so nothing restarts the
+  container, and readiness goes red so nothing routes traffic to it. Liveness
+  answers in milliseconds and readiness uses a bounded database probe. Deferred
+  startup work retries after the database returns, while readiness turns green
+  as soon as the database is usable. Everything that needs the database does
+  fail while it is down, sign-in included; the Settings database panel reports
+  the outage once a page is reachable, which covers the common partial case of
+  a database that is up but not migrated.
+- **Lost encryption key, database intact**: history is intact; re-enter each
   vCenter password (flagged "Needs password" on Connections) and the
   Anthropic key. See [Security](SECURITY.md).
 - **Rotated encryption key, previous key still available**: no re-entry is
   needed; follow [rotation and recovery](SECURITY.md#secrets-at-rest).
 - **Bad release**: re-pin the previous digest or tag and file an issue. The
-  database schema is migrated forward on startup; going back a release is
-  not guaranteed to be safe once a newer release has written to the volume,
-  so snapshot the volume before upgrading anything you care about.
+  database schema is migrated forward by the deployment migration step. Going
+  back a release is not guaranteed to be safe once a newer release has written
+  to the database, so back PostgreSQL up before upgrading anything you care
+  about.

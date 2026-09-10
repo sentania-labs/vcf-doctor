@@ -40,12 +40,11 @@ def status(request: Request) -> dict:
 def setup(body: PasswordBody, request: Request, response: Response) -> dict:
     if not auth.enabled():
         raise HTTPException(409, "authentication is disabled by the deployment")
+    auth.bootstrap_from_env()
     if auth.configured():
         raise HTTPException(409, "password already set; use change")
-    with auth.setup_lock:
-        if auth.configured():
-            raise HTTPException(409, "password already set; use change")
-        auth.set_password(body.password)
+    if not auth.set_initial_password(body.password):
+        raise HTTPException(409, "password already set; use change")
     _set_cookie(response, request)
     return {"ok": True}
 

@@ -1,13 +1,14 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { ConnectionPublic, ScanRun } from '@/types'
-import { getConnections, getHealth, getScans, triggerScan } from '@/api'
+import { getConnections, getReadiness, getScans, triggerScan } from '@/api'
 import { BACKEND_UNREACHABLE_EVENT } from '@/api/client'
 import { useInterval } from '@/hooks/useAsync'
+import { classifyReadiness, type BackendStatus } from './backendHealth'
 
 const STORAGE_KEY = 'vcfdoctor.connection'
 export const ALL = 'all'
 
-export type BackendStatus = 'checking' | 'up' | 'down'
+export type { BackendStatus } from './backendHealth'
 
 interface AppState {
   connections: ConnectionPublic[]
@@ -18,6 +19,7 @@ interface AppState {
   setSelectedId: (id: string) => void
   backend: BackendStatus
   backendError: string | null
+  databaseHealthy: boolean | null
   scans: ScanRun[]
   lastScan: string | null
   scanning: boolean
@@ -39,6 +41,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   })
   const [backend, setBackend] = useState<BackendStatus>('checking')
   const [backendError, setBackendError] = useState<string | null>(null)
+  const [databaseHealthy, setDatabaseHealthy] = useState<boolean | null>(null)
   const [scans, setScans] = useState<ScanRun[]>([])
   const [scanError, setScanError] = useState<string | null>(null)
   const [scanning, setScanning] = useState(false)
@@ -52,12 +55,18 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const connectionId = selectedId === ALL ? null : selectedId
   const selected = useMemo(() => connections.find(c => c.id === selectedId) ?? null, [connections, selectedId])
 
+  // Readiness, not liveness: a backend whose database is unreachable answers
+  // requests but cannot serve any page, and showing a green badge next to one
+  // that does not work is worse than showing nothing.
   const checkBackend = useCallback(async () => {
     try {
-      await getHealth()
-      setBackend('up'); setBackendError(null)
+      const readiness = await getReadiness()
+      const health = classifyReadiness(readiness)
+      setBackend(health.backend)
+      setBackendError(health.backendError)
+      setDatabaseHealthy(health.databaseHealthy)
     } catch (e) {
-      setBackend('down'); setBackendError(e instanceof Error ? e.message : String(e))
+      setBackend('down'); setBackendError(e instanceof Error ? e.message : String(e)); setDatabaseHealthy(null)
     }
   }, [])
 
@@ -80,8 +89,11 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   useEffect(() => { void checkBackend(); void reloadConnections() }, [checkBackend, reloadConnections])
   useEffect(() => { void reloadScans() }, [reloadScans, refreshKey])
 
-  // Backend heartbeat; faster while down so recovery is noticed quickly.
-  useInterval(() => { void checkBackend() }, backend === 'down' ? 5000 : 20000)
+  // Backend heartbeat; faster while unavailable so recovery is noticed quickly.
+  useInterval(
+    () => { void checkBackend() },
+    backend === 'up' ? 20000 : 5000,
+  )
   // Any API call that fails at the network level triggers an immediate check so the banner shows within a second.
   useEffect(() => {
     let last = 0
@@ -125,7 +137,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
   const value: AppState = {
     connections, connectionsLoading, selectedId, connectionId, selected, setSelectedId,
-    backend, backendError, scans, lastScan, scanning, scanNow, scanError,
+    backend, backendError, databaseHealthy, scans, lastScan, scanning, scanNow, scanError,
     refreshKey, refreshAll: () => setRefreshKey(k => k + 1), reloadConnections,
   }
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>

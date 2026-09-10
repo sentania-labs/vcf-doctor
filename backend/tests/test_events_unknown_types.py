@@ -446,8 +446,7 @@ def test_capture_logs_the_minimum_window_cap(monkeypatch, caplog, tmp_path):
     from app.events import store as events_store
     from app.models.event import Event, EventPolicy
 
-    db.reset_for_tests(str(tmp_path / "events.db"))
-    events_store.ensure_schema()
+    db.reset_for_tests()
     events_store.set_event_policy(EventPolicy(retention_hours=2, row_cap=250_000))
     monkeypatch.setattr(service, "MAX_ITEMS", 2)
     now = datetime(2026, 9, 9, 4, 50, tzinfo=UTC)

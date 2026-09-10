@@ -11,7 +11,7 @@ from app.main import app
 
 @pytest.fixture()
 def client(tmp_path):
-    db.reset_for_tests(str(tmp_path / "t.db"))
+    db.reset_for_tests()
     with TestClient(app) as test_client:
         yield test_client
 
