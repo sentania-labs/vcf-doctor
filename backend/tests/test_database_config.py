@@ -1,7 +1,6 @@
 """How the database connection is configured: the URL is a deployment binding
 and the password never travels in an environment variable."""
 
-import base64
 import json
 import logging
 import socket
@@ -212,41 +211,38 @@ def test_cold_start_serves_liveness_then_recovers_readiness(monkeypatch, caplog)
         db.close()
 
 
-def test_authentication_database_wait_does_not_delay_liveness(monkeypatch):
+def test_cold_proxy_database_wait_does_not_delay_liveness(monkeypatch):
     from fastapi.testclient import TestClient
 
-    from app import auth
+    from app import proxies
     from app.main import app
 
     db.reset_for_tests()
-    monkeypatch.setattr(cfg, "auth", "on")
-    _unreachable(monkeypatch)
     read_started = threading.Event()
     original_get_setting = db.get_setting
 
-    def tracked_get_setting(key, *args, **kwargs):
-        if key == auth._SECRET_KEY:
+    def delayed_get_setting(key, *args, **kwargs):
+        if key == proxies.SETTING_KEY:
             read_started.set()
+            time.sleep(0.5)
+            return []
         return original_get_setting(key, *args, **kwargs)
 
-    monkeypatch.setattr(db, "get_setting", tracked_get_setting)
-    token = base64.urlsafe_b64encode(b"1" + (b"x" * 32)).decode()
+    monkeypatch.setattr(db, "get_setting", delayed_get_setting)
     responses = []
-    with TestClient(app) as blocked_client, TestClient(app) as live_client:
-        blocked_client.cookies.set(auth.COOKIE, token)
-        thread = threading.Thread(
-            target=lambda: responses.append(blocked_client.get("/api/scans"))
-        )
+    with TestClient(app) as client:
+        thread = threading.Thread(target=lambda: responses.append(client.get("/api/version")))
         thread.start()
         assert read_started.wait(timeout=1)
         started = time.monotonic()
-        live = live_client.get("/api/health/live")
+        live = client.get("/api/health/live")
         elapsed = time.monotonic() - started
         thread.join(timeout=2)
     assert live.status_code == 200
     assert elapsed < 0.3
     assert not thread.is_alive() and responses
     db.close()
+    proxies.reset_cache()
 
 
 def test_liveness_stays_green_while_the_database_is_down(monkeypatch):

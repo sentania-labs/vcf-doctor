@@ -18,6 +18,8 @@ import threading
 import time
 from typing import Any
 
+from starlette.concurrency import run_in_threadpool
+
 from app import db
 from app.config import settings
 
@@ -257,7 +259,7 @@ class ForwardedHeadersMiddleware:
         client = scope.get("client")
         peer = client[0] if client else None
         path = scope.get("path", "")
-        nets = networks(wait_on_cold=not path.startswith("/api/health"))
+        nets = await run_in_threadpool(networks, not path.startswith("/api/health"))
         trusted = bool(peer) and is_trusted(peer, nets)
         # Keep the TCP peer and the trust decision for the Settings page:
         # scope["client"] is about to be rewritten when the peer is trusted.
