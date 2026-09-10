@@ -282,9 +282,17 @@ jobs:
           hdr localhost:8000/api/health | grep -qi '^cache-control: no-store'
           if hdr localhost:8000/ | grep -qi '^strict-transport-security'; then echo 'HSTS sent on plain http'; exit 1; fi
           hdr -H 'X-Forwarded-Proto: https' localhost:8000/ | grep -qi '^strict-transport-security: max-age=31536000'
-          # Login lockout is per forwarded client: five wrong passwords lock one address, not the next.
-          for i in 1 2 3 4 5; do curl -s -o /dev/null -H 'content-type: application/json' -H 'X-Forwarded-For: 203.0.113.5' -d '{"password":"nope-nope"}' localhost:8000/api/auth/login; done
-          test "$(curl -s -o /dev/null -w '%{http_code}' -H 'content-type: application/json' -H 'X-Forwarded-For: 203.0.113.5' -d '{"password":"smoke-test-pass"}' localhost:8000/api/auth/login)" = 429
+          # Login lockout is per forwarded client, and the counter lives in each
+          # worker rather than in the database (#74), so wrong passwords land in
+          # whichever worker accepted them and the refusal appears once one of
+          # them holds five. Nine fill one of the two workers however they land.
+          locked=
+          for i in $(seq 1 9); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' -H 'content-type: application/json' -H 'X-Forwarded-For: 203.0.113.5' -d '{"password":"nope-nope"}' localhost:8000/api/auth/login)
+            if [ "$code" = 429 ]; then locked=yes; break; fi
+          done
+          if [ -z "$locked" ]; then echo "wrong passwords never locked 203.0.113.5"; docker logs smoke; exit 1; fi
+          # The lockout is keyed on the forwarded address, so the next one still signs in.
           test "$(curl -s -o /dev/null -w '%{http_code}' -H 'content-type: application/json' -H 'X-Forwarded-For: 203.0.113.6' -d '{"password":"smoke-test-pass"}' localhost:8000/api/auth/login)" = 200
           # Runs as a non-root user.
           test "$(docker exec smoke id -u)" = 10001
