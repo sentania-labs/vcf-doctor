@@ -23,7 +23,7 @@ from app.api.router import router as api_router
 from app.config import settings
 
 log = logging.getLogger("vcf_doctor")
-_readiness_database_state: bool | None = None
+_readiness_database_state: tuple[bool, str | None] | None = None
 _readiness_startup_state: tuple[bool, bool, tuple[str, ...]] | None = None
 _readiness_state_guard = threading.Lock()
 
@@ -147,14 +147,15 @@ async def key_unavailable(request: Request, exc: vault.KeyUnavailable):
 
 def _log_database_transition(database: bool, detail: str | None) -> None:
     global _readiness_database_state
+    state = (database, detail)
     with _readiness_state_guard:
         previous = _readiness_database_state
-        if database == previous:
+        if state == previous:
             return
-        _readiness_database_state = database
+        _readiness_database_state = state
     if not database:
         log.warning("readiness: the database is not usable: %s", detail)
-    elif previous is False:
+    elif previous is not None and not previous[0]:
         log.info("readiness: the database is usable again")
 
 

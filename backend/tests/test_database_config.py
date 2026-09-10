@@ -308,7 +308,7 @@ def test_liveness_answers_fast_from_the_first_probe_after_the_database_dies(monk
     proxies.reset_cache()
 
 
-def test_readiness_goes_red_and_logs_database_transitions_once(monkeypatch, caplog):
+def test_readiness_logs_each_database_state_once(monkeypatch, caplog):
     """Readiness is "can this instance serve". Sign-in and every page behind it
     need the database, so an instance that cannot reach it must be taken out of
     rotation rather than sent visitors it will fail."""
@@ -319,6 +319,7 @@ def test_readiness_goes_red_and_logs_database_transitions_once(monkeypatch, capl
     db.reset_for_tests()
     original_url = cfg.database_url
     original_password_file = cfg.db_password_file
+    original_healthy = main.db.healthy
     monkeypatch.setattr(main, "_readiness_database_state", None)
     with TestClient(main.app) as client:
         with caplog.at_level(logging.INFO, logger="vcf_doctor"):
@@ -338,6 +339,18 @@ def test_readiness_goes_red_and_logs_database_transitions_once(monkeypatch, capl
                 for message in caplog.messages
             ) == 1
 
+            monkeypatch.setattr(
+                main.db,
+                "healthy",
+                lambda: (False, "pending migration(s): 0001_initial"),
+            )
+            client.get("/api/health/ready")
+            client.get("/api/health/ready")
+            assert caplog.messages.count(
+                "readiness: the database is not usable: pending migration(s): 0001_initial"
+            ) == 1
+
+            monkeypatch.setattr(main.db, "healthy", original_healthy)
             monkeypatch.setattr(cfg, "database_url", original_url)
             monkeypatch.setattr(cfg, "db_password_file", original_password_file)
             db.close()

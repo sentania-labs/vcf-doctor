@@ -16,8 +16,8 @@ export function databaseHealthPresentation(healthy: boolean | null): DatabaseHea
     }
   }
   return {
-    label: 'Unavailable',
+    label: 'Not healthy',
     tone: 'critical',
-    message: 'The database connection is unavailable, so nothing is being recorded and history cannot be read. The connection is set by whoever deployed this instance; fix it there.',
+    message: 'The database is not reporting healthy. Check the server log for the reason.',
   }
 }
