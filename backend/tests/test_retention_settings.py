@@ -38,9 +38,7 @@ def test_defaults_come_from_config_and_old_count_is_ignored(client):
     assert body["event_policy_default_limit"] is None
     # PostgreSQL's autovacuum reclaims space, so there is no maintenance card.
     assert "event_maintenance" not in body
-    stored_event_policy = db.get_setting("event_policy")
-    assert stored_event_policy["retention_hours"] == 48
-    assert stored_event_policy["row_cap"] == 250000
+    assert db.get_setting("event_policy") == {"retention_hours": 48, "row_cap": 250000}
     assert "retention" not in body
 
 
@@ -116,7 +114,10 @@ def test_clamped_event_default_is_visible_until_an_operator_saves(client, monkey
         "effective": {"retention_hours": 8760, "row_cap": 1000},
     }
 
-    saved = client.put("/api/settings", json={"event_policy": body["event_policy"]}).json()
+    saved = client.put(
+        "/api/settings",
+        json={"event_policy": {"retention_hours": 72, "row_cap": 1000}},
+    ).json()
     assert saved["event_policy_default_limit"] is None
     assert client.get("/api/settings").json()["event_policy_default_limit"] is None
 

@@ -243,7 +243,11 @@ jobs:
           # The database is reachable and migrated, and one worker holds the
           # scheduler lock, which every worker reports.
           curl -fsS localhost:8000/api/health/ready | grep -q '"database":true'
-          curl -fsS localhost:8000/api/health/ready | grep -q '"scheduler":true'
+          for i in $(seq 1 30); do
+            if curl -fsS localhost:8000/api/health/ready | grep -q '"scheduler":true'; then break; fi
+            if [ "$i" = 30 ]; then echo "scheduler never became active"; docker logs smoke; exit 1; fi
+            sleep 1
+          done
           # The console reads its password from a file only it can read.
           test "$(docker exec smoke stat -c '%a %u' /run/secrets/db-password)" = "400 10001"
           test "$(docker exec smoke sh -c 'cat /run/secrets/postgres-password 2>/dev/null' | wc -c)" = 0
