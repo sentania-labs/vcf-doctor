@@ -87,13 +87,29 @@ def is_connection_unavailable(exc: BaseException) -> bool:
     )
 
 
+# Applied to every connection this module opens, pooled or not, so a lock
+# session looks the same as a pooled one in pg_stat_activity.
+CONNECT_KWARGS: dict = {"row_factory": dict_row, "application_name": "vcf-doctor"}
+
+
+def lock_connection() -> psycopg.Connection:
+    """A connection outside the pool, for holding a session advisory lock.
+
+    Every connection to this database is opened here, so the settings the pool
+    applies apply to these too. Autocommit, so a held lock pins no snapshot.
+    The caller owns it and must close it; closing releases whatever it holds,
+    and a killed process takes its locks with it rather than leaving them held.
+    """
+    return psycopg.connect(conninfo(), autocommit=True, **CONNECT_KWARGS)
+
+
 def _new_pool() -> ConnectionPool:
     pool = ConnectionPool(
         conninfo(),
         min_size=max(0, cfg.db_pool_min_size),
         max_size=max(1, cfg.db_pool_max_size),
         timeout=cfg.db_pool_timeout,
-        kwargs={"row_factory": dict_row, "application_name": "vcf-doctor"},
+        kwargs=CONNECT_KWARGS,
         # A primary that failed over leaves broken sockets in the pool; check
         # each one on the way out so a failover costs a retry, not an error.
         check=ConnectionPool.check_connection,
@@ -198,7 +214,7 @@ def try_advisory_lock(namespace: str, ident: str) -> Iterator[bool]:
     process takes it with it rather than leaving it held.
     """
     key = _lock_key(namespace, ident)
-    conn = psycopg.connect(conninfo(), autocommit=True, row_factory=dict_row)
+    conn = lock_connection()
     try:
         got = bool(conn.execute("SELECT pg_try_advisory_lock(%s) AS ok", (key,)).fetchone()["ok"])
         if not got:
@@ -218,7 +234,7 @@ def acquire_scheduler_lock() -> bool:
     with _leader_guard:
         if _leader is not None and not _leader.closed:
             return True
-        conn = psycopg.connect(conninfo(), autocommit=True, row_factory=dict_row)
+        conn = lock_connection()
         try:
             got = bool(
                 conn.execute(
