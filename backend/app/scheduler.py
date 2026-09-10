@@ -18,6 +18,7 @@ import logging
 import os
 import sys
 from datetime import UTC, datetime, timedelta
+from typing import NamedTuple
 
 from app import db
 from app.collectors.registry import get_collector
@@ -39,6 +40,11 @@ _startup_failures: tuple[str, ...] = ()
 _retention_completed: set[str] = set()
 RECONCILE_SECONDS = 60
 STARTUP_RETRY_SECONDS = 5
+
+
+class _StartupResult(NamedTuple):
+    failed: bool = False
+    blocked: bool = False
 
 
 def retention_policy() -> RetentionPolicy:
@@ -72,53 +78,53 @@ def disable_stale_fixture_schedules() -> list[str]:
     return paused
 
 
-def _startup_vault_rekey() -> bool:
+def _startup_vault_rekey() -> _StartupResult:
     from app import vault
 
     vault.rekey_at_startup()
-    return True
+    return _StartupResult()
 
 
-def _startup_vault_plaintext() -> bool:
+def _startup_vault_plaintext() -> _StartupResult:
     from app import vault
 
     vault.migrate_plaintext()
-    return True
+    return _StartupResult()
 
 
-def _startup_event_defaults() -> bool:
+def _startup_event_defaults() -> _StartupResult:
     from app.events import store as events_store
 
     events_store.seed_defaults()
-    return True
+    return _StartupResult()
 
 
-def _startup_change_log_backfill() -> bool:
+def _startup_change_log_backfill() -> _StartupResult:
     for cid, start in store.backfill_log_since().items():
         log.info("change log coverage for %s starts %s", cid, start.isoformat())
-    return True
+    return _StartupResult()
 
 
-def _startup_scan_reconciliation() -> bool:
+def _startup_scan_reconciliation() -> _StartupResult:
     interrupted = store.reconcile_interrupted_runs()
     if interrupted:
         log.warning("marked %d interrupted scan run(s) as error", interrupted)
-    return True
+    return _StartupResult()
 
 
-def _startup_auth_bootstrap() -> bool:
+def _startup_auth_bootstrap() -> _StartupResult:
     from app import auth
 
     auth.bootstrap_from_env()
-    return True
+    return _StartupResult()
 
 
-def _startup_fixture_schedules() -> bool:
+def _startup_fixture_schedules() -> _StartupResult:
     disable_stale_fixture_schedules()
-    return True
+    return _StartupResult()
 
 
-def _startup_retention() -> bool | None:
+def _startup_retention() -> _StartupResult:
     connections = store.list_connections()
     policy = retention_policy()
     blocked = False
@@ -140,9 +146,7 @@ def _startup_retention() -> bool | None:
                 )
         else:
             _retention_completed.add(conn.id)
-    if failed:
-        return False
-    return None if blocked else True
+    return _StartupResult(failed=failed, blocked=blocked)
 
 
 _STARTUP_STEPS = (
@@ -172,7 +176,7 @@ def startup_maintenance() -> bool:
         if identifier not in pending:
             continue
         try:
-            complete = action()
+            result = action()
         except Exception as exc:
             if db.is_connection_unavailable(exc):
                 blocked = True
@@ -180,12 +184,12 @@ def startup_maintenance() -> bool:
                 failures.add(identifier)
                 log.exception("deferred startup step %s failed; retrying next interval", identifier)
         else:
-            if complete is False:
+            if result.failed:
                 failures.add(identifier)
-            elif complete is True:
-                pending.remove(identifier)
-            else:
+            if result.blocked:
                 blocked = True
+            if not result.failed and not result.blocked:
+                pending.remove(identifier)
 
     _startup_pending = frozenset(pending)
     _startup_failures = tuple(sorted(failures))
@@ -442,8 +446,11 @@ def take_leadership() -> None:
         log.info("holding the scheduler lock; scheduled scans run in this worker")
     try:
         interrupted = store.reconcile_interrupted_runs()
-    except Exception:
-        log.exception("scan run reconciliation failed; retrying next interval")
+    except Exception as exc:
+        if db.is_connection_unavailable(exc):
+            log.info("scan run reconciliation is waiting for the database")
+        else:
+            log.exception("scan run reconciliation failed; retrying next interval")
     else:
         if interrupted:
             log.warning("marked %d interrupted scan run(s) as error", interrupted)
@@ -453,8 +460,11 @@ def take_leadership() -> None:
 def _leadership_job() -> None:
     try:
         take_leadership()
-    except Exception:
-        log.exception("scheduler leadership check failed; retrying next interval")
+    except Exception as exc:
+        if db.is_connection_unavailable(exc):
+            log.info("scheduler leadership is waiting for the database")
+        else:
+            log.exception("scheduler leadership check failed; retrying next interval")
 
 
 def _maintenance_job() -> None:

@@ -14,7 +14,8 @@ import { databaseHealthPresentation } from './databaseHealth'
 export default function DatabaseCard() {
   const { databaseHealthy } = useAppState()
   const health = databaseHealthPresentation(databaseHealthy)
-  const badge = <Badge tone={health.tone} dot={health.dot}>{health.label}</Badge>
+  if (!health) return null
+  const badge = <Badge tone={health.tone} dot>{health.label}</Badge>
 
   return (
     <Card>

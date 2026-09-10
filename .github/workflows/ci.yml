@@ -306,7 +306,14 @@ jobs:
           test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8000/api/health)" = 200
           test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8000/api/health/ready)" = 503
           curl -s localhost:8000/api/health/ready | grep -q '"database":false'
-          test "$(docker inspect --format '{{.State.Health.Status}}' smoke)" = healthy
+          health=
+          for i in $(seq 1 45); do
+            health=$(docker inspect --format '{{.State.Health.Status}}' smoke)
+            [ "$health" = healthy ] && break
+            if [ "$health" = unhealthy ]; then echo "container went unhealthy while the database was down"; exit 1; fi
+            sleep 1
+          done
+          test "$health" = healthy
           docker start smoke-db
           for i in $(seq 1 60); do
             [ "$(curl -s -o /dev/null -w '%{http_code}' localhost:8000/api/health/ready)" = 200 ] && break

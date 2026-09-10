@@ -132,6 +132,7 @@ def test_startup_failures_are_isolated_and_do_not_stop_scheduled_scans(monkeypat
     from app.main import app
 
     failed_retention = _conn(name="retention-fails")
+    blocked_retention = _conn(name="retention-blocked")
     retained = _conn(name="retention-succeeds")
     calls: dict[str, int] = {}
     retention_calls: dict[str, int] = {}
@@ -158,6 +159,8 @@ def test_startup_failures_are_isolated_and_do_not_stop_scheduled_scans(monkeypat
         retention_calls[connection_id] = retention_calls.get(connection_id, 0) + 1
         if connection_id == failed_retention.id:
             raise RuntimeError("retention failed")
+        if connection_id == blocked_retention.id:
+            raise psycopg.OperationalError("connection lost")
 
     monkeypatch.setattr(vault, "rekey_at_startup", fail_rekey)
     monkeypatch.setattr(vault, "migrate_plaintext", record("vault_plaintext"))
@@ -190,10 +193,18 @@ def test_startup_failures_are_isolated_and_do_not_stop_scheduled_scans(monkeypat
         "fixture_schedules",
     ):
         assert calls[name] == 1
-    assert retention_calls == {failed_retention.id: 2, retained.id: 1}
-    assert fake_scheduler.maintenance_intervals == [60.0, 60.0]
+    assert retention_calls == {
+        failed_retention.id: 2,
+        blocked_retention.id: 2,
+        retained.id: 1,
+    }
+    assert fake_scheduler.maintenance_intervals == [5.0, 5.0]
     assert scheduler._leader is True
-    assert set(scheduler._scheduled_state) == {failed_retention.id, retained.id}
+    assert set(scheduler._scheduled_state) == {
+        failed_retention.id,
+        blocked_retention.id,
+        retained.id,
+    }
 
     with TestClient(app) as client:
         ready = client.get("/api/health/ready")
@@ -249,6 +260,30 @@ def test_pass_level_failure_is_logged_without_a_public_step(monkeypatch):
 
     assert scheduler.startup_status() == (False, ())
     assert fake_scheduler.maintenance_intervals == [60.0]
+
+
+def test_leadership_classifies_database_waits_without_hiding_failures(monkeypatch, caplog):
+    def unavailable():
+        raise psycopg.OperationalError("connection lost")
+
+    monkeypatch.setattr(scheduler, "take_leadership", unavailable)
+    caplog.set_level("INFO", logger="vcf_doctor.scan")
+
+    scheduler._leadership_job()
+
+    assert "scheduler leadership is waiting for the database" in caplog.messages
+    assert not any(record.levelname == "ERROR" for record in caplog.records)
+
+    caplog.clear()
+
+    def failure():
+        raise RuntimeError("leadership failed")
+
+    monkeypatch.setattr(scheduler, "take_leadership", failure)
+    scheduler._leadership_job()
+
+    assert "scheduler leadership check failed; retrying next interval" in caplog.messages
+    assert any(record.levelname == "ERROR" for record in caplog.records)
 
 
 class _FakeScheduler:
