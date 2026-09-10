@@ -4,7 +4,7 @@ import { classifyReadiness } from './backendHealth.ts'
 
 test('readiness distinguishes startup, database failure, and an unknown response', () => {
   assert.deepEqual(
-    classifyReadiness({ status: 'degraded', database: true, startup_complete: false }),
+    classifyReadiness({ status: 'ok', database: true, startup_complete: false }),
     { backend: 'starting', backendError: null, databaseHealthy: true },
   )
   assert.deepEqual(
@@ -20,7 +20,7 @@ test('readiness distinguishes startup, database failure, and an unknown response
 test('a failed maintenance step is not reported as startup or database failure', () => {
   assert.deepEqual(
     classifyReadiness({
-      status: 'degraded',
+      status: 'ok',
       database: true,
       startup_complete: false,
       startup_failures: ['vault_rekey'],
@@ -39,7 +39,7 @@ test('readiness only reports the console up from a complete healthy response', (
 test('database recovery moves startup to normal without a maintenance alarm', () => {
   const states = [
     classifyReadiness({
-      status: 'degraded',
+      status: 'ok',
       database: true,
       startup_complete: false,
       startup_failures: [],

@@ -157,7 +157,7 @@ def _readiness() -> tuple[dict, int]:
             )
         else:
             log.warning("readiness: deferred startup work is incomplete")
-    ready = database and startup_complete
+    ready = database
     body = {
         "status": "ok" if ready else "degraded",
         "version": app.version,

@@ -197,7 +197,8 @@ def test_startup_failures_are_isolated_and_do_not_stop_scheduled_scans(monkeypat
 
     with TestClient(app) as client:
         ready = client.get("/api/health/ready")
-        assert ready.status_code == 503
+        assert ready.status_code == 200
+        assert ready.json()["status"] == "ok"
         assert ready.json()["database"] is True
         assert ready.json()["startup_failures"] == [
             "retention",

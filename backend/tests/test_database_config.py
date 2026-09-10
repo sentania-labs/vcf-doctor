@@ -194,14 +194,15 @@ def test_cold_start_serves_liveness_then_recovers_readiness(monkeypatch, caplog)
         monkeypatch.setattr(cfg, "db_password_file", original_password_file)
         db.close()
         status, ready = _http_json(f"{base}/api/health/ready")
-        assert status == 503
+        assert status == 200
+        assert ready["status"] == "ok"
         assert ready["database"] is True
         assert ready["startup_complete"] is False
         assert ready["startup_failures"] == []
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:
             status, ready = _http_json(f"{base}/api/health/ready")
-            if status == 200:
+            if ready["startup_complete"] is True:
                 break
             time.sleep(0.05)
         assert status == 200
@@ -365,7 +366,7 @@ def test_readiness_is_red_while_a_migration_is_pending(tmp_path, monkeypatch, ca
         assert client.get("/api/health/live").status_code == 200
 
 
-def test_readiness_is_red_while_deferred_startup_is_pending(monkeypatch, caplog):
+def test_readiness_reports_deferred_startup_without_gating_traffic(monkeypatch, caplog):
     import logging
 
     from fastapi.testclient import TestClient
@@ -380,8 +381,8 @@ def test_readiness_is_red_while_deferred_startup_is_pending(monkeypatch, caplog)
     with TestClient(app) as client:
         with caplog.at_level(logging.WARNING, logger="vcf_doctor"):
             body = client.get("/api/health/ready")
-        assert body.status_code == 503
-        assert body.json()["status"] == "degraded"
+        assert body.status_code == 200
+        assert body.json()["status"] == "ok"
         assert body.json()["database"] is True
         assert body.json()["startup_complete"] is False
         assert body.json()["startup_failures"] == []

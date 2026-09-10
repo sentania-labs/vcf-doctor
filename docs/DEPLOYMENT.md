@@ -18,7 +18,7 @@ only whether the database is reachable.
 | Image | `ghcr.io/sentania-labs/vcf-doctor:<tag>` where tag is `vX.Y.Z` (release), `sha-<7>` or `latest` |
 | Port | `8000` (HTTP) |
 | Liveness | `GET /api/health/live` (and `GET /api/health`, the same body under the older name), 200 whenever the process is answering. Reads nothing, so it answers in milliseconds during a database outage. The container's `HEALTHCHECK` uses this. |
-| Readiness | `GET /api/health/ready`, 200 when the database is reachable, migrated, and this worker's deferred startup work has completed, 503 otherwise. Reports `database`, `scheduler`, `startup_complete`, and stable step identifiers in `startup_failures`. Exception details stay in the server log. |
+| Readiness | `GET /api/health/ready`, 200 when the database is reachable and migrated, 503 otherwise. Reports `database`, `scheduler`, `startup_complete`, and stable step identifiers in `startup_failures`. Maintenance state is reported but never gates readiness. Exception details stay in the server log. |
 | Build identity | `GET /api/version` returns the [build identity fields](../backend/app/_version.py); `GET /api/health` reports the same version |
 | Database | PostgreSQL 14 or newer, reached over `VCF_DOCTOR_DATABASE_URL`. Apply schema migrations before the console with `python3 -m app.migrate upgrade`. |
 | Database password | A file, never an environment variable. `VCF_DOCTOR_DB_PASSWORD_FILE`, default `/run/secrets/vcf-doctor-db-password`. |
@@ -66,10 +66,10 @@ console whose database is down fixes nothing and a restart loop makes the
 outage worse, so nothing should restart on the database.
 
 **Readiness** is whether this instance can serve. `GET /api/health/ready` is
-503 while the database is unreachable, a migration is pending, or this
-worker's deferred startup work has not completed. Sign-in and every page behind
-it need the database, so an instance that cannot reach it is one to take out of
-rotation, not one to send visitors to.
+503 while the database is unreachable or a migration is pending. Sign-in and
+every page behind it need the database, so an instance that cannot use it is
+one to take out of rotation, not one to send visitors to. Deferred maintenance
+state is reported in the body and interface, but it never gates traffic.
 
 `GET /api/health` is the older name for the liveness answer and returns the same
 body, so a manifest that has not been repointed yet keeps behaving as it does
@@ -120,9 +120,9 @@ The console begins serving without waiting on PostgreSQL. Once it is listening,
 each worker uses the scheduler's existing retry interval to rotate and migrate
 stored secrets, recover change-log coverage and interrupted scans, seed the
 operator password and event policy, pause stale fixture schedules, and apply
-retention. Readiness remains 503 until that work completes once. If PostgreSQL
-is unavailable, liveness stays green and the same work retries until the
-database returns, without restarting the process.
+retention. That maintenance state is reported without gating readiness. If
+PostgreSQL is unavailable, liveness stays green and the same work retries until
+the database returns, without restarting the process.
 
 Adding the next migration is dropping in `0002_<what_it_does>.sql`. Nothing
 else is registered and no shipped file is ever edited.
@@ -253,8 +253,8 @@ about a minute. Explicit libpq URL parameters override each default.
 | `VCF_DOCTOR_RETENTION_HOURLY_DAYS` | `30` | Between recent and this age, one scheduled snapshot per hour is kept |
 | `VCF_DOCTOR_RETENTION_DAILY_DAYS` | `365` | Between hourly and this age, one per day is kept; older scheduled snapshots and change-log rows are pruned. Manual snapshots are never pruned. (`VCF_DOCTOR_DEFAULT_RETENTION`, the old snapshot count, is ignored.) |
 | `VCF_DOCTOR_RETENTION_TIMEZONE` | `TZ`, then `UTC` | Seeds the daily tier and Snapshots grouping timezone when no saved policy exists; see the [retention contract](RETENTION_EVENTS.md#retention-policy-settings-kv-retention_policy-gui-on-settings). |
-| `VCF_DOCTOR_EVENT_RETENTION_HOURS` | [Configuration default](../backend/app/config.py) | Seeds the independent event history window; saved Settings values take precedence. See [event retention](RETENTION_EVENTS.md#events-and-tasks). |
-| `VCF_DOCTOR_EVENT_ROW_CAP` | [Configuration default](../backend/app/config.py) | Seeds the maximum event rows per connection; saved Settings values take precedence. See [event retention](RETENTION_EVENTS.md#events-and-tasks). |
+| `VCF_DOCTOR_EVENT_RETENTION_HOURS` | [Configuration default](../backend/app/config.py) | Seeds the independent event history window, accepted range 1 to 8,760 hours; out-of-range defaults are clamped. Saved Settings values take precedence. See [event retention](RETENTION_EVENTS.md#events-and-tasks). |
+| `VCF_DOCTOR_EVENT_ROW_CAP` | [Configuration default](../backend/app/config.py) | Seeds the maximum event rows per connection, accepted range 1,000 to 10,000,000 rows; out-of-range defaults are clamped. Saved Settings values take precedence. See [event retention](RETENTION_EVENTS.md#events-and-tasks). |
 | `VCF_DOCTOR_HEALTH_WEIGHTS` | `critical=40,warning=15,info=0` | Deployment default for the health score weights; the values saved in Settings take precedence |
 | `VCF_DOCTOR_MIN_INTERVAL_MINUTES` | `5` | Floor for scan intervals |
 | `VCF_DOCTOR_SCHEDULER` | `on` | `off` disables scheduled scans (Scan Now still works) |
@@ -407,11 +407,11 @@ a deployment artifact.
 - **Database unreachable**: liveness stays green so nothing restarts the
   container, and readiness goes red so nothing routes traffic to it. Liveness
   answers in milliseconds and readiness uses a bounded database probe. Deferred
-  startup work retries after the database returns, then readiness turns green
-  without a process restart. Everything that needs the database does fail while
-  it is down, sign-in included; the Settings database panel reports the outage
-  once a page is reachable, which covers the common partial case of a database
-  that is up but not migrated.
+  startup work retries after the database returns, while readiness turns green
+  as soon as the database is usable. Everything that needs the database does
+  fail while it is down, sign-in included; the Settings database panel reports
+  the outage once a page is reachable, which covers the common partial case of
+  a database that is up but not migrated.
 - **Lost encryption key, database intact**: history is intact; re-enter each
   vCenter password (flagged "Needs password" on Connections) and the
   Anthropic key. See [Security](SECURITY.md).

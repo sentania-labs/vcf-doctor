@@ -14,16 +14,24 @@ rows and stops there.
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime, timedelta
+from functools import cache
 
 from app import db
 from app.config import settings as cfg
 from app.models.event import (
+    EVENT_RETENTION_HOURS_MAX,
+    EVENT_RETENTION_HOURS_MIN,
+    EVENT_ROW_CAP_MAX,
+    EVENT_ROW_CAP_MIN,
     Event,
     EventCaptureStatus,
     EventPolicy,
     IncompleteInterval,
 )
+
+log = logging.getLogger("vcf_doctor.events")
 
 DEFAULT_LIMIT = 500
 MAX_LIMIT = 5000
@@ -36,8 +44,28 @@ _EVENT_COLUMNS = (
 )
 
 
+@cache
+def _bounded_default_values(retention_hours: int, row_cap: int) -> tuple[int, int]:
+    bounded_hours = min(max(retention_hours, EVENT_RETENTION_HOURS_MIN), EVENT_RETENTION_HOURS_MAX)
+    bounded_cap = min(max(row_cap, EVENT_ROW_CAP_MIN), EVENT_ROW_CAP_MAX)
+    if (bounded_hours, bounded_cap) != (retention_hours, row_cap):
+        log.warning(
+            "event policy defaults clamped from retention_hours=%d row_cap=%d "
+            "to retention_hours=%d row_cap=%d",
+            retention_hours,
+            row_cap,
+            bounded_hours,
+            bounded_cap,
+        )
+    return bounded_hours, bounded_cap
+
+
 def default_event_policy() -> EventPolicy:
-    return EventPolicy(retention_hours=cfg.event_retention_hours, row_cap=cfg.event_row_cap)
+    retention_hours, row_cap = _bounded_default_values(
+        cfg.event_retention_hours,
+        cfg.event_row_cap,
+    )
+    return EventPolicy(retention_hours=retention_hours, row_cap=row_cap)
 
 
 def event_policy() -> EventPolicy:
