@@ -478,12 +478,34 @@ def _settles_on(proxies, expected: list[str], timeout: float = 5.0) -> list[str]
 
 def test_a_saved_list_applies_without_waiting_for_a_refresh(monkeypatch):
     """An operator who saves Settings must not have to wait out the TTL, nor
-    briefly see the list empty while a background read catches up."""
+    have an older background read replace the saved list when it finishes."""
     from app import proxies
 
     db.reset_for_tests()
     proxies.set_stored(["10.42.0.0/16"])
-    assert proxies.stored_value() == ["10.42.0.0/16"]
+    proxies.reset_cache()
+    read_started = threading.Event()
+    release_read = threading.Event()
+    threads: list[threading.Thread] = []
+    real_thread = threading.Thread
+
+    def stale_read(*args, **kwargs):
+        read_started.set()
+        assert release_read.wait(2)
+        return ["10.42.0.0/16"]
+
+    def record_thread(*args, **kwargs):
+        thread = real_thread(*args, **kwargs)
+        threads.append(thread)
+        return thread
+
+    monkeypatch.setattr(db, "get_setting", stale_read)
+    monkeypatch.setattr(proxies.threading, "Thread", record_thread)
+    assert proxies.stored_value() == []
+    assert read_started.wait(2)
     proxies.set_stored(["192.0.2.0/24"])
+    release_read.set()
+    threads[0].join(2)
+    assert not threads[0].is_alive()
     assert proxies.stored_value() == ["192.0.2.0/24"]
     proxies.reset_cache()

@@ -37,6 +37,8 @@ DEFAULT_LIMIT = 500
 MAX_LIMIT = 5000
 CATEGORIES = ("info", "warning", "error", "user")
 EVENT_POLICY_KEY = "event_policy"
+_EVENT_POLICY_SOURCE_KEY = "_source"
+_EVENT_POLICY_DEFAULT_SOURCE = "environment_default"
 
 _EVENT_COLUMNS = (
     'id, connection_id, "time", source, type, category, message, "user", '
@@ -83,11 +85,34 @@ def set_event_policy(policy: EventPolicy) -> EventPolicy:
     return policy
 
 
+def default_event_policy_limit() -> dict[str, dict[str, int]] | None:
+    raw = db.get_setting(EVENT_POLICY_KEY)
+    if not isinstance(raw, dict) or raw.get(_EVENT_POLICY_SOURCE_KEY) != _EVENT_POLICY_DEFAULT_SOURCE:
+        return None
+    try:
+        effective = EventPolicy.model_validate(raw)
+    except Exception:  # noqa: BLE001  invalid stored settings are not a configured default
+        return None
+    if effective != default_event_policy():
+        return None
+    configured = {
+        "retention_hours": cfg.event_retention_hours,
+        "row_cap": cfg.event_row_cap,
+    }
+    if configured == effective.model_dump():
+        return None
+    return {"configured": configured, "effective": effective.model_dump()}
+
+
 def seed_defaults() -> None:
     """Store the default event policy on a fresh database, so Settings shows a
     saved value rather than an implicit fallback on the first visit."""
     if db.get_setting(EVENT_POLICY_KEY) is None:
-        set_event_policy(default_event_policy())
+        policy = default_event_policy().model_dump()
+        db.set_setting(
+            EVENT_POLICY_KEY,
+            {**policy, _EVENT_POLICY_SOURCE_KEY: _EVENT_POLICY_DEFAULT_SOURCE},
+        )
 
 
 def _iso(value: datetime) -> str:

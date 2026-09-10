@@ -10,7 +10,7 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from app import db, import_sqlite
+from app import db, import_sqlite, migrate
 from app.collectors.fixture import load_fixture
 from app.events import store as events_store
 from app.snapshots import store
@@ -288,3 +288,18 @@ def test_missing_file_is_named_not_a_traceback(tmp_path):
     with pytest.raises(FileNotFoundError) as missing:
         import_sqlite.run(tmp_path / "not-here.db")
     assert "not-here.db" in str(missing.value)
+
+
+def test_pending_migrations_are_named_before_import_starts(tmp_path, monkeypatch):
+    path = tmp_path / "vcf-doctor.db"
+    sqlite3.connect(path).close()
+    migrations = tmp_path / "migrations"
+    migrations.mkdir()
+    (migrations / "9999_pending.sql").write_text("SELECT 1", encoding="utf-8")
+    monkeypatch.setattr(migrate, "MIGRATIONS_DIR", migrations)
+
+    with pytest.raises(SystemExit) as refused:
+        import_sqlite.run(path)
+
+    assert "9999_pending" in str(refused.value)
+    assert "python3 -m app.migrate upgrade" in str(refused.value)

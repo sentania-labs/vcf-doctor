@@ -38,26 +38,31 @@ CACHE_TTL = 5.0
 _cache: list[str] | None = None
 _cached_at = 0.0
 _refreshing = False
+_cache_generation = 0
 _cache_guard = threading.Lock()
 
 
 def reset_cache() -> None:
     """Forget the cached list. Called when the test database is rebuilt under a
     running process."""
-    global _cache, _cached_at
+    global _cache, _cached_at, _cache_generation
     with _cache_guard:
         _cache = None
         _cached_at = 0.0
+        _cache_generation += 1
 
 
-def _remember(value: list[str]) -> None:
-    global _cache, _cached_at
+def _remember(value: list[str], expected_generation: int | None = None) -> None:
+    global _cache, _cached_at, _cache_generation
     with _cache_guard:
+        if expected_generation is not None and expected_generation != _cache_generation:
+            return
         _cache = value
         _cached_at = time.monotonic()
+        _cache_generation += 1
 
 
-def _refresh_stored() -> None:
+def _refresh_stored(generation: int) -> None:
     """Read the list and remember it, off the request path. A failed read is
     remembered as "trust nobody" like any other answer, so an outage cannot make
     the next request wait; the read is retried once the entry expires."""
@@ -70,7 +75,7 @@ def _refresh_stored() -> None:
         except Exception:  # noqa: BLE001  a database that cannot be read trusts nobody
             log.warning("trusted proxies unreadable; trusting nobody until the database returns")
             value = []
-        _remember(value)
+        _remember(value, expected_generation=generation)
     finally:
         with _cache_guard:
             _refreshing = False
@@ -136,7 +141,8 @@ def stored_value() -> list[str]:
     refresh in the background when that is missing or older than CACHE_TTL.
     Nothing here can block a response, which is what lets liveness answer in
     milliseconds while PostgreSQL is unreachable, and an unreachable database
-    trusts nobody rather than turning every response into a 500.
+    trusts nobody rather than turning every response into a 500. A save on this
+    worker supersedes any older refresh that is still in flight.
     """
     global _refreshing
     with _cache_guard:
@@ -145,8 +151,14 @@ def stored_value() -> list[str]:
         refresh = expired and not _refreshing
         if refresh:
             _refreshing = True
+            generation = _cache_generation
     if refresh:
-        threading.Thread(target=_refresh_stored, name="trusted-proxies", daemon=True).start()
+        threading.Thread(
+            target=_refresh_stored,
+            args=(generation,),
+            name="trusted-proxies",
+            daemon=True,
+        ).start()
     return value if value is not None else []
 
 

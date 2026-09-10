@@ -27,7 +27,7 @@ import sqlite3
 import sys
 from pathlib import Path
 
-from app import db
+from app import db, migrate
 
 log = logging.getLogger("vcf_doctor.import")
 
@@ -261,6 +261,13 @@ def _resync_identity(target) -> None:
 
 def run(path: Path) -> dict[str, int]:
     """Copy every table across. Returns rows moved per table."""
+    pending = migrate.pending()
+    if pending:
+        revisions = ", ".join(item.stem for item in pending)
+        raise SystemExit(
+            f"the target database has pending migrations ({revisions}); run "
+            "`python3 -m app.migrate upgrade` before importing"
+        )
     if not path.is_file():
         raise FileNotFoundError(f"no SQLite database at {path}")
     existing = {table: n for table, n in target_row_counts().items() if n}
