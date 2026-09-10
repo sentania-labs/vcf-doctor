@@ -11,8 +11,8 @@ Key source, in order:
      SealedSecret, so it survives redeploys). A 44 character Fernet key is
      used as is; any other string is stretched with scrypt so a passphrase
      works too.
-  2. A key file next to the SQLite database (<db name>.key, mode 0600),
-     generated on first start so a fresh install runs with no setup.
+  2. A generated key file at <VCF_DOCTOR_DATA_DIR>/vcf-doctor.key (mode 0600),
+     created on first start so a fresh install runs with no setup.
 
 Losing the key means the stored passwords cannot be read. The app keeps
 running: those connections are flagged as needing credentials and the

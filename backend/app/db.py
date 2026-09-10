@@ -278,13 +278,15 @@ def scheduler_lock_held() -> bool:
     """True when any worker in the deployment holds the scheduler lock.
 
     Asked from a worker that is not the leader, this still answers "scheduled
-    scans are running", so /api/health and Settings do not depend on which
+    scans are running", so /api/health/ready and Settings do not depend on which
     worker served the request.
     """
     try:
         row = fetchone(
             "SELECT 1 AS held FROM pg_locks WHERE locktype = 'advisory' "
-            "AND classid = %s AND objid = %s AND granted LIMIT 1",
+            "AND classid = %s AND objid = %s AND granted "
+            "AND database = (SELECT oid FROM pg_database WHERE datname = current_database()) "
+            "LIMIT 1",
             (LOCK_CLASS_SCHEDULER, LOCK_OBJ_SCHEDULER),
             timeout=PROBE_TIMEOUT,
         )

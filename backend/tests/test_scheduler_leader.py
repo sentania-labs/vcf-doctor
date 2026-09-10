@@ -4,8 +4,12 @@ The advisory lock is what makes that true across workers and pods, so these
 tests exercise losing it and taking it back rather than the APScheduler wiring.
 """
 
+from uuid import uuid4
+
 import psycopg
 import pytest
+from psycopg import sql
+from psycopg.conninfo import make_conninfo
 
 from app import db, scheduler
 from app.models import ConnectionCreate
@@ -46,8 +50,28 @@ def test_a_second_session_is_refused_while_the_lock_is_held():
     db.release_scheduler_lock()
 
 
+def test_a_lock_in_another_database_is_not_reported_here():
+    database_name = f"vcf_doctor_lock_{uuid4().hex}"
+    admin = psycopg.connect(db.conninfo(), autocommit=True)
+    other = None
+    try:
+        admin.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(database_name)))
+        other = psycopg.connect(make_conninfo(db.conninfo(), dbname=database_name), autocommit=True)
+        locked = other.execute(
+            "SELECT pg_try_advisory_lock(%s, %s)",
+            (db.LOCK_CLASS_SCHEDULER, db.LOCK_OBJ_SCHEDULER),
+        ).fetchone()[0]
+        assert locked is True
+        assert db.scheduler_lock_held() is False
+    finally:
+        if other is not None:
+            other.close()
+        admin.execute(sql.SQL("DROP DATABASE {}").format(sql.Identifier(database_name)))
+        admin.close()
+
+
 def test_running_is_true_from_a_worker_that_is_not_the_leader():
-    """/api/health and Settings must not depend on which worker answered."""
+    """/api/health/ready and Settings must not depend on which worker answered."""
     assert scheduler.running() is False
     assert db.acquire_scheduler_lock() is True
     assert scheduler._leader is False  # this process took the lock, not the scheduler

@@ -1,4 +1,4 @@
-"""Assistant settings: GUI-editable, stored in SQLite via db.get_setting.
+"""Assistant settings: GUI-editable, stored in PostgreSQL via db.get_setting.
 
 Key resolution: a key entered in Settings (the "assistant_api_key" row) wins;
 the ANTHROPIC_API_KEY environment variable is the deployment default. The
