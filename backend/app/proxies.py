@@ -259,7 +259,10 @@ class ForwardedHeadersMiddleware:
         client = scope.get("client")
         peer = client[0] if client else None
         path = scope.get("path", "")
-        nets = await run_in_threadpool(networks, not path.startswith("/api/health"))
+        if path.startswith("/api/health"):
+            nets = networks()
+        else:
+            nets = await run_in_threadpool(networks, True)
         trusted = bool(peer) and is_trusted(peer, nets)
         # Keep the TCP peer and the trust decision for the Settings page:
         # scope["client"] is about to be rewritten when the peer is trusted.

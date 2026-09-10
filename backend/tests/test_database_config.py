@@ -211,36 +211,58 @@ def test_cold_start_serves_liveness_then_recovers_readiness(monkeypatch, caplog)
         db.close()
 
 
-def test_cold_proxy_database_wait_does_not_delay_liveness(monkeypatch):
+def test_saturated_proxy_database_wait_does_not_delay_liveness(monkeypatch):
     from fastapi.testclient import TestClient
 
     from app import proxies
     from app.main import app
 
     db.reset_for_tests()
-    read_started = threading.Event()
+    blocked_requests = 40
+    reads_started = 0
+    reads_guard = threading.Lock()
+    all_reads_started = threading.Event()
+    release_reads = threading.Event()
     original_get_setting = db.get_setting
 
     def delayed_get_setting(key, *args, **kwargs):
+        nonlocal reads_started
         if key == proxies.SETTING_KEY:
-            read_started.set()
-            time.sleep(0.5)
+            with reads_guard:
+                reads_started += 1
+                if reads_started >= blocked_requests:
+                    all_reads_started.set()
+            assert release_reads.wait(timeout=5)
             return []
         return original_get_setting(key, *args, **kwargs)
 
     monkeypatch.setattr(db, "get_setting", delayed_get_setting)
     responses = []
+    threads = []
+    release_timer = threading.Timer(1, release_reads.set)
     with TestClient(app) as client:
-        thread = threading.Thread(target=lambda: responses.append(client.get("/api/version")))
-        thread.start()
-        assert read_started.wait(timeout=1)
-        started = time.monotonic()
-        live = client.get("/api/health/live")
-        elapsed = time.monotonic() - started
-        thread.join(timeout=2)
+        try:
+            for _ in range(blocked_requests):
+                thread = threading.Thread(
+                    target=lambda: responses.append(client.get("/api/version"))
+                )
+                threads.append(thread)
+                thread.start()
+            assert all_reads_started.wait(timeout=3)
+            release_timer.start()
+            started = time.monotonic()
+            live = client.get("/api/health/live")
+            elapsed = time.monotonic() - started
+        finally:
+            release_reads.set()
+            release_timer.cancel()
+            for thread in threads:
+                thread.join(timeout=5)
     assert live.status_code == 200
     assert elapsed < 0.3
-    assert not thread.is_alive() and responses
+    assert all(not thread.is_alive() for thread in threads)
+    assert len(responses) == blocked_requests
+    assert all(response.status_code == 200 for response in responses)
     db.close()
     proxies.reset_cache()
 
