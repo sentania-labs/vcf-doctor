@@ -51,7 +51,7 @@ function SignOutItem() {
 }
 
 export function Shell() {
-  const { backend, backendError } = useAppState()
+  const { backend, backendError, maintenanceFailures } = useAppState()
   return (
     <div className="h-full flex bg-bg text-fg">
       <aside className="w-[232px] shrink-0 border-r border-border bg-surface flex flex-col">
@@ -79,13 +79,10 @@ export function Shell() {
           <div className="bg-warning-bg border-b border-warning/40 px-6 py-2.5 text-sm flex items-center gap-2.5 text-fg">
             <span className="h-2 w-2 rounded-full bg-warning anim-pulse" />
             <span className="font-medium">Background maintenance needs attention.</span>
-            <span className="text-muted">The console remains available. Check the server log for the failing step.</span>
-          </div>
-        ) : backend === 'starting' ? (
-          <div className="bg-warning-bg border-b border-warning/40 px-6 py-2.5 text-sm flex items-center gap-2.5 text-fg">
-            <span className="h-2 w-2 rounded-full bg-warning anim-pulse" />
-            <span className="font-medium">This console is still starting.</span>
-            <span className="text-muted">Background maintenance is finishing.</span>
+            <span className="text-muted">
+              The console remains available. Failing {maintenanceFailures.length === 1 ? 'step' : 'steps'}:{' '}
+              <span className="font-mono">{maintenanceFailures.join(', ')}</span>.
+            </span>
           </div>
         ) : backend === 'down' ? (
           <div className="bg-critical-bg border-b border-critical/40 px-6 py-2.5 text-sm flex items-center gap-2.5 text-fg">

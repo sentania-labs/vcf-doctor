@@ -2,58 +2,33 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { classifyReadiness } from './backendHealth.ts'
 
-test('readiness distinguishes startup, database failure, and an unknown response', () => {
+test('readiness distinguishes available, database failure, and unknown responses', () => {
   assert.deepEqual(
-    classifyReadiness({ status: 'ok', database: true, startup_complete: false }),
-    { backend: 'starting', backendError: null, databaseHealthy: true },
+    classifyReadiness({ status: 'ok', database: true, startup_failures: [] }),
+    { backend: 'up', backendError: null, databaseHealthy: true, maintenanceFailures: [] },
   )
   assert.deepEqual(
-    classifyReadiness({ status: 'degraded', database: false, startup_complete: false }),
-    { backend: 'down', backendError: '503 Service Unavailable', databaseHealthy: false },
+    classifyReadiness({ status: 'degraded', database: false }),
+    { backend: 'down', backendError: '503 Service Unavailable', databaseHealthy: false, maintenanceFailures: [] },
   )
   assert.deepEqual(
     classifyReadiness({ status: 'degraded' }),
-    { backend: 'down', backendError: '503 Service Unavailable', databaseHealthy: null },
+    { backend: 'down', backendError: '503 Service Unavailable', databaseHealthy: null, maintenanceFailures: [] },
   )
 })
 
-test('a failed maintenance step is not reported as startup or database failure', () => {
+test('a failed maintenance step is a notice with stable identifiers', () => {
   assert.deepEqual(
     classifyReadiness({
       status: 'ok',
       database: true,
-      startup_complete: false,
       startup_failures: ['vault_rekey'],
     }),
-    { backend: 'maintenance', backendError: null, databaseHealthy: true },
-  )
-})
-
-test('readiness only reports the console up from a complete healthy response', () => {
-  assert.deepEqual(
-    classifyReadiness({ status: 'ok', database: true, startup_complete: true }),
-    { backend: 'up', backendError: null, databaseHealthy: true },
-  )
-})
-
-test('database recovery moves startup to normal without a maintenance alarm', () => {
-  const states = [
-    classifyReadiness({
-      status: 'ok',
-      database: true,
-      startup_complete: false,
-      startup_failures: [],
-    }),
-    classifyReadiness({
-      status: 'ok',
-      database: true,
-      startup_complete: true,
-      startup_failures: [],
-    }),
-  ]
-
-  assert.deepEqual(
-    states.map(({ backend }) => backend),
-    ['starting', 'up'],
+    {
+      backend: 'maintenance',
+      backendError: null,
+      databaseHealthy: true,
+      maintenanceFailures: ['vault_rekey'],
+    },
   )
 })

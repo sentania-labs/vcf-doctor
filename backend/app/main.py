@@ -23,8 +23,9 @@ from app.api.router import router as api_router
 from app.config import settings
 
 log = logging.getLogger("vcf_doctor")
+_readiness_database_state: bool | None = None
 _readiness_startup_state: tuple[bool, bool, tuple[str, ...]] | None = None
-_readiness_startup_guard = threading.Lock()
+_readiness_state_guard = threading.Lock()
 
 
 @asynccontextmanager
@@ -144,12 +145,25 @@ async def key_unavailable(request: Request, exc: vault.KeyUnavailable):
 # from the database, so it is reported by readiness alone.
 
 
+def _log_database_transition(database: bool, detail: str | None) -> None:
+    global _readiness_database_state
+    with _readiness_state_guard:
+        previous = _readiness_database_state
+        if database == previous:
+            return
+        _readiness_database_state = database
+    if not database:
+        log.warning("readiness: the database is not usable: %s", detail)
+    elif previous is False:
+        log.info("readiness: the database is usable again")
+
+
 def _log_startup_transition(
     database: bool, startup_complete: bool, startup_failures: tuple[str, ...]
 ) -> None:
     global _readiness_startup_state
     state = (database, startup_complete, startup_failures)
-    with _readiness_startup_guard:
+    with _readiness_state_guard:
         previous = _readiness_startup_state
         if state == previous:
             return
@@ -170,11 +184,7 @@ def _log_startup_transition(
 
 def _readiness() -> tuple[dict, int]:
     database, detail = db.healthy()
-    if detail:
-        # Server-side only. The diagnostic comes from libpq or names the
-        # configured secret path, and readiness needs no session, so the public
-        # body says whether this instance can serve and nothing more.
-        log.warning("readiness: the database is not usable: %s", detail)
+    _log_database_transition(database, detail)
     startup_complete, startup_failures = scheduler.startup_status()
     _log_startup_transition(database, startup_complete, startup_failures)
     ready = database
@@ -183,7 +193,6 @@ def _readiness() -> tuple[dict, int]:
         "version": app.version,
         "scheduler": scheduler.running(),
         "database": database,
-        "startup_complete": startup_complete,
         "startup_failures": startup_failures,
     }
     return body, 200 if ready else 503

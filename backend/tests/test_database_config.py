@@ -197,24 +197,20 @@ def test_cold_start_serves_liveness_then_recovers_readiness(monkeypatch, caplog)
         assert status == 200
         assert ready["status"] == "ok"
         assert ready["database"] is True
-        assert ready["startup_complete"] is False
         assert ready["startup_failures"] == []
         deadline = time.monotonic() + 10
-        while time.monotonic() < deadline:
-            status, ready = _http_json(f"{base}/api/health/ready")
-            if ready["startup_complete"] is True:
-                break
+        while not scheduler.startup_status()[0] and time.monotonic() < deadline:
             time.sleep(0.05)
+        assert scheduler.startup_status()[0] is True
+        status, ready = _http_json(f"{base}/api/health/ready")
         assert status == 200
         assert ready["status"] == "ok" and ready["database"] is True
-        assert ready["startup_complete"] is True
         assert ready["startup_failures"] == []
         assert set(ready) == {
             "status",
             "version",
             "scheduler",
             "database",
-            "startup_complete",
             "startup_failures",
         }
     finally:
@@ -312,28 +308,42 @@ def test_liveness_answers_fast_from_the_first_probe_after_the_database_dies(monk
     proxies.reset_cache()
 
 
-def test_readiness_goes_red_while_the_database_is_down(monkeypatch):
+def test_readiness_goes_red_and_logs_database_transitions_once(monkeypatch, caplog):
     """Readiness is "can this instance serve". Sign-in and every page behind it
     need the database, so an instance that cannot reach it must be taken out of
     rotation rather than sent visitors it will fail."""
     from fastapi.testclient import TestClient
 
-    from app.main import app
+    from app import main
 
     db.reset_for_tests()
-    with TestClient(app) as client:
-        ready = client.get("/api/health/ready")
-        assert ready.status_code == 200
-        assert ready.json()["database"] is True
+    original_url = cfg.database_url
+    original_password_file = cfg.db_password_file
+    monkeypatch.setattr(main, "_readiness_database_state", None)
+    with TestClient(main.app) as client:
+        with caplog.at_level(logging.INFO, logger="vcf_doctor"):
+            ready = client.get("/api/health/ready")
+            assert ready.status_code == 200
+            assert ready.json()["database"] is True
 
-        _unreachable(monkeypatch)
-        body = client.get("/api/health/ready")
-        assert body.status_code == 503
-        assert body.json()["status"] == "degraded"
-        assert body.json()["database"] is False
-        # Readiness needs no session, and the driver's diagnostic names hosts
-        # and the configured secret path, so it is logged and never published.
-        assert "detail" not in body.json()
+            _unreachable(monkeypatch)
+            body = client.get("/api/health/ready")
+            client.get("/api/health/ready")
+            assert body.status_code == 503
+            assert body.json()["status"] == "degraded"
+            assert body.json()["database"] is False
+            assert "detail" not in body.json()
+            assert sum(
+                "readiness: the database is not usable" in message
+                for message in caplog.messages
+            ) == 1
+
+            monkeypatch.setattr(cfg, "database_url", original_url)
+            monkeypatch.setattr(cfg, "db_password_file", original_password_file)
+            db.close()
+            client.get("/api/health/ready")
+            client.get("/api/health/ready")
+            assert caplog.messages.count("readiness: the database is usable again") == 1
     db.close()
 
 
@@ -384,21 +394,20 @@ def test_readiness_reports_deferred_startup_without_gating_traffic(monkeypatch, 
             assert body.status_code == 200
             assert body.json()["status"] == "ok"
             assert body.json()["database"] is True
-            assert body.json()["startup_complete"] is False
             assert body.json()["startup_failures"] == []
             assert set(body.json()) == {
                 "status",
                 "version",
                 "scheduler",
                 "database",
-                "startup_complete",
                 "startup_failures",
             }
             assert caplog.messages.count("readiness: deferred startup work is incomplete") == 1
 
             startup[0] = (False, ("vault_rekey",))
+            failing = client.get("/api/health/ready")
             client.get("/api/health/ready")
-            client.get("/api/health/ready")
+            assert failing.json()["startup_failures"] == ["vault_rekey"]
             assert sum(
                 "deferred startup steps are failing" in msg for msg in caplog.messages
             ) == 1
