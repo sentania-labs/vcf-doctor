@@ -1,6 +1,7 @@
 """FastAPI entrypoint, middleware, and router registration."""
 
 import logging
+import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -22,6 +23,8 @@ from app.api.router import router as api_router
 from app.config import settings
 
 log = logging.getLogger("vcf_doctor")
+_readiness_startup_state: tuple[bool, bool, tuple[str, ...]] | None = None
+_readiness_startup_guard = threading.Lock()
 
 
 @asynccontextmanager
@@ -141,6 +144,30 @@ async def key_unavailable(request: Request, exc: vault.KeyUnavailable):
 # from the database, so it is reported by readiness alone.
 
 
+def _log_startup_transition(
+    database: bool, startup_complete: bool, startup_failures: tuple[str, ...]
+) -> None:
+    global _readiness_startup_state
+    state = (database, startup_complete, startup_failures)
+    with _readiness_startup_guard:
+        previous = _readiness_startup_state
+        if state == previous:
+            return
+        _readiness_startup_state = state
+    if not database:
+        return
+    if not startup_complete:
+        if startup_failures:
+            log.warning(
+                "readiness: deferred startup steps are failing: %s",
+                ", ".join(startup_failures),
+            )
+        else:
+            log.warning("readiness: deferred startup work is incomplete")
+    elif previous is not None and not previous[1]:
+        log.info("readiness: deferred startup work completed")
+
+
 def _readiness() -> tuple[dict, int]:
     database, detail = db.healthy()
     if detail:
@@ -149,14 +176,7 @@ def _readiness() -> tuple[dict, int]:
         # body says whether this instance can serve and nothing more.
         log.warning("readiness: the database is not usable: %s", detail)
     startup_complete, startup_failures = scheduler.startup_status()
-    if database and not startup_complete:
-        if startup_failures:
-            log.warning(
-                "readiness: deferred startup steps are failing: %s",
-                ", ".join(startup_failures),
-            )
-        else:
-            log.warning("readiness: deferred startup work is incomplete")
+    _log_startup_transition(database, startup_complete, startup_failures)
     ready = database
     body = {
         "status": "ok" if ready else "degraded",
@@ -182,8 +202,7 @@ async def health_live() -> dict:
 @app.get("/api/health/ready")
 def health_ready() -> JSONResponse:
     """Public readiness. 503 while the database is unreachable or a migration
-    or deferred startup work is pending. This is what a Kubernetes
-    readinessProbe should use."""
+    is pending. This is what a Kubernetes readinessProbe should use."""
     body, status = _readiness()
     return JSONResponse(body, status_code=status)
 

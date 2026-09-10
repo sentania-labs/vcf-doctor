@@ -5,7 +5,7 @@ settings endpoint (the /api middleware in main.py handles that)."""
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from app import proxies
+from app import db, proxies
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -43,7 +43,7 @@ def _current(request: Request) -> TrustedProxies:
     return TrustedProxies(
         trusted_proxies=value,
         source=source,
-        stored=proxies.stored_value(),
+        stored=proxies.parse_list(db.get_setting(proxies.SETTING_KEY) or []),
         env_problem=proxies.env_problem(),
         peer=peer,
         peer_trusted=trusted,

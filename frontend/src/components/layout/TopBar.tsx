@@ -5,6 +5,7 @@ import { useAssistantDrawer } from '@/state/AssistantState'
 import { Button } from '@/components/ui'
 import { relativeTime } from '@/lib/format'
 import { cn } from '@/lib/cn'
+import { canStartScan, topBarStatus } from './topBarState'
 
 export function TopBar() {
   const { connections, selectedId, setSelectedId, selected, lastScan, scanning, scanNow, scanError, scans, backend } = useAppState()
@@ -16,15 +17,11 @@ export function TopBar() {
   const latestByConn = new Map<string, typeof scans[number]>()
   for (const s of [...scans].sort((a, b) => a.started.localeCompare(b.started))) latestByConn.set(s.connection_id, s)
   const relevant = selectedId === ALL ? [...latestByConn.values()] : [latestByConn.get(selectedId)].filter(Boolean) as typeof scans
-  let dot: 'ok' | 'error' | 'running' | 'none' = 'none'
-  let statusLabel = 'Not scanned yet'
-  if (backend === 'down') { dot = 'error'; statusLabel = 'Console unavailable' }
-  else if (backend === 'maintenance') { dot = 'error'; statusLabel = 'Maintenance failing' }
-  else if (backend === 'starting') { dot = 'running'; statusLabel = 'Console starting' }
-  else if (backend === 'checking') { dot = 'running'; statusLabel = 'Checking console' }
-  else if (relevant.some(s => s.status === 'running')) { dot = 'running'; statusLabel = 'Scanning' }
-  else if (relevant.length && relevant.every(s => s.status === 'ok')) { dot = 'ok'; statusLabel = 'Connected' }
-  else if (relevant.some(s => s.status === 'error')) { dot = 'error'; statusLabel = selectedId === ALL ? 'A connection is failing' : 'Last scan failed' }
+  const { dot, label: statusLabel } = topBarStatus(
+    backend,
+    relevant.map(scan => scan.status),
+    selectedId === ALL,
+  )
   const dotCls = { ok: 'bg-ok', error: 'bg-critical', running: 'bg-warning anim-pulse', none: 'bg-faint' }[dot]
 
   return (
@@ -47,7 +44,7 @@ export function TopBar() {
         </span>
         {scanError ? <span className="text-xs text-critical max-w-[240px] truncate" title={scanError}>{scanError}</span> : null}
         <Button variant="ghost" size="md" onClick={() => openDrawer()} title="Open assistant"><Bot size={16} /> Assistant</Button>
-        <Button variant="primary" onClick={() => void scanNow()} loading={scanning} disabled={backend !== 'up' || connections.length === 0}>
+        <Button variant="primary" onClick={() => void scanNow()} loading={scanning} disabled={!canStartScan(backend, connections.length)}>
           {!scanning ? <RefreshCw size={15} /> : null}{scanning ? 'Scanning' : 'Scan Now'}
         </Button>
       </div>

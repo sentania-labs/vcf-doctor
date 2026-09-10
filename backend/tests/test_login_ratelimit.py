@@ -254,6 +254,31 @@ def test_trusted_proxies_from_settings_page_apply_live(tmp_path):
         assert r.status_code == 200
 
 
+def test_settings_reads_saved_proxies_instead_of_the_fail_closed_cache(
+    tmp_path, monkeypatch
+):
+    app = _app(tmp_path)
+    with TestClient(app, client=("10.0.0.1", 5000)) as c:
+        c.post("/api/auth/setup", json={"password": "correct horse"})
+        saved = ["172.16.0.0/12"]
+        assert c.put(
+            "/api/settings/trusted-proxies", json={"trusted_proxies": saved}
+        ).status_code == 200
+
+        proxies._remember([])
+        body = c.get("/api/settings/trusted-proxies")
+        assert body.status_code == 200
+        assert body.json()["stored"] == saved
+
+        def fail_setting(*_args, **_kwargs):
+            raise RuntimeError("database read failed")
+
+        monkeypatch.setattr(db, "get_setting", fail_setting)
+        proxies._remember([])
+        body = c.get("/api/settings/trusted-proxies")
+        assert body.status_code == 500
+
+
 def test_trusted_proxies_validation_and_env_override(tmp_path, monkeypatch):
     from app.config import settings
 

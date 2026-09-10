@@ -154,7 +154,7 @@ def test_startup_failures_are_isolated_and_do_not_stop_scheduled_scans(monkeypat
         calls["scan_reconciliation"] = calls.get("scan_reconciliation", 0) + 1
         raise RuntimeError("scan reconciliation failed")
 
-    def apply_retention(connection_id, _policy):
+    def apply_retention(connection_id, _policy=None):
         retention_calls[connection_id] = retention_calls.get(connection_id, 0) + 1
         if connection_id == failed_retention.id:
             raise RuntimeError("retention failed")
@@ -208,6 +208,9 @@ def test_startup_failures_are_isolated_and_do_not_stop_scheduled_scans(monkeypat
         assert "key volume is read-only" not in ready.text
         assert ready.json()["scheduler"] is True
         assert client.get("/api/health/live").status_code == 200
+        scan = client.post("/api/scan", json={"connection_id": retained.id})
+        assert scan.status_code == 200
+        assert scan.json()[0]["status"] == "ok"
 
 
 def test_startup_names_server_errors_but_not_connection_failures(monkeypatch):

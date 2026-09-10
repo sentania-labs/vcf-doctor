@@ -90,7 +90,10 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   useEffect(() => { void reloadScans() }, [reloadScans, refreshKey])
 
   // Backend heartbeat; faster while unavailable or starting so recovery is noticed quickly.
-  useInterval(() => { void checkBackend() }, backend === 'up' ? 20000 : 5000)
+  useInterval(
+    () => { void checkBackend() },
+    backend === 'up' || backend === 'maintenance' ? 20000 : 5000,
+  )
   // Any API call that fails at the network level triggers an immediate check so the banner shows within a second.
   useEffect(() => {
     let last = 0

@@ -371,30 +371,42 @@ def test_readiness_reports_deferred_startup_without_gating_traffic(monkeypatch, 
 
     from fastapi.testclient import TestClient
 
-    from app import scheduler
-    from app.main import app
+    from app import main, scheduler
 
     db.reset_for_tests()
-    monkeypatch.setattr(
-        scheduler, "startup_status", lambda: (False, ())
-    )
-    with TestClient(app) as client:
-        with caplog.at_level(logging.WARNING, logger="vcf_doctor"):
+    startup = [(False, ())]
+    monkeypatch.setattr(scheduler, "startup_status", lambda: startup[0])
+    monkeypatch.setattr(main, "_readiness_startup_state", None)
+    with TestClient(main.app) as client:
+        with caplog.at_level(logging.INFO, logger="vcf_doctor"):
             body = client.get("/api/health/ready")
-        assert body.status_code == 200
-        assert body.json()["status"] == "ok"
-        assert body.json()["database"] is True
-        assert body.json()["startup_complete"] is False
-        assert body.json()["startup_failures"] == []
-        assert set(body.json()) == {
-            "status",
-            "version",
-            "scheduler",
-            "database",
-            "startup_complete",
-            "startup_failures",
-        }
-        assert "deferred startup work is incomplete" in caplog.text
+            client.get("/api/health/ready")
+            assert body.status_code == 200
+            assert body.json()["status"] == "ok"
+            assert body.json()["database"] is True
+            assert body.json()["startup_complete"] is False
+            assert body.json()["startup_failures"] == []
+            assert set(body.json()) == {
+                "status",
+                "version",
+                "scheduler",
+                "database",
+                "startup_complete",
+                "startup_failures",
+            }
+            assert caplog.messages.count("readiness: deferred startup work is incomplete") == 1
+
+            startup[0] = (False, ("vault_rekey",))
+            client.get("/api/health/ready")
+            client.get("/api/health/ready")
+            assert sum(
+                "deferred startup steps are failing" in msg for msg in caplog.messages
+            ) == 1
+
+            startup[0] = (True, ())
+            client.get("/api/health/ready")
+            client.get("/api/health/ready")
+            assert caplog.messages.count("readiness: deferred startup work completed") == 1
 
 
 def test_trusted_proxies_trust_nobody_when_the_database_is_unreadable(monkeypatch):
