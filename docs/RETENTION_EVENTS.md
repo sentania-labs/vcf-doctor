@@ -121,8 +121,9 @@ defined by [EventPolicy](../backend/app/models/event.py).
 Both limits apply per connection at startup and after each scan, including
 when event capture fails. Time-based pruning runs first, then the row cap
 keeps the newest remaining rows. Saving settings takes effect at the next
-retention pass. Existing databases gain the defaults and supporting tables
-automatically at startup, so existing history is subject to these limits.
+retention pass. Tables come from the numbered migrations, and a database with
+no saved policy is seeded with the defaults on startup, so existing history is
+subject to these limits too.
 A result that reaches the collector's 20,000-item safety cap is split into
 smaller time windows. If the minimum window still reaches the cap, its
 interval is persisted, shown on the Events page, and retried on later scans.

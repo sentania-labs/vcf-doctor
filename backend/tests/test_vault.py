@@ -562,8 +562,6 @@ def test_rekey_moves_what_it_can_and_names_what_it_could_not(monkeypatch):
     """Two secrets under two different old keys: supplying one moves that one,
     reports the other, and commits the rewrite and the recorded outcome
     together."""
-    from app.main import app
-
     first = Fernet.generate_key().decode()
     _set_key(monkeypatch, first)
     a = _conn(password="under-first")

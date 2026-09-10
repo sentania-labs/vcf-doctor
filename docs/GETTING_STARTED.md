@@ -110,9 +110,10 @@ first Overview will be quieter than the second.
 - **Events**: vCenter events and tasks collected with each scan.
 - **Inventory** and **Snapshots**: browse what was captured and when.
 - **Settings**: snapshot retention tiers and independent
-  [event limits and cleanup status](RETENTION_EVENTS.md#events-and-tasks),
+  [event limits](RETENTION_EVENTS.md#events-and-tasks),
   health score weights, change significance,
-  the assistant and its API key, encryption status, trusted proxies (set
+  the assistant and its API key, encryption status, whether the database is
+  reachable, trusted proxies (set
   this to your ingress so login lockouts are per visitor), the password, and
   the running build identity under About.
 

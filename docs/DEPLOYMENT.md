@@ -420,5 +420,5 @@ a deployment artifact.
 - **Bad release**: re-pin the previous digest or tag and file an issue. The
   database schema is migrated forward by the deployment migration step. Going
   back a release is not guaranteed to be safe once a newer release has written
-  to the volume, so snapshot the volume before upgrading anything you care
+  to the database, so back PostgreSQL up before upgrading anything you care
   about.
