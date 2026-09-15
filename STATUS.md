@@ -1,8 +1,9 @@
 # STATUS
 
-Current state of the product against `main`. Updated 2026-09-09. Every claim
-here was checked against the code on that date; the earlier hackathon-era
-version of this file is in git history.
+Current state of the product against `main`, plus the roadmap: what is next
+and why, in priority order. Updated 2026-09-15. Every claim here was checked
+against the code and the open GitHub issues on that date; the earlier
+hackathon-era version of this file is in git history.
 
 ## Working
 
@@ -82,11 +83,64 @@ version of this file is in git history.
   more than one replica is supported (#74); see
   [Access](docs/SECURITY.md#access).
 
+## Roadmap
+
+Updated 2026-09-15. Next in priority order, with the reason. All eight items
+below are open GitHub issues; there is no other planning material behind this
+list.
+
+1. **Console strands the operator during a database outage (#75).** Reload
+   the browser while PostgreSQL is down and the operator lands on a login
+   page that blames "the container" when the container is fine; there is no
+   path to the Database panel that would show the real problem. This goes
+   first because it actively misleads whoever is troubleshooting at the
+   worst moment to be misled.
+2. **Login lockout counters are per worker, not per deployment (#74).**
+   PostgreSQL (#59, shipped) lifted the one-replica rule, so a deployment can
+   now run several workers and several pods, and each one counts login
+   failures separately. A password guesser gets that many times the free
+   attempts, once per worker. Follows #75 because it is also
+   a login-path correctness gap, smaller blast radius.
+3. **Out-of-range event policy values are clamped silently instead of
+   refused (#76).** A typo in an event retention environment variable (for
+   example a row cap of 100 instead of 100000) now runs quietly under a
+   different limit instead of failing startup. Silent misconfiguration is
+   worse than a hard failure an operator can see and fix.
+4. **SQLite importer's missing-column fallback is wider than any shipped
+   schema needs (#77).** The one-time SQLite to PostgreSQL importer
+   (`app.import_sqlite`) is more permissive than it needs to be; if it ever
+   applies to a resource-count column it would import a snapshot showing zero
+   resources instead of the real count. Narrow the fallback to the two
+   columns that actually varied. Lower urgency: it only runs once, during a
+   lab's move off SQLite.
+5. **Event capture leaves a wrong placeholder type registered until restart
+   (#66).** Follow-on from the #65 fix that lets capture survive a managed
+   type pyVmomi does not know: an unknown event class hits the same code path
+   and registers a wrong placeholder, so later drains of that type fail until
+   the process restarts. Narrow, cosmetic in the failure mode (a restart
+   clears it), so it sits behind the correctness items above.
+6. **Settings rotation refresh has no test guarding it against discarding
+   unsaved edits (#71, #73).** The #68 fix that stops a key rotation from
+   silently wiping an operator's unsaved Settings edits works, but nothing in
+   the test suite would catch someone undoing it later. This is test debt,
+   not a live defect, so it is scheduled behind everything above.
+
+Deferred:
+
+- **Per-user accounts (#49).** Today one shared operator password gates the
+  console; per-user accounts, or delegating sign-in to an ingress or IdP,
+  would give an audit trail of who did what and let one password be revoked
+  without rotating it for everyone. Deliberately deferred: it is an
+  authentication redesign, not a fix to something broken, and needs a captain
+  decision on native accounts versus delegated sign-in before work starts.
+
 ## Stretch
 
 - SDDC Manager discovery (a disabled "Experimental" card on Connections,
   nothing behind it), NSX, topology view, correlation engine, other LLM
-  providers.
+  providers. These were named in the original hackathon plan
+  (`docs/ORIGINAL_PLAN.md`) and have no issue or schedule behind them; they
+  stay parked unless the captain asks for one.
 - "Cross-vCenter diff" was redefined on 2026-09-02 as a time-1 vs time-2
   estate-wide view and delivered as the Environment page (#38).
 
