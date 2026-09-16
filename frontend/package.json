@@ -20,12 +20,12 @@
     "tailwindcss": "^4.3.3"
   },
   "devDependencies": {
-    "@types/jsdom": "^28.0.3",
+    "@types/jsdom": "^30.0.0",
     "@types/node": "^26.4.1",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.7",
     "@vitejs/plugin-react": "^6.1.0",
-    "jsdom": "^28.1.0",
+    "jsdom": "^30.0.1",
     "oxlint": "^1.81.0",
     "typescript": "~7.0.2",
     "vite": "^8.2.2"
