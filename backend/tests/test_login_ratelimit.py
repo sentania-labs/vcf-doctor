@@ -139,7 +139,7 @@ def _app(tmp_path):
     db.reset_for_tests()
     import importlib
 
-    import app.main as main
+    from app import main
 
     importlib.reload(main)
     return main.app
@@ -370,8 +370,7 @@ def _two_app_instances():
     import importlib
     import sys
 
-    import app as app_pkg
-
+    app_pkg = sys.modules["app"]
     saved_auth = sys.modules["app.auth"]
     saved_oidc_router = sys.modules["app.api.oidc_router"]
     saved_auth_router = sys.modules["app.api.auth_router"]
