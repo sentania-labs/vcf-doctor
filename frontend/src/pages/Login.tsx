@@ -1,8 +1,9 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { Navigate, useNavigate } from 'react-router-dom'
-import { AlertTriangle, Stethoscope } from 'lucide-react'
+import { Navigate, useNavigate, useSearchParams } from 'react-router-dom'
+import { AlertTriangle, KeyRound, Stethoscope } from 'lucide-react'
 import { login, setupPassword, USE_MOCKS } from '@/api'
-import { ApiError } from '@/api/client'
+import { ApiError, apiUrl } from '@/api/client'
+import { ssoMessage } from '@/lib/ssoErrors'
 import { isAuthed, useAuth } from '@/state/AuthState'
 import { Button, Field, Input, Spinner } from '@/components/ui'
 
@@ -13,6 +14,11 @@ export default function LoginPage() {
   const [confirm, setConfirm] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  // Why a single sign-on attempt ended here, from ?sso=<code>. Read once, then the address is tidied.
+  const [params, setParams] = useSearchParams()
+  const [ssoError] = useState(() => ssoMessage(params.get('sso')))
+  useEffect(() => { if (params.has('sso')) setParams({}, { replace: true }) }, [params, setParams])
+  const [ssoBusy, setSsoBusy] = useState(false)
   // Lockout from the backend (429): sign-in is refused until this time. Counted down on screen.
   const [lockUntil, setLockUntil] = useState<number | null>(null)
   const [now, setNow] = useState(() => Date.now())
@@ -81,8 +87,24 @@ export default function LoginPage() {
               </div>
             ) : (
               <form onSubmit={e => void submit(e)} className="space-y-4" noValidate>
+                {ssoError ? <p className="text-sm text-critical bg-critical-bg rounded-md px-3 py-2" role="alert">{ssoError}</p> : null}
+                {status?.oidc?.enabled ? (
+                  <div className="space-y-4">
+                    <div>
+                      <h1 className="text-[15px] font-semibold tracking-tight">Sign in</h1>
+                      <p className="text-sm text-muted mt-0.5">Use your account at the identity provider.</p>
+                    </div>
+                    <Button type="button" variant="primary" className="w-full" loading={ssoBusy}
+                      onClick={() => { setSsoBusy(true); window.location.assign(apiUrl('/auth/oidc/login')) }}>
+                      <KeyRound size={15} /> Sign in with single sign-on
+                    </Button>
+                    <div className="flex items-center gap-3 text-xs text-faint" aria-hidden="true">
+                      <span className="h-px flex-1 bg-border" />or with the operator password<span className="h-px flex-1 bg-border" />
+                    </div>
+                  </div>
+                ) : null}
                 <div>
-                  <h1 className="text-[15px] font-semibold tracking-tight">{firstRun ? 'Set the admin password' : 'Sign in'}</h1>
+                  {status?.oidc?.enabled && !firstRun ? null : <h1 className="text-[15px] font-semibold tracking-tight">{firstRun ? 'Set the admin password' : 'Sign in'}</h1>}
                   <p className="text-sm text-muted mt-0.5">
                     {firstRun ? 'This is the first run. Choose the password operators will use to open this console.' : 'Enter the operator password to continue.'}
                   </p>

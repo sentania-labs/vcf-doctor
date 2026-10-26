@@ -129,6 +129,19 @@ export interface TrustedProxies {
   // Where this request came from, so the page can point at the ingress.
   peer: string | null; peer_trusted: boolean; ignored_forwarded_headers: boolean; scheme: string
 }
+// Single sign-on (OpenID Connect). The client secret is never here: it is read from a file on the deployment.
+export interface OidcValues { issuer: string; client_id: string; redirect_uri: string; scopes: string; groups_claim: string; admin_groups: string[] }
+export interface OidcSettings {
+  stored: OidcValues; effective: OidcValues
+  // Fields a VCF_DOCTOR_OIDC_* variable decides; saving from the page cannot change them.
+  pinned: Record<keyof OidcValues, boolean>
+  defaults: { scopes: string; groups_claim: string }
+  configured: boolean; problems: string[]
+  // What to register at the provider when no redirect URI is set.
+  callback_url: string
+  client_secret: boolean; auth_enabled: boolean
+}
+export interface OidcTest { ok: boolean; error: string | null; issuer: string | null; end_session: boolean; pkce: boolean; secret: boolean }
 export interface SettingsUpdate { retention_policy: RetentionPolicy; event_policy: EventPolicy; assistant: Partial<AssistantSettings> & { api_key?: string }; changes_min_significance?: Significance }
 export interface AssistantEvidenceCount { findings: number; changes: number; resources: number; events: number }
 export type AssistantStreamEvent =

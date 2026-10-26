@@ -23,9 +23,25 @@ unless that peer is a trusted proxy (Settings, or
 ingress every visitor shares the ingress's address and one lockout; trust
 the ingress and each visitor gets their own.
 
+People can also sign in through an OpenID Connect provider (authorization
+code flow with PKCE, state and nonce; see
+[single sign-on](DEPLOYMENT.md#single-sign-on)). Only members of the admin
+groups the deployer lists get a session; everyone else is refused. Nothing
+names a group by default. ID tokens must be signed with an asymmetric
+algorithm and are checked for issuer, audience, expiry and nonce. The sign-in
+attempt travels in a signed, short-lived cookie scoped to the two OIDC routes,
+and the callback route is public because the visitor has no session yet: it
+issues one only for a verified person in an admin group. A session records
+who signed in (issuer and subject), and sign-ins, refusals and every change
+made through the API are logged with that identity. The operator password
+stays as break-glass. The client secret is read from a file and is never
+stored, shown or logged. Groups are re-checked at each sign-in, not while a
+session is live: a removed person keeps an existing session until it expires
+or the operator password is changed.
+
 The console is read-only against vCenter: it only ever reads inventory and
-events, and generated scripts are shown, never executed. Per-user accounts
-are not built; see issue #49.
+events, and generated scripts are shown, never executed. Roles beyond admin,
+and personal and service-account API tokens, are not built yet (#87).
 
 `VCF_DOCTOR_AUTH=off` removes the login page. Use it only behind ingress
 authentication.

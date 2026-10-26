@@ -10,6 +10,7 @@ import { Badge, Button, Card, CardHeader, ErrorState, Field, Input, PageHeader, 
 import HealthScoreCard from '@/components/settings/HealthScoreCard'
 import EncryptionCard from '@/components/settings/EncryptionCard'
 import TrustedProxiesCard from '@/components/settings/TrustedProxiesCard'
+import OidcCard from '@/components/settings/OidcCard'
 import AboutCard from '@/components/settings/AboutCard'
 import DatabaseCard from '@/components/settings/DatabaseCard'
 
@@ -288,6 +289,7 @@ export default function SettingsPage() {
           <EncryptionCard reloadKey={`${assistant.api_key_set}:${assistant.api_key_unreadable ?? false}`} onRotated={() => void refreshKeyState()} />
           <DatabaseCard />
           <AccessCard />
+          <OidcCard />
           <TrustedProxiesCard />
           <AboutCard />
           {err ? <p className="text-sm text-critical">{err}</p> : null}

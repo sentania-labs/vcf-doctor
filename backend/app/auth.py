@@ -1,15 +1,20 @@
-"""Single shared operator password with a signed session cookie.
+"""Sessions: a shared operator password, and optionally single sign-on.
 
 Deliberately simple: one password, hashed with PBKDF2 and stored in the
-settings table; sessions are HMAC-signed timestamps in an HttpOnly cookie.
-The signing secret is generated once and kept in the settings table, so it
-survives restarts and is the same in every worker. VCF_DOCTOR_AUTH=off disables all of
-it for deployments that front the app with ingress authentication.
+settings table; sessions are HMAC-signed tokens in an HttpOnly cookie. A
+password session is a signed timestamp. A single sign-on session (app/oidc.py)
+is a signed record that also says who signed in: issuer, subject and display
+name. The signing secret is generated once and kept in the settings table, so
+it survives restarts and is the same in every worker. The operator password
+stays as break-glass whether or not single sign-on is configured.
+VCF_DOCTOR_AUTH=off disables all of it for deployments that front the app with
+ingress authentication.
 """
 
 import base64
 import hashlib
 import hmac
+import json
 import logging
 import math
 import os
@@ -17,14 +22,18 @@ import secrets
 import threading
 import time
 from collections import OrderedDict, deque
+from dataclasses import dataclass
 
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from app import db
+from app import db, oidc
 from app.config import settings
 
 log = logging.getLogger("vcf_doctor.auth")
+# Who did what. Sign-ins, refusals, sign-outs and every change made through the
+# API are written here with the person's identity (see main.py for the setup).
+audit = logging.getLogger("vcf_doctor.audit")
 
 COOKIE = "vcfdoctor_session"
 _SIG_LEN = 32  # sha256 digest length
@@ -109,33 +118,137 @@ def _secret() -> bytes:
     return s.encode()
 
 
-def issue_token() -> str:
-    payload = str(int(time.time())).encode()
+# Tokens carry their own signature at the end, a fixed 32 bytes; never split on
+# a delimiter, raw HMAC bytes can contain any value. The longest legitimate
+# token (a sign-in flow that has just started) is a couple of kilobytes.
+_MAX_TOKEN = 4096
+
+
+def _seal(payload: bytes) -> str:
     sig = hmac.new(_secret(), payload, hashlib.sha256).digest()
-    # Fixed-length signature appended; never split on a delimiter, raw HMAC
-    # bytes can contain any value.
     return base64.urlsafe_b64encode(payload + sig).decode()
 
 
-def token_valid(token: str | None) -> bool:
-    if not token or len(token) > 256:
-        return False
+def _unseal(token: str | None) -> bytes | None:
+    """The payload of a token this deployment signed, or None."""
+    if not token or len(token) > _MAX_TOKEN:
+        return None
     try:
         raw = base64.urlsafe_b64decode(token.encode())
-        payload, sig = raw[:-_SIG_LEN], raw[-_SIG_LEN:]
-        issued = int(payload)
     except (ValueError, TypeError):
-        return False
+        return None
+    payload, sig = raw[:-_SIG_LEN], raw[-_SIG_LEN:]
     expected = hmac.new(_secret(), payload, hashlib.sha256).digest()
-    if not hmac.compare_digest(sig, expected):
-        return False
-    return time.time() - issued < SESSION_TTL
+    return payload if hmac.compare_digest(sig, expected) else None
+
+
+@dataclass(frozen=True)
+class Session:
+    """Who a valid session cookie belongs to. A password session is the shared
+    operator; a single sign-on session is one person."""
+
+    method: str  # "password" or "oidc"
+    issued: int
+    issuer: str = ""
+    subject: str = ""
+    name: str = ""
+    role: str = ""
+
+    @property
+    def sso(self) -> bool:
+        return self.method == "oidc"
+
+    def describe(self) -> str:
+        """For logs. The name is quoted, so a hostile one cannot forge a line."""
+        if not self.sso:
+            return "operator password"
+        return f"{self.name!r} (sub={self.subject}, iss={self.issuer})"
+
+
+def issue_token(identity: oidc.Identity | None = None) -> str:
+    """A session cookie value: for the operator password, or for a person who
+    signed in through the identity provider."""
+    now = int(time.time())
+    if identity is None:
+        return _seal(str(now).encode())
+    record = {
+        "v": 2,
+        "m": "oidc",
+        "iat": now,
+        "iss": identity.issuer,
+        "sub": identity.subject,
+        "name": identity.name,
+        "role": identity.role,
+    }
+    return _seal(json.dumps(record, separators=(",", ":")).encode())
+
+
+def read_token(token: str | None) -> Session | None:
+    payload = _unseal(token)
+    if payload is None:
+        return None
+    try:
+        if payload.startswith(b"{"):
+            record = json.loads(payload)
+            if record.get("v") != 2 or record.get("m") != "oidc":
+                return None
+            session = Session(
+                method="oidc",
+                issued=int(record["iat"]),
+                issuer=str(record["iss"]),
+                subject=str(record["sub"]),
+                name=str(record.get("name", "")),
+                role=str(record.get("role", "")),
+            )
+        else:
+            session = Session(method="password", issued=int(payload))
+    except (ValueError, TypeError, KeyError, AttributeError):
+        return None
+    if time.time() - session.issued >= SESSION_TTL:
+        return None
+    if session.sso and (session.role != oidc.ROLE_ADMIN or not oidc.accepts_issuer(session.issuer)):
+        # Single sign-on was turned off, or pointed at another provider, since
+        # this person signed in: the session is not honoured any more.
+        return None
+    return session
+
+
+def seal_flow(flow: dict) -> str:
+    """The cookie that carries a sign-in attempt (state, nonce, PKCE verifier)
+    from the redirect to the provider to the redirect back. Signed so it cannot
+    be forged; it is not a session and read_token refuses it."""
+    return _seal(json.dumps({"p": "flow", **flow}, separators=(",", ":")).encode())
+
+
+def unseal_flow(token: str | None) -> dict | None:
+    payload = _unseal(token)
+    if payload is None or not payload.startswith(b"{"):
+        return None
+    try:
+        record = json.loads(payload)
+    except ValueError:
+        return None
+    if not isinstance(record, dict) or record.pop("p", None) != "flow":
+        return None
+    return record
+
+
+def token_valid(token: str | None) -> bool:
+    return read_token(token) is not None
+
+
+def session_for(request: Request) -> Session | None:
+    """The session behind this request's cookie, None without one. With
+    authentication off there are no sessions to read."""
+    if not enabled():
+        return None
+    return read_token(request.cookies.get(COOKIE))
 
 
 def is_authenticated(request: Request) -> bool:
     if not enabled():
         return True
-    return token_valid(request.cookies.get(COOKIE))
+    return session_for(request) is not None
 
 
 # Paths under /api that never require a session.

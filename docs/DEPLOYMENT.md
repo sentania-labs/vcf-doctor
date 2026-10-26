@@ -247,6 +247,8 @@ about a minute. Explicit libpq URL parameters override each default.
 | `ANTHROPIC_API_KEY` | unset | Enables the Claude assistant. A key entered in Settings takes precedence. |
 | `VCF_DOCTOR_AUTH` | `on` | `off` disables the login page (use only behind ingress authentication) |
 | `VCF_DOCTOR_ADMIN_PASSWORD` | unset | Seeds the operator password on first boot; otherwise the UI asks on first visit |
+| `VCF_DOCTOR_OIDC_ISSUER`, `_CLIENT_ID`, `_REDIRECT_URI`, `_SCOPES`, `_GROUPS_CLAIM`, `_ADMIN_GROUPS` | unset | Single sign-on settings, each overriding the value saved in Settings. See [single sign-on](#single-sign-on). |
+| `VCF_DOCTOR_OIDC_CLIENT_SECRET_FILE` | `/run/secrets/vcf-doctor-oidc-client-secret` | File holding the OIDC client secret. Missing file means a public client (PKCE only). The secret is never an environment variable. |
 | `VCF_DOCTOR_TRUSTED_PROXIES` | unset (trust nobody) | Comma-separated IPs or CIDRs (the ingress) whose `X-Forwarded-For` and `X-Forwarded-Proto` are believed. Overrides the Settings page value. Set it to the ingress pod network so each visitor gets their own login lockout instead of sharing the ingress's. |
 | `VCF_DOCTOR_LLM_MODEL` | `claude-opus-5` | Default assistant model; changeable in Settings |
 | `VCF_DOCTOR_RETENTION_RECENT_DAYS` | `14` | Default retention tier: every scheduled snapshot younger than this is kept; changeable in Settings |
@@ -267,6 +269,102 @@ vCenter. Never set them on a real deployment. When `VCF_DOCTOR_TEST_FIXTURES`
 is off, startup pauses enabled schedules on leftover fixture connections
 and logs a warning if any were paused. The connections remain visible on
 Connections for the operator to remove; live vCenter schedules are unaffected.
+
+## Single sign-on
+
+People can sign in through any OpenID Connect provider (Authentik, Keycloak,
+Entra ID, Okta, Dex, and so on) instead of sharing the operator password. It
+uses the authorization code flow with PKCE, state and a nonce. The operator
+password stays as break-glass: it works whether or not single sign-on is
+configured, and with the provider down.
+
+Which groups may sign in is your decision and nothing is assumed. A person who
+authenticates but is in none of the admin groups is refused and gets no
+session. Members of an admin group get full access, exactly what the operator
+password gets today; there is no read-only role yet. With nothing configured
+the console behaves exactly as it did before.
+
+### What you provide
+
+Everything but the secret is on **Settings, Single sign-on**, and each can be
+pinned by the variable named below, which wins over the saved value.
+
+| Setting | Variable | Notes |
+|---|---|---|
+| Issuer URL | `VCF_DOCTOR_OIDC_ISSUER` | Required. `https`, or `http` to localhost for development. The discovery document is read from `<issuer>/.well-known/openid-configuration`, and its `issuer` must match. |
+| Client ID | `VCF_DOCTOR_OIDC_CLIENT_ID` | Required. |
+| Client secret | `VCF_DOCTOR_OIDC_CLIENT_SECRET_FILE` | A file, never a value in the environment or the interface. Mount it like the database password. No file means a public client. |
+| Admin groups | `VCF_DOCTOR_OIDC_ADMIN_GROUPS` | Required. Comma separated in the variable, one per line on the page. Matched exactly, case included. With none listed, single sign-on stays off. |
+| Redirect URI | `VCF_DOCTOR_OIDC_REDIRECT_URI` | Optional. Default `<this console's address>/api/auth/oidc/callback`. Set it when an ingress terminates TLS and the console would otherwise see `http`, or [trust the ingress](SECURITY.md#access). |
+| Scopes | `VCF_DOCTOR_OIDC_SCOPES` | Default `openid profile email`. `openid` is always requested. Add whatever scope makes your provider send groups. |
+| Groups claim | `VCF_DOCTOR_OIDC_GROUPS_CLAIM` | Default `groups`. Read from the ID token, or from the userinfo endpoint when the token has none. |
+
+Register the redirect URI at the provider exactly as the page shows it. **Test
+the provider** on the same page asks for the discovery document and reports
+whether the provider has an end-session page.
+
+### Example: Authentik
+
+1. In Authentik create an **OAuth2/OpenID Provider**: client type
+   *Confidential*, redirect URI (strict) `https://doctor.example.com/api/auth/oidc/callback`,
+   signing key set (RS256). Note the client ID and client secret.
+2. Create an **Application** that uses the provider, with a slug such as
+   `vcf-doctor`. Its issuer is
+   `https://auth.example.com/application/o/vcf-doctor/` (keep the trailing slash).
+3. Select the provider's default scope mappings. Authentik's profile mapping
+   puts a `groups` claim in the ID token, so the default scopes are enough.
+   Bind a policy or group to the application so only the people you want can
+   reach it.
+4. Put the client secret in a file and mount it (below), then set in Settings
+   (or the variables): the issuer from step 2, the client ID, and the names
+   of the groups whose members should be administrators.
+
+Keycloak, Okta and Entra ID differ only in where those values are found: the
+issuer is the realm or tenant URL, and groups need a mapper or claim that puts
+them in the ID token under the name set as the groups claim.
+
+```yaml
+# Kubernetes: a Secret volume next to the database password's.
+          env:
+            - name: VCF_DOCTOR_OIDC_ISSUER
+              value: https://auth.example.com/application/o/vcf-doctor/
+            - name: VCF_DOCTOR_OIDC_CLIENT_ID
+              value: vcf-doctor
+            - name: VCF_DOCTOR_OIDC_ADMIN_GROUPS
+              value: labadmins
+            - name: VCF_DOCTOR_OIDC_CLIENT_SECRET_FILE
+              value: /run/secrets/vcf-doctor-oidc-client-secret
+          volumeMounts:
+            - name: oidc-secret
+              mountPath: /run/secrets/vcf-doctor-oidc-client-secret
+              subPath: vcf-doctor-oidc-client-secret
+              readOnly: true
+      volumes:
+        - name: oidc-secret
+          secret:
+            secretName: vcf-doctor-oidc
+            defaultMode: 0440
+            items: [{ key: client-secret, path: vcf-doctor-oidc-client-secret }]
+```
+
+### What to expect
+
+- A person's issuer and subject identify them. The session cookie carries
+  those and a display name; the sign-in, every refusal, sign-out and every
+  change made through the API is written to the log with that identity
+  (logger `vcf_doctor.audit`).
+- Groups are checked at every sign-in. Removing someone from a group stops
+  their next sign-in, but a session they already hold lasts until it expires
+  (7 days). To cut everyone off at once, change the operator password, which
+  rotates the signing secret. Turning single sign-on off, or pointing it at
+  another provider, ends the sessions it issued.
+- Signing out ends the local session and, when the provider advertises an
+  end-session endpoint, sends the browser there.
+- With the provider down the SSO button reports that and the password login
+  still works. Sessions already issued keep working until they expire.
+- Set `VCF_DOCTOR_ADMIN_PASSWORD` for any deployment that uses single sign-on,
+  so break-glass exists from the first boot and nobody has to be first to the
+  setup page.
 
 ## Rotating the encryption key
 
