@@ -245,12 +245,6 @@ def session_for(request: Request) -> Session | None:
     return read_token(request.cookies.get(COOKIE))
 
 
-def is_authenticated(request: Request) -> bool:
-    if not enabled():
-        return True
-    return session_for(request) is not None
-
-
 # Paths under /api that never require a session.
 PUBLIC_PREFIXES = ("/api/health", "/api/version", "/api/auth/")
 

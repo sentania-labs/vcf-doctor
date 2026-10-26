@@ -396,6 +396,13 @@ def test_wrong_state_is_refused(app_client, idp):
     refused(app_client, callback(app_client, idp, state="forged"), "expired")
 
 
+def test_non_ascii_state_is_refused_as_expired(app_client, idp, caplog):
+    with caplog.at_level(logging.ERROR):
+        refused(app_client, callback(app_client, idp, state="\u00e9tat"), "expired")
+    assert "Traceback" not in caplog.text
+    assert idp.token_requests == []
+
+
 def test_a_callback_without_a_started_sign_in_is_refused(app_client, idp):
     r = app_client.get("/api/auth/oidc/callback", params={"code": "x", "state": "y"})
     refused(app_client, r, "expired")

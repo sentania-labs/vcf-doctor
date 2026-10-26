@@ -64,6 +64,7 @@ def setup(body: PasswordBody, request: Request, response: Response) -> dict:
         raise HTTPException(409, "password already set; use change")
     if not auth.set_initial_password(body.password):
         raise HTTPException(409, "password already set; use change")
+    auth.audit.info("operator password set for the first time from %s", proxies.client_ip(request))
     _set_cookie(response, request)
     return {"ok": True}
 
@@ -189,7 +190,8 @@ def change(body: ChangeBody, request: Request, response: Response):
     """Changing the password re-checks the current one, so it runs through the
     same per-client backoff as /login. A stolen session cannot use it to guess
     the current password any faster than the login page allows."""
-    if not auth.is_authenticated(request):
+    session = auth.session_for(request)
+    if session is None and auth.enabled():
         raise HTTPException(401, "authentication required")
     ip = proxies.client_ip(request)
     wait, stamp = auth.begin_attempt(ip)
@@ -203,5 +205,10 @@ def change(body: ChangeBody, request: Request, response: Response):
             return auth.too_many_response(wait)
         raise HTTPException(401, "current password is incorrect")
     auth.set_password(body.new_password)
+    auth.audit.info(
+        "operator password changed by %s from %s",
+        session.describe() if session else "operator password",
+        ip,
+    )
     _set_cookie(response, request)
     return {"ok": True}

@@ -542,7 +542,9 @@ def complete(cfg: Config, flow: Mapping[str, Any], query: Mapping[str, str]) -> 
     if not _same_issuer(str(flow.get("issuer", "")), cfg.issuer):
         raise SignInError(EXPIRED, "the provider changed during the sign-in")
     given_state = query.get("state", "")
-    if not given_state or not secrets.compare_digest(given_state, str(flow["state"])):
+    if not given_state or not secrets.compare_digest(
+        given_state.encode(), str(flow["state"]).encode()
+    ):
         raise SignInError(EXPIRED, "state does not match this browser's sign-in attempt")
     if query.get("error"):
         raise SignInError(
