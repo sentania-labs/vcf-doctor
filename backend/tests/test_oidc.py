@@ -322,10 +322,6 @@ def test_group_names_must_match_exactly(app_client, idp):
     refused(app_client, callback(app_client, idp, groups=[ADMIN_GROUP + " "]), "not_authorized")
 
 
-def test_a_single_group_sent_as_a_string_is_accepted(app_client, idp):
-    assert callback(app_client, idp, groups=ADMIN_GROUP).headers["location"] == "/"
-
-
 def test_the_groups_claim_name_is_configurable(app_client, idp):
     from app import oidc
 

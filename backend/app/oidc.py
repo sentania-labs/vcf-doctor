@@ -454,13 +454,10 @@ def _clean(text: Any, limit: int) -> str:
 
 
 def _groups(claims: Mapping[str, Any], claim: str) -> list[str] | None:
-    """The groups in a claim: a list of names, or one name as a bare string.
-    None when the claim is absent."""
+    """The groups in a claim: a list of names. None when the claim is absent."""
     if claim not in claims:
         return None
     value = claims[claim]
-    if isinstance(value, str):
-        return [value]
     if isinstance(value, list):
         return [item for item in value if isinstance(item, str)]
     return []
