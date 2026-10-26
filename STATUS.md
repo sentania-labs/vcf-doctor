@@ -50,9 +50,10 @@ version of this file is in git history.
 - Ten pages plus Login: Overview, Health, Changes, Environment, Events,
   Inventory, Snapshots, Assistant, Connections, Settings.
 - Shared operator password with first-run setup, per-client login lockout
-  and a trusted proxies setting (#4, #47); vCenter passwords and the
+  and a trusted proxies setting (#4, #47, #74); vCenter passwords and the
   Anthropic key encrypted at rest (#46). The Settings password change shares
-  the login lockout (#37).
+  the login lockout (#37), and both lockout counters live in PostgreSQL so they
+  hold across workers and replicas (#74).
 - Single sign-on through any OpenID Connect provider, with admin groups mapped
   from a groups claim and the operator password kept as break-glass (#87,
   piece 1). Personal and service-account tokens are the follow-up pieces.
@@ -80,10 +81,7 @@ version of this file is in git history.
 
 ## Broken
 
-- Nothing known. Open follow-ups are tracked in GitHub Issues. The login
-  lockout counters are per worker process rather than per deployment now that
-  more than one replica is supported (#74); see
-  [Access](docs/SECURITY.md#access).
+- Nothing known. Open follow-ups are tracked in GitHub Issues.
 
 ## Stretch
 

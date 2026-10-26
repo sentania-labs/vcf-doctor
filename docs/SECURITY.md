@@ -11,12 +11,11 @@ sign-ins are counted per client address: five, then an exponential wait
 capped at a minute, reported back as `Retry-After` and counted down on the
 login page. The Settings password change re-checks the current password, so
 it shares that one counter and a wrong guess in one place pauses the other.
-A process-wide ceiling (30 failures a minute across every address)
-backstops guessing from many addresses. Both counters are in memory and so are
-per worker process: a deployment running N workers or N pods gives a guesser N
-times those allowances before the backoff bites. That is a consequence of
-running more than one replica (#59) and is tracked in #74; front the console
-with ingress rate limiting if it is exposed anywhere that matters. The client address is the TCP peer
+A deployment-wide ceiling (30 failures a minute across every address)
+backstops guessing from many addresses. Both counters live in PostgreSQL, so
+the limits hold across every worker process and every replica (#74); front the
+console with ingress rate limiting as well if it is exposed anywhere that
+matters. The client address is the TCP peer
 unless that peer is a trusted proxy (Settings, or
 `VCF_DOCTOR_TRUSTED_PROXIES`), in which case the rightmost untrusted
 `X-Forwarded-For` hop is used. Nothing is trusted by default, so behind an

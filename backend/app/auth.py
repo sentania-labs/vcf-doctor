@@ -19,9 +19,7 @@ import logging
 import math
 import os
 import secrets
-import threading
 import time
-from collections import OrderedDict, deque
 from dataclasses import dataclass
 
 from fastapi import HTTPException, Request
@@ -257,15 +255,16 @@ def requires_auth(path: str) -> bool:
 #
 # Keyed per client address (see app/proxies.py for what "client" means behind
 # an ingress) and shared by every endpoint that checks a password: /auth/login
-# and /auth/change. Five free failures per address, then
-# an exponential wait capped at a minute. On top of that a process-wide ceiling: more than
+# and /auth/change. Five free failures per address, then an exponential wait
+# capped at a minute. On top of that a deployment-wide ceiling: more than
 # GLOBAL_LIMIT failures across every address inside GLOBAL_WINDOW seconds
 # pauses logins for everyone, so a guesser rotating addresses still gets no
-# more throughput than that. Everything is in memory, so both counters are per
-# worker process: N workers means a guesser gets N times these allowances
-# before the backoff bites. A restart simply forgives everyone.
+# more throughput than that. Both counters live in PostgreSQL and are
+# serialized under a transaction advisory lock, so every worker and replica
+# shares one allowance and a process restart does not reset it.
 
-_fail_lock = threading.Lock()
+_LOCK_NS = "auth"
+_LOCK_KEY = "lockout"
 _BACKOFF_AFTER = 5
 _BACKOFF_MAX = 60
 # Bounded store: at most MAX_TRACKED addresses, oldest evicted first, and an
@@ -275,51 +274,68 @@ ENTRY_TTL = 15 * 60
 GLOBAL_LIMIT = 30
 GLOBAL_WINDOW = 60
 
-# ip -> [failures, last_failure]; insertion order doubles as LRU order.
-_per_ip: OrderedDict[str, list[float]] = OrderedDict()
-# Timestamps of the most recent GLOBAL_LIMIT failures, any address.
-_recent_failures: deque[float] = deque(maxlen=GLOBAL_LIMIT)
+
+def _sweep(c, now: float) -> None:
+    """Drop expired per-address entries and trim the global failure window."""
+    c.execute(
+        "DELETE FROM login_failures WHERE (%s - last_failure) > %s",
+        (now, float(ENTRY_TTL)),
+    )
+    c.execute(
+        "DELETE FROM login_failure_window "
+        "WHERE (%s - occurred_at) >= %s "
+        "OR id NOT IN ("
+        "SELECT id FROM login_failure_window ORDER BY occurred_at DESC, id DESC LIMIT %s"
+        ")",
+        (now, float(GLOBAL_WINDOW), max(0, GLOBAL_LIMIT)),
+    )
 
 
-def _sweep(now: float) -> None:
-    """Drop expired entries from the front (oldest) until a live one."""
-    while _per_ip:
-        ip, (_, last) = next(iter(_per_ip.items()))
-        if now - last > ENTRY_TTL:
-            del _per_ip[ip]
-        else:
-            break
-
-
-def _global_wait(now: float) -> float:
-    if len(_recent_failures) < GLOBAL_LIMIT:
+def _global_wait(c, now: float) -> float:
+    row = c.execute(
+        "SELECT COUNT(*) AS n, MIN(occurred_at) AS oldest FROM login_failure_window"
+    ).fetchone()
+    if not row or int(row["n"]) < GLOBAL_LIMIT or row["oldest"] is None:
         return 0.0
-    return _recent_failures[0] + GLOBAL_WINDOW - now
+    return float(row["oldest"]) + GLOBAL_WINDOW - now
 
 
-def _ip_wait(ip: str, now: float) -> float:
-    entry = _per_ip.get(ip)
-    if not entry or entry[0] < _BACKOFF_AFTER:
+def _ip_wait(c, ip: str, now: float) -> float:
+    row = c.execute(
+        "SELECT failures, last_failure FROM login_failures WHERE ip = %s",
+        (ip,),
+    ).fetchone()
+    if not row or int(row["failures"]) < _BACKOFF_AFTER:
         return 0.0
-    failures, last = entry
-    wait = min(2 ** (failures - _BACKOFF_AFTER), _BACKOFF_MAX)
+    failures = int(row["failures"])
+    last = float(row["last_failure"])
+    exp = min(failures - _BACKOFF_AFTER, 10)
+    wait = min(2**exp, _BACKOFF_MAX)
     return last + wait - now
 
 
-def _wait(ip: str, now: float) -> int:
-    remaining = max(_ip_wait(ip, now), _global_wait(now))
+def _wait(c, ip: str, now: float) -> int:
+    remaining = max(_ip_wait(c, ip, now), _global_wait(c, now))
     return math.ceil(remaining) if remaining > 0 else 0
 
 
-def _count_failure(ip: str, now: float) -> None:
-    _recent_failures.append(now)
-    entry = _per_ip.pop(ip, None) or [0, 0.0]
-    entry[0] += 1
-    entry[1] = now
-    _per_ip[ip] = entry  # re-append: most recently active goes last
-    _sweep(now)
-    while len(_per_ip) > MAX_TRACKED:
-        _per_ip.popitem(last=False)
+def _count_failure(c, ip: str, now: float) -> None:
+    c.execute("INSERT INTO login_failure_window(occurred_at) VALUES(%s)", (now,))
+    c.execute(
+        "INSERT INTO login_failures(ip, failures, last_failure) VALUES(%s, 1, %s) "
+        "ON CONFLICT(ip) DO UPDATE SET "
+        "failures = login_failures.failures + 1, "
+        "last_failure = excluded.last_failure, "
+        "updated_seq = excluded.updated_seq",
+        (ip, now),
+    )
+    _sweep(c, now)
+    c.execute(
+        "DELETE FROM login_failures WHERE ip NOT IN ("
+        "SELECT ip FROM login_failures ORDER BY last_failure DESC, updated_seq DESC LIMIT %s"
+        ")",
+        (max(0, MAX_TRACKED),),
+    )
 
 
 def too_many_response(wait: int) -> JSONResponse:
@@ -334,9 +350,10 @@ def too_many_response(wait: int) -> JSONResponse:
 def login_blocked(ip: str) -> int:
     """Seconds this client must wait before another attempt, 0 if allowed."""
     now = time.time()
-    with _fail_lock:
-        _sweep(now)
-        return _wait(ip, now)
+    with db.transaction() as c:
+        db.lock_in_transaction(c, _LOCK_NS, _LOCK_KEY)
+        _sweep(c, now)
+        return _wait(c, ip, now)
 
 
 def begin_attempt(ip: str) -> tuple[int, float]:
@@ -346,24 +363,28 @@ def begin_attempt(ip: str) -> tuple[int, float]:
     of concurrent guesses cannot all slip past the counter; finish_attempt
     forgives it on success."""
     now = time.time()
-    with _fail_lock:
-        _sweep(now)
-        wait = _wait(ip, now)
+    with db.transaction() as c:
+        db.lock_in_transaction(c, _LOCK_NS, _LOCK_KEY)
+        _sweep(c, now)
+        wait = _wait(c, ip, now)
         if wait:
             return wait, 0.0
-        _count_failure(ip, now)
+        _count_failure(c, ip, now)
         return 0, now
 
 
 def finish_attempt(ip: str, stamp: float, success: bool) -> None:
     if not success:
         return
-    with _fail_lock:
-        _per_ip.pop(ip, None)
-        try:
-            _recent_failures.remove(stamp)
-        except ValueError:
-            pass  # already rotated out of the window
+    with db.transaction() as c:
+        db.lock_in_transaction(c, _LOCK_NS, _LOCK_KEY)
+        c.execute("DELETE FROM login_failures WHERE ip = %s", (ip,))
+        c.execute(
+            "DELETE FROM login_failure_window WHERE id = ("
+            "SELECT id FROM login_failure_window WHERE occurred_at = %s ORDER BY id DESC LIMIT 1"
+            ")",
+            (stamp,),
+        )
 
 
 def record_login(ip: str, success: bool) -> None:
@@ -371,21 +392,27 @@ def record_login(ip: str, success: bool) -> None:
     login and password-change endpoints use; this stays for callers that
     already know the result."""
     now = time.time()
-    with _fail_lock:
+    with db.transaction() as c:
+        db.lock_in_transaction(c, _LOCK_NS, _LOCK_KEY)
         if success:
-            _per_ip.pop(ip, None)
+            c.execute("DELETE FROM login_failures WHERE ip = %s", (ip,))
         else:
-            _count_failure(ip, now)
+            _count_failure(c, ip, now)
 
 
 def tracked_addresses() -> int:
-    with _fail_lock:
-        return len(_per_ip)
+    row = db.fetchone("SELECT COUNT(*) AS n FROM login_failures")
+    return int(row["n"]) if row else 0
+
+
+def recent_failures() -> int:
+    row = db.fetchone("SELECT COUNT(*) AS n FROM login_failure_window")
+    return int(row["n"]) if row else 0
 
 
 def reset_login_state() -> None:
     """Forget every failure. Tests, and nothing else, call this."""
-    global _recent_failures
-    with _fail_lock:
-        _per_ip.clear()
-        _recent_failures = deque(maxlen=GLOBAL_LIMIT)
+    with db.transaction() as c:
+        db.lock_in_transaction(c, _LOCK_NS, _LOCK_KEY)
+        c.execute("DELETE FROM login_failures")
+        c.execute("DELETE FROM login_failure_window")

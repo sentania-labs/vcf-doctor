@@ -1,4 +1,4 @@
-"""Login backoff: keyed per client address, bounded, with a process-wide ceiling."""
+"""Login backoff: keyed per client address, bounded, with a deployment-wide ceiling."""
 
 import pytest
 from fastapi.testclient import TestClient
@@ -64,6 +64,18 @@ def test_store_is_bounded_and_evicts_oldest(monkeypatch):
     # The first address was evicted; a new failure starts from zero.
     auth.record_login("10.1.0.0", False)
     assert auth.login_blocked("10.1.0.0") == 0
+    # Re-touching an older address moves it to the back of the eviction queue,
+    # even when the clock has not advanced.
+    monkeypatch.setattr(auth, "MAX_TRACKED", 3)
+    monkeypatch.setattr(auth.time, "time", lambda: 2000.0)
+    auth.reset_login_state()
+    for ip in ("10.9.0.1", "10.9.0.2", "10.9.0.3"):
+        auth.record_login(ip, False)
+    for _ in range(3):
+        auth.record_login("10.9.0.1", False)  # 4 failures now, most recently active
+    auth.record_login("10.9.0.4", False)  # evicts 10.9.0.2, not 10.9.0.1
+    auth.record_login("10.9.0.1", False)  # 5th failure for 10.9.0.1 locks it out
+    assert auth.login_blocked("10.9.0.1") == 1
 
 
 def test_entries_expire(monkeypatch):
@@ -98,7 +110,7 @@ def test_attempt_is_reserved_before_the_password_check():
     auth.reset_login_state()
     wait, stamp = auth.begin_attempt("10.0.0.2")
     auth.finish_attempt("10.0.0.2", stamp, True)
-    assert auth.tracked_addresses() == 0 and len(auth._recent_failures) == 0
+    assert auth.tracked_addresses() == 0 and auth.recent_failures() == 0
 
 
 def test_env_override_rejects_trust_everyone_and_fails_closed(monkeypatch):
@@ -127,7 +139,7 @@ def _app(tmp_path):
     db.reset_for_tests()
     import importlib
 
-    import app.main as main
+    from app import main
 
     importlib.reload(main)
     return main.app
@@ -349,7 +361,176 @@ def test_limiter_key_is_never_header_sized(tmp_path, monkeypatch):
         for _ in range(5):
             c.post("/api/auth/login", json={"password": "bad"}, headers={"X-Forwarded-For": huge})
         assert auth.tracked_addresses() == 1
-        assert all(len(k) <= 64 for k in auth._per_ip)
+        assert all(len(r["ip"]) <= 64 for r in db.fetchall("SELECT ip FROM login_failures"))
+
+
+def _two_app_instances():
+    """Two FastAPI apps bound to two distinct app.auth module objects, standing
+    in for two uvicorn worker processes or two replicas sharing PostgreSQL."""
+    import importlib
+    import sys
+
+    app_pkg = sys.modules["app"]
+    saved_auth = sys.modules["app.auth"]
+    saved_oidc_router = sys.modules["app.api.oidc_router"]
+    saved_auth_router = sys.modules["app.api.auth_router"]
+    saved_main = sys.modules["app.main"]
+    try:
+        for name in ("app.auth", "app.api.oidc_router", "app.api.auth_router", "app.main"):
+            sys.modules.pop(name, None)
+        auth_one = importlib.import_module("app.auth")
+        main_one = importlib.import_module("app.main")
+
+        for name in ("app.auth", "app.api.oidc_router", "app.api.auth_router", "app.main"):
+            sys.modules.pop(name, None)
+        auth_two = importlib.import_module("app.auth")
+        main_two = importlib.import_module("app.main")
+    finally:
+        sys.modules["app.auth"] = saved_auth
+        sys.modules["app.api.oidc_router"] = saved_oidc_router
+        sys.modules["app.api.auth_router"] = saved_auth_router
+        sys.modules["app.main"] = saved_main
+        app_pkg.auth = saved_auth
+        app_pkg.main = saved_main
+
+    assert auth_one is not auth_two
+    assert main_one.app is not main_two.app
+    return (main_one.app, auth_one), (main_two.app, auth_two)
+
+
+def test_per_address_lockout_is_shared_across_two_app_instances(tmp_path, monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "trusted_proxies", "10.0.0.0/8")
+    db.reset_for_tests()
+    (app_one, _auth_one), (app_two, _auth_two) = _two_app_instances()
+    headers = {"X-Forwarded-For": "203.0.113.5"}
+
+    with (
+        TestClient(app_one, client=("10.0.0.1", 5000)) as c1,
+        TestClient(app_two, client=("10.0.0.2", 5000)) as c2,
+    ):
+        assert c1.post("/api/auth/setup", json={"password": "correct horse"}).status_code == 200
+        c1.post("/api/auth/logout")
+
+        # Three wrong guesses on instance 1, then a fourth on instance 2: all 401.
+        for client in (c1, c1, c1, c2):
+            r = client.post(
+                "/api/auth/login", json={"password": "wrong wrong"}, headers=headers
+            )
+            assert r.status_code == 401
+
+        # The fifth wrong guess lands on instance 2 and trips the shared counter.
+        r = c2.post("/api/auth/login", json={"password": "wrong wrong"}, headers=headers)
+        assert r.status_code == 429
+        assert r.json()["retry_after"] >= 1
+
+        # Instance 1 immediately sees the lockout too, even with the right password.
+        r = c1.post("/api/auth/login", json={"password": "correct horse"}, headers=headers)
+        assert r.status_code == 429
+
+        # A different client address on either instance is unaffected.
+        r = c1.post(
+            "/api/auth/login",
+            json={"password": "correct horse"},
+            headers={"X-Forwarded-For": "203.0.113.6"},
+        )
+        assert r.status_code == 200
+
+
+def test_login_and_password_change_share_lockout_across_two_app_instances(tmp_path):
+    db.reset_for_tests()
+    (app_one, _auth_one), (app_two, _auth_two) = _two_app_instances()
+
+    with (
+        TestClient(app_one, client=("10.0.0.1", 5000)) as c1,
+        TestClient(app_two, client=("10.0.0.1", 5001)) as c2,
+    ):
+        assert c1.post("/api/auth/setup", json={"password": "correct horse"}).status_code == 200
+        cookie = c1.cookies.get(auth.COOKIE)
+        c2.cookies.set(auth.COOKIE, cookie)
+        c1.post("/api/auth/logout")
+
+        # Two failed logins on instance 1, two failed password changes on instance 2.
+        for _ in range(2):
+            assert c1.post("/api/auth/login", json={"password": "wrong wrong"}).status_code == 401
+        for _ in range(2):
+            r = c2.post(
+                "/api/auth/change",
+                json={"current_password": "wrong wrong", "new_password": "battery staple"},
+            )
+            assert r.status_code == 401
+
+        # A successful login on instance 1 clears the shared counter before the 5th failure.
+        assert c1.post("/api/auth/login", json={"password": "correct horse"}).status_code == 200
+        c1.post("/api/auth/logout")
+
+        # Now accumulate five failures split across instance 2 (/change) and instance 1 (/login).
+        for _ in range(3):
+            r = c2.post(
+                "/api/auth/change",
+                json={"current_password": "wrong wrong", "new_password": "battery staple"},
+            )
+            assert r.status_code == 401
+        assert c1.post("/api/auth/login", json={"password": "wrong wrong"}).status_code == 401
+        r = c2.post(
+            "/api/auth/change",
+            json={"current_password": "wrong wrong", "new_password": "battery staple"},
+        )
+        assert r.status_code == 429
+        assert c1.post("/api/auth/login", json={"password": "correct horse"}).status_code == 429
+
+
+def test_global_ceiling_is_shared_across_two_app_instances(tmp_path, monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "trusted_proxies", "10.0.0.0/8")
+    db.reset_for_tests()
+    (app_one, auth_one), (app_two, auth_two) = _two_app_instances()
+    monkeypatch.setattr(auth_one, "GLOBAL_LIMIT", 10)
+    monkeypatch.setattr(auth_two, "GLOBAL_LIMIT", 10)
+
+    with (
+        TestClient(app_one, client=("10.0.0.1", 5000)) as c1,
+        TestClient(app_two, client=("10.0.0.2", 5000)) as c2,
+    ):
+        assert c1.post("/api/auth/setup", json={"password": "correct horse"}).status_code == 200
+        c1.post("/api/auth/logout")
+
+        # Five failures from distinct addresses on instance 1, five on instance 2.
+        for i in range(5):
+            r1 = c1.post(
+                "/api/auth/login",
+                json={"password": "wrong wrong"},
+                headers={"X-Forwarded-For": f"198.51.100.{i + 1}"},
+            )
+            r2 = c2.post(
+                "/api/auth/login",
+                json={"password": "wrong wrong"},
+                headers={"X-Forwarded-For": f"198.51.100.{i + 101}"},
+            )
+            assert r1.status_code == 401
+            # The 10th failure across both instances reaches GLOBAL_LIMIT, so its
+            # response already reports the ceiling wait.
+            assert r2.status_code == (429 if i == 4 else 401)
+
+        # A brand-new address is refused on both instances until the window clears.
+        for client in (c1, c2):
+            r = client.post(
+                "/api/auth/login",
+                json={"password": "correct horse"},
+                headers={"X-Forwarded-For": "203.0.113.99"},
+            )
+            assert r.status_code == 429
+
+        # Pool reconnect (standing in for a process restart) preserves the lockout.
+        db.reconnect_for_tests()
+        r = c1.post(
+            "/api/auth/login",
+            json={"password": "correct horse"},
+            headers={"X-Forwarded-For": "203.0.113.99"},
+        )
+        assert r.status_code == 429
 
 
 def test_settings_page_reports_the_tcp_peer_not_the_forwarded_client(tmp_path, monkeypatch):
