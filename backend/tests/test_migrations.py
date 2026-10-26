@@ -18,14 +18,14 @@ def _drop_schema() -> None:
 
 
 def test_initial_revision_is_applied_and_reported():
-    assert migrate.current() == "0001_initial"
+    assert migrate.current() == "0002_login_lockout"
     assert migrate.pending() == []
-    assert "0001_initial" in migrate.applied()
+    assert migrate.applied() == ["0001_initial", "0002_login_lockout"]
 
 
 def test_upgrade_is_idempotent():
     assert migrate.upgrade() == []
-    assert migrate.current() == "0001_initial"
+    assert migrate.current() == "0002_login_lockout"
 
 
 def test_upgrade_works_with_a_single_pool_connection(monkeypatch):
@@ -37,8 +37,8 @@ def test_upgrade_works_with_a_single_pool_connection(monkeypatch):
     monkeypatch.setattr(settings, "db_pool_max_size", 1)
     monkeypatch.setattr(settings, "db_pool_timeout", 0.2)
 
-    assert migrate.upgrade() == ["0001_initial"]
-    assert migrate.current() == "0001_initial"
+    assert migrate.upgrade() == ["0001_initial", "0002_login_lockout"]
+    assert migrate.current() == "0002_login_lockout"
 
 
 def test_every_table_the_app_writes_exists():
@@ -57,6 +57,8 @@ def test_every_table_the_app_writes_exists():
         "events",
         "event_capture_state",
         "event_incomplete_intervals",
+        "login_failures",
+        "login_failure_window",
         "schema_migrations",
     } <= names
     # The SQLite vacuum bookkeeping table is not carried over.
@@ -68,21 +70,21 @@ def test_a_second_migration_is_just_another_file(tmp_path, monkeypatch):
     file and nothing else. Applying it must not need the first one rewritten."""
     for path in migrate.revisions():
         (tmp_path / path.name).write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
-    (tmp_path / "0002_example.sql").write_text(
+    (tmp_path / "0003_example.sql").write_text(
         "CREATE TABLE example_later (id TEXT PRIMARY KEY);", encoding="utf-8"
     )
     monkeypatch.setattr(migrate, "MIGRATIONS_DIR", tmp_path)
 
-    assert [p.stem for p in migrate.pending()] == ["0002_example"]
-    assert migrate.upgrade() == ["0002_example"]
-    assert migrate.current() == "0002_example"
+    assert [p.stem for p in migrate.pending()] == ["0003_example"]
+    assert migrate.upgrade() == ["0003_example"]
+    assert migrate.current() == "0003_example"
     assert db.fetchone("SELECT COUNT(*) AS n FROM example_later")["n"] == 0
 
     _drop_schema()
-    # A fresh database applies both in order, so the initial revision is not a
-    # first-install special case.
-    assert migrate.upgrade() == ["0001_initial", "0002_example"]
-    assert migrate.current() == "0002_example"
+    # A fresh database applies all revisions in order, so the initial revision
+    # is not a first-install special case.
+    assert migrate.upgrade() == ["0001_initial", "0002_login_lockout", "0003_example"]
+    assert migrate.current() == "0003_example"
 
 
 def test_database_is_unhealthy_while_a_migration_is_pending(tmp_path, monkeypatch):
@@ -91,10 +93,10 @@ def test_database_is_unhealthy_while_a_migration_is_pending(tmp_path, monkeypatc
     assert db.healthy() == (True, None)
     for path in migrate.revisions():
         (tmp_path / path.name).write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
-    (tmp_path / "0002_example.sql").write_text(
+    (tmp_path / "0003_example.sql").write_text(
         "CREATE TABLE example_later (id TEXT PRIMARY KEY);", encoding="utf-8"
     )
     monkeypatch.setattr(migrate, "MIGRATIONS_DIR", tmp_path)
     ok, error = db.healthy()
     assert ok is False
-    assert "0002_example" in error
+    assert "0003_example" in error

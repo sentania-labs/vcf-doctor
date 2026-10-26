@@ -5,10 +5,10 @@ by `app.migrate`; nothing here creates a table.
 
 Concurrency model: a psycopg connection pool per worker process. PostgreSQL,
 not this module, serializes writers, so there is no process-wide write lock and
-more than one uvicorn worker is supported. The three places that need a writer
-to be alone (the scheduler leader, one scan per connection, the startup vault
-rewrite) take a PostgreSQL advisory lock, which holds across every worker and
-every pod rather than only inside one process.
+more than one uvicorn worker is supported. The places that need a writer to be
+alone (the scheduler leader, one scan per connection, the startup vault
+rewrite, the login lockout) take a PostgreSQL advisory lock, which holds across
+every worker and every pod rather than only inside one process.
 
 Timestamps are stored as ISO 8601 UTC text, exactly as the SQLite schema stored
 them. Every writer normalises to UTC with a fixed `+00:00` offset, so lexical
