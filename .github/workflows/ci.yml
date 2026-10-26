@@ -266,6 +266,15 @@ jobs:
           # encryption key file, which is all the volume still holds.
           test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8000/api/overview)" = 401
           curl -s --path-as-is localhost:8000/../data/vcf-doctor.key | grep -q '<title>VCF Doctor</title>'
+          # The single sign-on routes are public, so neither may be a way in. With
+          # no provider configured both send the visitor back to the login page,
+          # and a forged callback issues no session.
+          for route in login 'callback?code=forged&state=forged'; do
+            test "$(curl -s -o /dev/null -D sso.headers -w '%{http_code}' "localhost:8000/api/auth/oidc/$route")" = 303
+            grep -qi '^location: /login?sso=' sso.headers
+            if grep -qi 'vcfdoctor_session' sso.headers; then echo "oidc/$route issued a session"; exit 1; fi
+            test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8000/api/overview)" = 401
+          done
           # Log in with the seeded password. A fresh install has no connections.
           curl -fsS -c cj -H 'content-type: application/json' -d '{"password":"smoke-test-pass"}' localhost:8000/api/auth/login
           test "$(curl -fsS -b cj localhost:8000/api/connections)" = '[]'

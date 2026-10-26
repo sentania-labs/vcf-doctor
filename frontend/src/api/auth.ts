@@ -2,7 +2,12 @@ import { apiGet, apiSend } from './client'
 import { USE_MOCKS, delay } from './mocks'
 import { ApiError } from './client'
 
-export interface AuthStatus { enabled: boolean; configured: boolean; authenticated: boolean }
+// `oidc` is present only when single sign-on is set up; `user` only for someone who signed in through it.
+export interface AuthStatus {
+  enabled: boolean; configured: boolean; authenticated: boolean
+  oidc?: { enabled: boolean }
+  user?: { name: string; subject: string; issuer: string }
+}
 interface OkResponse { ok: boolean }
 
 // In-memory mock auth. Starts unconfigured so the first-run setup flow is visible.
@@ -42,14 +47,17 @@ export async function login(password: string): Promise<void> {
   await apiSend<OkResponse>('POST', '/auth/login', { password })
 }
 
-export async function logout(): Promise<void> {
+// Where the provider wants the browser sent to end its own session, when it has such a page.
+export async function logout(): Promise<{ redirect?: string }> {
   if (USE_MOCKS) {
     await delay(null, 150)
     mock.authenticated = false; saveMock(mock)
-    return
+    return {}
   }
-  await apiSend<OkResponse>('POST', '/auth/logout')
+  const r = await apiSend<OkResponse & { redirect?: string }>('POST', '/auth/logout')
+  return { redirect: r?.redirect }
 }
+
 
 export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
   if (USE_MOCKS) {

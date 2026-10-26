@@ -41,12 +41,19 @@ function SignOutItem() {
   const [busy, setBusy] = useState(false)
   if (!status?.enabled) return null
   return (
+    <>
+    {status.user ? (
+      <div className="px-3 pb-2 text-xs text-muted leading-snug" title={`${status.user.subject} at ${status.user.issuer}`}>
+        Signed in as <span className="font-medium text-fg break-words">{status.user.name}</span>
+      </div>
+    ) : null}
     <button type="button" disabled={busy} onClick={() => { setBusy(true); void signOut().finally(() => setBusy(false)) }}
       className={cn('flex items-center gap-3 rounded-md px-3 h-9 text-[13.5px] font-medium transition-colors duration-150 w-full text-left',
         'text-muted hover:text-fg hover:bg-surface-2 disabled:opacity-50')}>
       <LogOut size={16} className="text-faint" />
       Sign out
     </button>
+    </>
   )
 }
 

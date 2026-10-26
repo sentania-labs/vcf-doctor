@@ -18,6 +18,7 @@ from app.api.environment_router import router as environment_router
 from app.api.events_router import router as events_router
 from app.api.findings_related import router as findings_related_router
 from app.api.health_score_router import router as health_score_router
+from app.api.oidc_router import router as oidc_router
 from app.api.proxies_router import router as proxies_router
 from app.api.router import router as api_router
 from app.config import settings
@@ -50,13 +51,42 @@ app = FastAPI(
 )
 
 
+def _configure_audit_log() -> None:
+    """Make the audit trail visible. The application's own loggers have no
+    handler under uvicorn and INFO is dropped, so this one logger gets a stderr
+    handler of its own (unless the deployment configured the root logger)."""
+    audit = auth.audit
+    audit.setLevel(logging.INFO)
+    if not audit.handlers and not logging.getLogger().handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(asctime)s AUDIT %(levelname)s %(message)s"))
+        audit.addHandler(handler)
+
+
+_configure_audit_log()
+
+# Methods that change something. A read is not worth a line of its own.
+_AUDITED_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+
 @app.middleware("http")
 async def require_session(request: Request, call_next):
-    if auth.requires_auth(request.url.path) and not await run_in_threadpool(
-        auth.is_authenticated, request
-    ):
-        return JSONResponse({"detail": "authentication required"}, status_code=401)
-    return await call_next(request)
+    """The session gate for /api, and the audit trail for what gets changed
+    through it: who (a person from single sign-on, or the shared operator
+    password), what and with what result."""
+    gated = auth.requires_auth(request.url.path)
+    session = None
+    if gated:
+        session = await run_in_threadpool(auth.session_for, request)
+        if session is None and auth.enabled():
+            return JSONResponse({"detail": "authentication required"}, status_code=401)
+    response = await call_next(request)
+    if gated and request.method in _AUDITED_METHODS:
+        who = session.describe() if session else "authentication disabled"
+        # ascii(): the path is whatever the caller sent, and must not forge a line.
+        path = ascii(request.url.path)[1:-1]
+        auth.audit.info("%s %s %s -> %s", who, request.method, path, response.status_code)
+    return response
 
 
 # The built UI loads only same-origin scripts, styles, images and API calls;
@@ -203,6 +233,7 @@ app.include_router(environment_router)
 app.include_router(encryption_router)
 app.include_router(findings_related_router)
 app.include_router(proxies_router)
+app.include_router(oidc_router)
 
 try:
     from app.assistant.router import router as assistant_router

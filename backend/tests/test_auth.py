@@ -1,3 +1,5 @@
+import logging
+
 from fastapi.testclient import TestClient
 
 
@@ -241,3 +243,17 @@ def test_password_change_still_needs_a_session(tmp_path, monkeypatch):
         assert auth.login_blocked("testclient") == 0
         assert c.post("/api/auth/login", json={"password": "correct horse"}).status_code == 200
     auth.reset_login_state()
+
+
+def test_password_setup_and_change_are_audited(tmp_path, monkeypatch, caplog):
+    with _client(tmp_path, monkeypatch) as c:
+        with caplog.at_level(logging.INFO, logger="vcf_doctor.audit"):
+            assert c.post("/api/auth/setup", json={"password": "correct horse"}).status_code == 200
+            r = c.post(
+                "/api/auth/change",
+                json={"current_password": "correct horse", "new_password": "battery staple"},
+            )
+            assert r.status_code == 200
+        lines = [r.getMessage() for r in caplog.records if r.name == "vcf_doctor.audit"]
+        assert "operator password set for the first time from testclient" in lines
+        assert "operator password changed by operator password from testclient" in lines

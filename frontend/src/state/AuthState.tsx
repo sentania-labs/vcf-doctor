@@ -42,8 +42,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [navigate, location.pathname])
 
   const signOut = useCallback(async () => {
-    try { await apiLogout() } catch { /* cookie may already be gone; go to login regardless */ }
-    setStatus(s => (s ? { ...s, authenticated: false } : s))
+    let redirect: string | undefined
+    try { redirect = (await apiLogout()).redirect } catch { /* cookie may already be gone; go to login regardless */ }
+    setStatus(s => (s ? { ...s, authenticated: false, user: undefined } : s))
+    // Someone who signed in through the identity provider is sent there to end its session too.
+    if (redirect) { window.location.assign(redirect); return }
     navigate('/login', { replace: true })
   }, [navigate])
 

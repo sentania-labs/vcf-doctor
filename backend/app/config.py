@@ -21,6 +21,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # Where compose mounts its secret and where the Kubernetes manifest mounts
 # its Secret volume, so one default covers both shapes.
 DEFAULT_DB_PASSWORD_FILE = "/run/secrets/vcf-doctor-db-password"
+DEFAULT_OIDC_SECRET_FILE = "/run/secrets/vcf-doctor-oidc-client-secret"
 
 
 class PasswordInUrl(ValueError):
@@ -78,6 +79,20 @@ class Settings(BaseSettings):
     # X-Forwarded-Proto (the ingress). Overrides the Settings page value.
     # Empty (the default) trusts nobody; see app/proxies.py.
     trusted_proxies: str = ""
+    # Single sign-on through any OpenID Connect provider. The Settings page
+    # stores these; a value set here wins over the stored one, field by field
+    # (see app/oidc.py). Empty means "use the stored value". The client secret
+    # is deliberately not an environment variable: it is read from the file
+    # named below, and a missing file means a public client (PKCE only).
+    oidc_issuer: str = ""
+    oidc_client_id: str = ""
+    oidc_client_secret_file: str = DEFAULT_OIDC_SECRET_FILE
+    oidc_redirect_uri: str = ""
+    oidc_scopes: str = ""
+    oidc_groups_claim: str = ""
+    # Comma-separated group names that get the admin role. No default: which
+    # groups may sign in is the deployer's decision.
+    oidc_admin_groups: str = ""
 
 
 settings = Settings()
@@ -90,6 +105,19 @@ def database_password() -> str | None:
     secret --from-file` almost always leaves a trailing newline behind.
     """
     path = Path(settings.db_password_file or "")
+    if not path.name or not path.is_file():
+        return None
+    value = path.read_text(encoding="utf-8").strip("\r\n")
+    return value or None
+
+
+def oidc_client_secret() -> str | None:
+    """The OIDC client secret from its file, or None when there is no file.
+
+    Read on every sign-in rather than cached, so rotating the mounted secret
+    needs no restart. Trailing newlines are stripped like the database password's.
+    """
+    path = Path(settings.oidc_client_secret_file or "")
     if not path.name or not path.is_file():
         return None
     value = path.read_text(encoding="utf-8").strip("\r\n")
