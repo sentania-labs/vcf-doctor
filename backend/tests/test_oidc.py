@@ -47,8 +47,6 @@ class MockIdP:
         self.codes: dict[str, dict] = {}
         self.token_requests: list[dict] = []
         self.discovery_requests = 0
-        self.userinfo: dict | None = None
-        self.last_subject = ""
         self.metadata_patch: dict = {}
 
     # -- the transport the app talks through --------------------------------
@@ -67,8 +65,6 @@ class MockIdP:
             return httpx2.Response(200, json={"keys": [KEY.as_dict(private=False)]})
         if path == "/token":
             return self.token(request)
-        if path == "/userinfo":
-            return httpx2.Response(200, json=self.userinfo or {"sub": self.last_subject})
         return httpx2.Response(404)
 
     def metadata(self) -> dict:
@@ -77,7 +73,6 @@ class MockIdP:
             "authorization_endpoint": "https://idp.test/authorize",
             "token_endpoint": "https://idp.test/token",
             "jwks_uri": "https://idp.test/jwks",
-            "userinfo_endpoint": "https://idp.test/userinfo",
             "id_token_signing_alg_values_supported": ["RS256"],
             "code_challenge_methods_supported": ["S256"],
         }
@@ -125,7 +120,6 @@ class MockIdP:
             return httpx2.Response(
                 400, json={"error": "invalid_grant", "error_description": "pkce"}
             )
-        self.last_subject = rec["user"]["sub"]
         now = int(time.time())
         claims = {
             "iss": ISSUER,
@@ -296,14 +290,6 @@ def test_without_a_secret_file_the_client_is_public(app_client, idp, monkeypatch
     assert "client_secret" not in request["form"]
 
 
-def test_secret_post_is_used_when_the_provider_only_offers_it(app_client, idp, secret_file):
-    idp.metadata_patch = {"token_endpoint_auth_methods_supported": ["client_secret_post"]}
-    assert callback(app_client, idp).headers["location"] == "/"
-    request = idp.token_requests[0]
-    assert request["authorization"] is None
-    assert request["form"]["client_secret"] == CLIENT_SECRET
-
-
 def test_group_names_are_not_in_the_code_or_the_defaults(app_client, idp):
     """Nothing configured means nobody gets in, whatever groups they carry."""
     from app import oidc
@@ -334,17 +320,6 @@ def test_group_names_must_match_exactly(app_client, idp):
     refused(app_client, callback(app_client, idp, groups=["TEAM-ADMINS"]), "not_authorized")
     app_client.cookies.clear()
     refused(app_client, callback(app_client, idp, groups=[ADMIN_GROUP + " "]), "not_authorized")
-
-
-def test_groups_can_come_from_the_userinfo_endpoint(app_client, idp):
-    idp.userinfo = {"sub": "user-alice", "groups": [ADMIN_GROUP]}
-    assert callback(app_client, idp, groups=None).headers["location"] == "/"
-    assert signed_in(app_client)
-
-
-def test_userinfo_for_a_different_subject_is_not_trusted(app_client, idp):
-    idp.userinfo = {"sub": "someone-else", "groups": [ADMIN_GROUP]}
-    refused(app_client, callback(app_client, idp, groups=None), "failed")
 
 
 def test_a_single_group_sent_as_a_string_is_accepted(app_client, idp):
@@ -736,7 +711,6 @@ def test_refusals_and_failures_are_logged(app_client, idp, caplog):
 def test_the_settings_endpoints_need_a_session(app_client, idp):
     assert app_client.get("/api/settings/oidc").status_code == 401
     assert app_client.put("/api/settings/oidc", json={}).status_code == 401
-    assert app_client.post("/api/settings/oidc/test").status_code == 401
 
 
 def test_settings_round_trip_and_validation(app_client, idp):
@@ -815,28 +789,10 @@ def test_a_malformed_deployment_variable_fails_closed(app_client, idp, monkeypat
     assert app_client.get("/api/auth/oidc/login").headers["location"] == "/login?sso=not_configured"
 
 
-def test_the_test_button_reports_what_the_provider_offers(app_client, idp, secret_file):
-    app_client.post("/api/auth/login", json={"password": "break glass pw"})
-    r = app_client.post("/api/settings/oidc/test")
-    assert r.json() == {
-        "ok": True,
-        "error": None,
-        "issuer": ISSUER,
-        "end_session": True,
-        "pkce": True,
-        "secret": True,
-    }
-    idp.up = False
-    r = app_client.post("/api/settings/oidc/test")
-    assert r.status_code == 200
-    assert r.json()["ok"] is False and "down" in r.json()["error"]
-
-
 def test_the_secret_never_appears_in_any_settings_response(app_client, idp, secret_file):
     app_client.post("/api/auth/login", json={"password": "break glass pw"})
     for response in (
         app_client.get("/api/settings/oidc"),
-        app_client.post("/api/settings/oidc/test"),
         app_client.get("/api/auth/status"),
     ):
         assert CLIENT_SECRET not in response.text

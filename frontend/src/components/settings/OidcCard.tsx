@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { CheckCircle2, KeyRound, Plug } from 'lucide-react'
-import type { OidcTest, OidcValues } from '@/types'
-import { getOidcSettings, testOidc, updateOidcSettings } from '@/api'
+import { CheckCircle2, KeyRound } from 'lucide-react'
+import type { OidcValues } from '@/types'
+import { getOidcSettings, updateOidcSettings } from '@/api'
 import { useAsync } from '@/hooks/useAsync'
 import { Badge, Button, Card, CardHeader, ErrorState, Field, Input, Skeleton } from '@/components/ui'
 
@@ -22,10 +22,8 @@ export default function OidcCard() {
   const [form, setForm] = useState<Omit<OidcValues, 'admin_groups'>>({ issuer: '', client_id: '', redirect_uri: '', scopes: '', groups_claim: '' })
   const [groups, setGroups] = useState('')
   const [busy, setBusy] = useState(false)
-  const [testing, setTesting] = useState(false)
   const [saved, setSaved] = useState(false)
   const [err, setErr] = useState<string | null>(null)
-  const [result, setResult] = useState<OidcTest | null>(null)
 
   useEffect(() => {
     if (!s.data) return
@@ -35,22 +33,16 @@ export default function OidcCard() {
 
   const pinned = s.data?.pinned
   const shown = (k: keyof OidcValues): string => (pinned?.[k] && s.data ? [s.data.effective[k]].flat().join(', ') : '')
-  const set = (k: keyof typeof form) => (v: string) => { setForm(f => ({ ...f, [k]: v })); setResult(null) }
+  const set = (k: keyof typeof form) => (v: string) => setForm(f => ({ ...f, [k]: v }))
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
-    setErr(null); setSaved(false); setResult(null); setBusy(true)
+    setErr(null); setSaved(false); setBusy(true)
     try {
       await updateOidcSettings({ ...form, admin_groups: splitGroups(groups) })
       setSaved(true); setTimeout(() => setSaved(false), 2500)
       s.reload()
     } catch (e2) { setErr(e2 instanceof Error ? e2.message : String(e2)) } finally { setBusy(false) }
-  }
-
-  const runTest = async () => {
-    setErr(null); setResult(null); setTesting(true)
-    try { setResult(await testOidc()) }
-    catch (e2) { setErr(e2 instanceof Error ? e2.message : String(e2)) } finally { setTesting(false) }
   }
 
   const field = (k: keyof typeof form, label: string, hint: string, placeholder = '') => (
@@ -77,7 +69,7 @@ export default function OidcCard() {
               {field('scopes', 'Scopes', `Space separated; openid is always requested. Empty means ${s.data.defaults.scopes}. Many providers need a scope such as groups for the groups claim to be sent.`, s.data.defaults.scopes)}
               {field('groups_claim', 'Groups claim', `The claim that lists a person's groups. Empty means ${s.data.defaults.groups_claim}.`, s.data.defaults.groups_claim)}
               <Field label="Admin groups" hint={pinned?.admin_groups ? `Set by ${ENV_NAME.admin_groups} on the deployment: ${shown('admin_groups')}` : 'Members of any of these get full access, the same as the operator password. One per line, matched exactly. Anyone else who signs in is refused. No group is assumed: with none listed, single sign-on stays off.'}>
-                <textarea value={pinned?.admin_groups ? shown('admin_groups').split(', ').join('\n') : groups} onChange={e => { setGroups(e.target.value); setResult(null) }}
+                <textarea value={pinned?.admin_groups ? shown('admin_groups').split(', ').join('\n') : groups} onChange={e => setGroups(e.target.value)}
                   disabled={busy || !!pinned?.admin_groups} rows={3} spellCheck={false} className={textareaCls} placeholder={'one group per line'} />
               </Field>
             </div>
@@ -89,18 +81,9 @@ export default function OidcCard() {
             {!s.data.configured && s.data.problems.length > 0 && (form.issuer || form.client_id || groups) ? (
               <p className="text-sm text-muted bg-surface-2 rounded-md px-3 py-2">Not on yet: {s.data.problems.join('; ')}.</p>
             ) : null}
-            {result ? (
-              result.ok ? (
-                <div className="text-sm bg-ok-bg rounded-md px-3 py-2 space-y-0.5" role="status">
-                  <div className="text-ok font-medium inline-flex items-center gap-1.5"><CheckCircle2 size={15} /> The provider answered and describes itself correctly.</div>
-                  <div className="text-muted">{result.end_session ? 'It has an end-session page, so signing out also ends its session.' : 'It has no end-session page, so signing out only ends this console\'s session.'}{result.pkce ? '' : ' It does not list S256 PKCE among its methods.'}</div>
-                </div>
-              ) : <p className="text-sm text-critical bg-critical-bg rounded-md px-3 py-2 break-words" role="alert">The provider could not be used: {result.error}</p>
-            ) : null}
             {err ? <p className="text-sm text-critical bg-critical-bg rounded-md px-3 py-2" role="alert">{err}</p> : null}
             <div className="flex items-center gap-3">
               <Button type="submit" loading={busy}><KeyRound size={15} /> Save single sign-on</Button>
-              <Button type="button" onClick={() => void runTest()} loading={testing} disabled={busy || !s.data.configured}><Plug size={15} /> Test the provider</Button>
               {saved ? <span className="text-sm text-ok inline-flex items-center gap-1.5"><CheckCircle2 size={15} /> Saved</span> : null}
             </div>
           </form>

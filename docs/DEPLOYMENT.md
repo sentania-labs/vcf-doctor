@@ -297,11 +297,9 @@ pinned by the variable named below, which wins over the saved value.
 | Admin groups | `VCF_DOCTOR_OIDC_ADMIN_GROUPS` | Required. Comma separated in the variable, one per line on the page. Matched exactly, case included. With none listed, single sign-on stays off. |
 | Redirect URI | `VCF_DOCTOR_OIDC_REDIRECT_URI` | Optional. Default `<this console's address>/api/auth/oidc/callback`. Set it when an ingress terminates TLS and the console would otherwise see `http`, or [trust the ingress](SECURITY.md#access). |
 | Scopes | `VCF_DOCTOR_OIDC_SCOPES` | Default `openid profile email`. `openid` is always requested. Add whatever scope makes your provider send groups. |
-| Groups claim | `VCF_DOCTOR_OIDC_GROUPS_CLAIM` | Default `groups`. Read from the ID token, or from the userinfo endpoint when the token has none. |
+| Groups claim | `VCF_DOCTOR_OIDC_GROUPS_CLAIM` | Default `groups`. Read from the ID token; a provider that only sends groups elsewhere needs a mapping that puts them there. |
 
-Register the redirect URI at the provider exactly as the page shows it. **Test
-the provider** on the same page asks for the discovery document and reports
-whether the provider has an end-session page.
+Register the redirect URI at the provider exactly as the page shows it.
 
 ### Example: Authentik
 

@@ -141,7 +141,6 @@ export interface OidcSettings {
   callback_url: string
   client_secret: boolean; auth_enabled: boolean
 }
-export interface OidcTest { ok: boolean; error: string | null; issuer: string | null; end_session: boolean; pkce: boolean; secret: boolean }
 export interface SettingsUpdate { retention_policy: RetentionPolicy; event_policy: EventPolicy; assistant: Partial<AssistantSettings> & { api_key?: string }; changes_min_significance?: Significance }
 export interface AssistantEvidenceCount { findings: number; changes: number; resources: number; events: number }
 export type AssistantStreamEvent =

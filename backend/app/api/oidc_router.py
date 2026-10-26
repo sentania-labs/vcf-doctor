@@ -1,8 +1,7 @@
-"""GET/PUT /api/settings/oidc and POST /api/settings/oidc/test: the single
-sign-on settings. Session-protected like every other settings endpoint (the
-/api middleware in main.py handles that). The client secret is not here: it is
-read from the file named by VCF_DOCTOR_OIDC_CLIENT_SECRET_FILE and only its
-presence is reported."""
+"""GET/PUT /api/settings/oidc: the single sign-on settings. Session-protected
+like every other settings endpoint (the /api middleware in main.py handles
+that). The client secret is not here: it is read from the file named by
+VCF_DOCTOR_OIDC_CLIENT_SECRET_FILE and only its presence is reported."""
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
@@ -41,15 +40,6 @@ class OidcSettings(BaseModel):
     auth_enabled: bool
 
 
-class OidcTest(BaseModel):
-    ok: bool
-    error: str | None = None
-    issuer: str | None = None
-    end_session: bool = False
-    pkce: bool = True
-    secret: bool = False
-
-
 def _current(request: Request) -> OidcSettings:
     problems = oidc.problems()
     return OidcSettings(
@@ -84,15 +74,3 @@ def put_oidc(body: OidcValues, request: Request) -> OidcSettings:
     oidc.reset_cache()
     return _current(request)
 
-
-@router.post("/oidc/test", response_model=OidcTest)
-def test_oidc() -> OidcTest:
-    """Asks the provider for its discovery document, which is what every
-    sign-in starts with."""
-    cfg = oidc.effective()
-    if cfg is None:
-        raise HTTPException(400, "; ".join(oidc.problems()))
-    try:
-        return OidcTest(ok=True, **oidc.check(cfg))
-    except oidc.SignInError as exc:
-        return OidcTest(ok=False, error=exc.detail)

@@ -1,4 +1,4 @@
-import type { OidcSettings, OidcTest, OidcValues } from '@/types'
+import type { OidcSettings, OidcValues } from '@/types'
 import { apiGet, apiSend } from './client'
 import { USE_MOCKS, delay } from './mocks'
 
@@ -27,9 +27,4 @@ export function updateOidcSettings(values: OidcValues): Promise<OidcSettings> {
     return delay(mockOidc, 300)
   }
   return apiSend<OidcSettings>('PUT', '/settings/oidc', values)
-}
-
-export function testOidc(): Promise<OidcTest> {
-  if (USE_MOCKS) return delay({ ok: true, error: null, issuer: mockOidc.effective.issuer, end_session: true, pkce: true, secret: false }, 400)
-  return apiSend<OidcTest>('POST', '/settings/oidc/test')
 }

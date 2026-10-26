@@ -7,12 +7,12 @@ challenge, token request, client authentication) and joserfc, its sibling
 library, verifies the ID token.
 
 Who may sign in is the deployer's decision and nothing in the code or the
-defaults names a group. The groups claim is read from the ID token (or the
-userinfo endpoint when the token omits it) and compared with the configured
-admin groups; anyone who authenticates without one of them is refused and gets
-no session. That check runs at every sign-in, so removing someone from a group
-takes effect the next time they sign in (and at once for everybody when the
-operator password is changed, which rotates the session signing secret).
+defaults names a group. The groups claim is read from the verified ID token
+and compared with the configured admin groups; anyone who authenticates
+without one of them is refused and gets no session. That check runs at every
+sign-in, so removing someone from a group takes effect the next time they sign
+in (and at once for everybody when the operator password is changed, which
+rotates the session signing secret).
 
 Configuration lives in the settings table and is edited on the Settings page.
 A VCF_DOCTOR_OIDC_* variable set on the deployment wins over the stored value,
@@ -343,12 +343,12 @@ def reset_cache() -> None:
         _keys_cache.clear()
 
 
-def _client(cfg: Config, redirect_uri: str, auth_method: str = "none") -> OAuth2Client:
+def _client(cfg: Config, redirect_uri: str) -> OAuth2Client:
     secret = oidc_client_secret()
     return OAuth2Client(
         client_id=cfg.client_id,
         client_secret=secret,
-        token_endpoint_auth_method=auth_method if secret else "none",
+        token_endpoint_auth_method="client_secret_basic" if secret else "none",
         scope=cfg.scopes,
         redirect_uri=redirect_uri,
         code_challenge_method="S256",
@@ -357,9 +357,9 @@ def _client(cfg: Config, redirect_uri: str, auth_method: str = "none") -> OAuth2
     )
 
 
-def _get_json(client: OAuth2Client, url: str, **kwargs: Any) -> dict[str, Any]:
+def _get_json(client: OAuth2Client, url: str) -> dict[str, Any]:
     try:
-        resp = client.request("GET", url, withhold_token=True, **kwargs)
+        resp = client.request("GET", url, withhold_token=True)
     except httpx2.HTTPError as exc:
         raise SignInError(UNAVAILABLE, f"{url}: {type(exc).__name__}: {exc}") from exc
     if resp.status_code != 200:
@@ -393,20 +393,13 @@ def _fetch_metadata(cfg: Config) -> dict[str, Any]:
 def discover(cfg: Config, *, fresh: bool = False) -> dict[str, Any]:
     """The provider's discovery document. `fresh` always asks the provider,
     which is how starting a sign-in notices a provider that is down; otherwise a
-    recent copy is used, and a stale one stands in when the provider is
-    unreachable so a blip does not break sessions mid-callback."""
+    recent copy is used."""
     now = time.monotonic()
     with _cache_lock:
         cached = _metadata_cache.get(cfg.issuer)
     if cached and not fresh and now - cached[0] < METADATA_TTL:
         return cached[1]
-    try:
-        meta = _fetch_metadata(cfg)
-    except SignInError as exc:
-        if cached and not fresh and exc.code == UNAVAILABLE:
-            log.warning("identity provider unreachable, using its cached metadata: %s", exc.detail)
-            return cached[1]
-        raise
+    meta = _fetch_metadata(cfg)
     with _cache_lock:
         _metadata_cache[cfg.issuer] = (now, meta)
     return meta
@@ -428,28 +421,6 @@ def _keyset(cfg: Config, meta: dict[str, Any], *, refresh: bool) -> KeySet:
     return keys
 
 
-def _auth_method(meta: dict[str, Any]) -> str:
-    supported = meta.get("token_endpoint_auth_methods_supported")
-    if not isinstance(supported, list) or "client_secret_basic" in supported:
-        return "client_secret_basic"
-    if "client_secret_post" in supported:
-        return "client_secret_post"
-    return "client_secret_basic"
-
-
-def check(cfg: Config) -> dict[str, Any]:
-    """What the Settings page's test button reports: can the provider be
-    reached and does it describe itself well enough to sign in against."""
-    meta = discover(cfg, fresh=True)
-    methods = meta.get("code_challenge_methods_supported")
-    return {
-        "issuer": meta.get("issuer"),
-        "end_session": bool(meta.get("end_session_endpoint")),
-        "pkce": not isinstance(methods, list) or "S256" in methods,
-        "secret": oidc_client_secret() is not None,
-    }
-
-
 # ---- the flow -------------------------------------------------------------
 
 
@@ -459,7 +430,7 @@ def begin(cfg: Config, redirect_uri: str) -> tuple[str, dict[str, Any]]:
     verifier = generate_token(64)
     state = secrets.token_urlsafe(32)
     nonce = secrets.token_urlsafe(32)
-    with _client(cfg, redirect_uri, _auth_method(meta)) as client:
+    with _client(cfg, redirect_uri) as client:
         url, _ = client.create_authorization_url(
             meta["authorization_endpoint"], state=state, code_verifier=verifier, nonce=nonce
         )
@@ -556,7 +527,7 @@ def complete(cfg: Config, flow: Mapping[str, Any], query: Mapping[str, str]) -> 
 
     meta = discover(cfg)
     try:
-        with _client(cfg, flow["redirect_uri"], _auth_method(meta)) as client:
+        with _client(cfg, flow["redirect_uri"]) as client:
             token = client.fetch_token(
                 meta["token_endpoint"],
                 code=code,
@@ -568,17 +539,6 @@ def complete(cfg: Config, flow: Mapping[str, Any], query: Mapping[str, str]) -> 
             if not isinstance(id_token, str) or not id_token:
                 raise SignInError(FAILED, "the token response has no ID token (openid scope?)")
             claims = _verify_id_token(cfg, meta, flow, id_token)
-            groups = _groups(claims, cfg.groups_claim)
-            if groups is None and meta.get("userinfo_endpoint") and token.get("access_token"):
-                info = _get_json(
-                    client,
-                    meta["userinfo_endpoint"],
-                    headers={"Authorization": f"Bearer {token['access_token']}"},
-                )
-                if info.get("sub") != claims["sub"]:
-                    raise SignInError(FAILED, "userinfo describes a different subject")
-                groups = _groups(info, cfg.groups_claim)
-                claims = {**info, **claims}
     except OAuthError as exc:
         raise SignInError(FAILED, f"token request refused: {exc.error}: {exc.description}") from exc
     except httpx2.HTTPError as exc:
@@ -586,6 +546,7 @@ def complete(cfg: Config, flow: Mapping[str, Any], query: Mapping[str, str]) -> 
             UNAVAILABLE, f"token request failed: {type(exc).__name__}: {exc}"
         ) from exc
 
+    groups = _groups(claims, cfg.groups_claim)
     subject = claims["sub"]
     if not isinstance(subject, str) or not subject or len(subject) > MAX_SUBJECT:
         raise SignInError(FAILED, "ID token subject is not usable")
