@@ -98,7 +98,8 @@ def create_token(body: NewToken, request: Request) -> CreatedToken:
 @router.delete("/{token_id}")
 def revoke_token(token_id: str, request: Request) -> dict:
     me = _owner(request)
-    if not tokens.revoke(me.issuer, me.subject, token_id):
+    revoked_id = tokens.revoke(me.issuer, me.subject, token_id)
+    if revoked_id is None:
         raise HTTPException(404, "no such token")
-    auth.audit.info("API token %s revoked by %s", token_id, me.describe())
+    auth.audit.info("API token %s revoked by %s", revoked_id, me.describe())
     return {"ok": True}

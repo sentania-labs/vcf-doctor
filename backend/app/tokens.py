@@ -90,8 +90,9 @@ def list_for(issuer: str, subject: str) -> list[dict]:
     )
 
 
-def revoke(issuer: str, subject: str, token_id: str) -> bool:
-    """End one of this person's tokens. False when they have no such token."""
+def revoke(issuer: str, subject: str, token_id: str) -> str | None:
+    """End one of this person's tokens. Returns its stored id, or None when they
+    have no such token."""
     with db.transaction() as c:
         row = c.execute(
             "UPDATE api_tokens SET revoked_at = COALESCE(revoked_at, %s), "
@@ -99,7 +100,7 @@ def revoke(issuer: str, subject: str, token_id: str) -> bool:
             "WHERE id = %s AND issuer = %s AND subject = %s RETURNING id",
             (_stamp(_now()), REASON_REVOKED, token_id, issuer, subject),
         ).fetchone()
-    return row is not None
+    return row["id"] if row else None
 
 
 def revoke_all(issuer: str, subject: str, reason: str) -> int:

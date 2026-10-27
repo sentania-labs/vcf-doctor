@@ -1,0 +1,4 @@
+# Placeholder bearer values, not credentials: the CI smoke test sends a forged
+# token to check it is refused, and the deployment guide shows an example call.
+f1803cc85efa75cf73a19308de72761a48457ab5:.github/workflows/ci.yml:curl-auth-header:270
+f1803cc85efa75cf73a19308de72761a48457ab5:docs/DEPLOYMENT.md:curl-auth-header:377

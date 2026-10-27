@@ -11,7 +11,6 @@ from fastapi.testclient import TestClient
 
 from tests.test_oidc import (
     ADMIN_GROUP,
-    ALICE,
     ISSUER,
     app_client,
     callback,
@@ -115,20 +114,23 @@ def test_revoking_a_token_stops_it_at_once(alice):
     made = make(alice)
     with script() as s:
         assert s.get("/api/connections", headers=bearer(made["token"])).status_code == 200
-        assert alice.delete(f"/api/tokens/{made['info']['id']}").status_code == 200
+        revoked = alice.delete(f"/api/tokens/{made['info']['id']}")
+        assert revoked.status_code == 200
         r = s.get("/api/connections", headers=bearer(made["token"]))
         assert r.status_code == 401
     listed = alice.get("/api/tokens").json()["tokens"][0]
     assert listed["revoked_at"] and listed["revoked_reason"] == "revoked"
     # Revoking again is harmless and keeps the first revocation.
-    assert alice.delete(f"/api/tokens/{made['info']['id']}").status_code == 200
+    again = alice.delete(f"/api/tokens/{made['info']['id']}")
+    assert again.status_code == 200
 
 
 def test_one_person_cannot_revoke_anothers_token(alice, idp):
     made = make(alice)
     alice.cookies.clear()
     assert callback(alice, idp, user=BOB, groups=[ADMIN_GROUP]).status_code == 303
-    assert alice.delete(f"/api/tokens/{made['info']['id']}").status_code == 404
+    refused_delete = alice.delete(f"/api/tokens/{made['info']['id']}")
+    assert refused_delete.status_code == 404
     with script() as s:
         assert s.get("/api/connections", headers=bearer(made["token"])).status_code == 200
 
@@ -176,7 +178,8 @@ def test_spent_tokens_stay_listed(alice):
 def test_the_endpoints_need_a_session(app_client):
     assert app_client.get("/api/tokens").status_code == 401
     assert app_client.post("/api/tokens", json={"name": "x"}).status_code == 401
-    assert app_client.delete("/api/tokens/abc").status_code == 401
+    deleted = app_client.delete("/api/tokens/abc")
+    assert deleted.status_code == 401
 
 
 def test_the_operator_password_has_no_tokens(app_client):
@@ -193,7 +196,8 @@ def test_a_token_cannot_manage_tokens(alice):
         h = bearer(made["token"])
         assert s.post("/api/tokens", headers=h, json={"name": "more"}).status_code == 403
         assert s.get("/api/tokens", headers=h).status_code == 403
-        assert s.delete(f"/api/tokens/{made['info']['id']}", headers=h).status_code == 403
+        deleted = s.delete(f"/api/tokens/{made['info']['id']}", headers=h)
+        assert deleted.status_code == 403
     assert len(alice.get("/api/tokens").json()["tokens"]) == 1
 
 
