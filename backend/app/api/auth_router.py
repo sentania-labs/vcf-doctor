@@ -191,10 +191,6 @@ def oidc_callback(request: Request) -> Response:
     except Exception:
         log.exception("single sign-on failed unexpectedly")
         return _login_page(oidc.FAILED)
-    try:
-        tokens.refresh_role(identity.issuer, identity.subject, identity.role, identity.name)
-    except Exception:
-        log.exception("could not refresh the role of %s's API tokens", identity.subject)
     response = RedirectResponse("/", status_code=303)
     response.delete_cookie(FLOW_COOKIE, path=FLOW_COOKIE_PATH)
     _set_cookie(response, request, identity)

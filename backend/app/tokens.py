@@ -7,9 +7,9 @@ chosen by a person, a plain fast hash is the right one: there is nothing to
 guess and nothing to stretch.
 
 A token belongs to a person (issuer and subject, as in a single sign-on
-session) and carries that person's current role: the role is refreshed at every
-sign-in, and everything here is refused unless single sign-on is still pointed
-at the provider the token's owner came from (app/auth.py checks that). A person
+session) and carries the role that person had when they made it. Everything here is refused
+unless single sign-on is still pointed at the provider the token's owner came
+from and the role is still one it accepts (app/auth.py checks that). A person
 who is refused at a later sign-in loses every token they had.
 """
 
@@ -24,13 +24,9 @@ PREFIX = "vcfd_pat_"
 MAX_NAME = 100
 DEFAULT_DAYS = 30
 MAX_DAYS = 365
-# Per person, counting only tokens that still work.
-MAX_ACTIVE = 25
 # last_used_at is a hint for the owner, not an audit record; rewriting the row
 # on every request would make a busy script write constantly.
 TOUCH_EVERY = timedelta(minutes=5)
-# Spent tokens stay listed a while so the owner can see what happened to them.
-KEEP_SPENT = timedelta(days=30)
 
 REASON_REVOKED = "revoked"
 REASON_REFUSED = "the person was refused at a later sign-in"
@@ -39,10 +35,6 @@ _COLUMNS = (
     "id, hint, name, issuer, subject, owner_name, role, "
     "created_at, expires_at, last_used_at, revoked_at, revoked_reason"
 )
-
-
-class TooManyTokens(Exception):
-    pass
 
 
 def _now() -> datetime:
@@ -69,20 +61,6 @@ def create(
     now = _now()
     token_id = uuid.uuid4().hex
     with db.transaction() as c:
-        # Two tabs creating at once must not both squeeze under the cap.
-        db.lock_in_transaction(c, "api_tokens", f"{issuer}\n{subject}")
-        c.execute(
-            "DELETE FROM api_tokens WHERE issuer = %s AND subject = %s "
-            "AND COALESCE(revoked_at, expires_at) < %s",
-            (issuer, subject, _stamp(now - KEEP_SPENT)),
-        )
-        active = c.execute(
-            "SELECT COUNT(*) AS n FROM api_tokens WHERE issuer = %s AND subject = %s "
-            "AND revoked_at IS NULL AND expires_at > %s",
-            (issuer, subject, _stamp(now)),
-        ).fetchone()
-        if int(active["n"]) >= MAX_ACTIVE:
-            raise TooManyTokens(f"at most {MAX_ACTIVE} active tokens per person")
         c.execute(
             "INSERT INTO api_tokens(id, token_hash, hint, name, issuer, subject, owner_name, "
             "role, created_at, expires_at) VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
@@ -132,17 +110,6 @@ def revoke_all(issuer: str, subject: str, reason: str) -> int:
             "WHERE issuer = %s AND subject = %s AND revoked_at IS NULL",
             (_stamp(_now()), reason, issuer, subject),
         ).rowcount
-
-
-def refresh_role(issuer: str, subject: str, role: str, owner_name: str) -> None:
-    """A person signed in: their tokens carry the role and name they have now."""
-    with db.transaction() as c:
-        c.execute(
-            "UPDATE api_tokens SET role = %s, owner_name = %s "
-            "WHERE issuer = %s AND subject = %s AND revoked_at IS NULL "
-            "AND (role <> %s OR owner_name <> %s)",
-            (role, owner_name, issuer, subject, role, owner_name),
-        )
 
 
 def authenticate(secret: str) -> dict | None:

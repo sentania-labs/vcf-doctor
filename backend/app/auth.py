@@ -225,10 +225,12 @@ def _still_trusted(session: Session) -> bool:
 
 
 def _bearer(request: Request) -> str | None:
-    """The secret in an `Authorization: Bearer` header, None when there is no
-    such header. A header that is present but empty comes back as ""."""
+    """The secret in an `Authorization: Bearer` header when it is in the format
+    of a personal API token, otherwise None. Any other bearer value belongs to
+    something else (an authenticating proxy, say) and is left alone."""
     scheme, _, value = request.headers.get("authorization", "").partition(" ")
-    return value.strip() if scheme.lower() == "bearer" else None
+    value = value.strip()
+    return value if scheme.lower() == "bearer" and tokens.looks_like_token(value) else None
 
 
 def token_session(secret: str) -> Session | None:
@@ -277,8 +279,9 @@ def token_valid(token: str | None) -> bool:
 def session_for(request: Request) -> Session | None:
     """The session behind this request, None without one: a personal API token
     in an Authorization header, otherwise the session cookie. A request that
-    sends a bearer token is judged by that token alone, so a dead one is never
-    rescued by a cookie. With authentication off there are no sessions."""
+    sends a `vcfd_pat_` token is judged by that token alone, so a dead one is
+    never rescued by a cookie; any other bearer value is ignored. With
+    authentication off there are no sessions."""
     if not enabled():
         return None
     bearer = _bearer(request)

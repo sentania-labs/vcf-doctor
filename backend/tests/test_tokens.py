@@ -158,19 +158,7 @@ def test_a_token_needs_a_name_and_the_name_is_made_safe(alice):
     assert "\n" not in name and "\x00" not in name and len(name) <= 100
 
 
-def test_there_is_a_cap_on_active_tokens(alice, monkeypatch):
-    from app import tokens
-
-    monkeypatch.setattr(tokens, "MAX_ACTIVE", 2)
-    first = make(alice, "a")
-    make(alice, "b")
-    r = alice.post("/api/tokens", json={"name": "c"})
-    assert r.status_code == 409 and "revoke one first" in r.json()["detail"]
-    alice.delete(f"/api/tokens/{first['info']['id']}")
-    make(alice, "c")
-
-
-def test_old_spent_tokens_are_cleared_out(alice):
+def test_spent_tokens_stay_listed(alice):
     from app import db
 
     made = make(alice, "old")
@@ -178,7 +166,8 @@ def test_old_spent_tokens_are_cleared_out(alice):
     long_ago = (datetime.now(UTC) - timedelta(days=60)).isoformat(timespec="seconds")
     db.fetchall("UPDATE api_tokens SET revoked_at = %s RETURNING id", (long_ago,))
     make(alice, "new")
-    assert [t["name"] for t in alice.get("/api/tokens").json()["tokens"]] == ["new"]
+    names = [t["name"] for t in alice.get("/api/tokens").json()["tokens"]]
+    assert sorted(names) == ["new", "old"]
 
 
 # ---- who may manage tokens --------------------------------------------------
@@ -221,18 +210,36 @@ def test_with_authentication_off_there_is_nothing_to_manage(app_client, monkeypa
 @pytest.mark.parametrize(
     "header",
     [
-        "Bearer",
-        "Bearer ",
-        "Bearer nonsense",
+        "Bearer vcfd_pat_",
+        "Bearer vcfd_pat_nonsense",
         "Bearer vcfd_pat_" + "A" * 43,
-        "Basic dXNlcjpwdw==",
-        "Token vcfd_pat_x",
+        "Bearer vcfd_pat_" + "A" * 500,
     ],
 )
 def test_bad_credentials_are_refused(alice, header):
     make(alice)
     with script() as s:
         assert s.get("/api/connections", headers={"Authorization": header}).status_code == 401
+
+
+@pytest.mark.parametrize(
+    "header",
+    [
+        "Bearer",
+        "Bearer ",
+        "Bearer nonsense",
+        "Bearer eyJhbGciOiJSUzI1NiJ9.e30.sig",
+        "Basic dXNlcjpwdw==",
+        "Token vcfd_pat_x",
+    ],
+)
+def test_other_authorization_headers_are_not_ours(alice, header):
+    """A proxy in front may add its own Authorization header. Without a session
+    cookie it gets nowhere; with one, the cookie decides."""
+    make(alice)
+    with script() as s:
+        assert s.get("/api/connections", headers={"Authorization": header}).status_code == 401
+    assert alice.get("/api/connections", headers={"Authorization": header}).status_code == 200
 
 
 def test_a_dead_token_is_not_rescued_by_a_cookie(alice):
@@ -364,27 +371,24 @@ def test_the_provider_being_down_does_not_take_tokens_away(alice, idp):
         assert s.get("/api/connections", headers=bearer(made["token"])).status_code == 200
 
 
-def test_signing_in_again_keeps_the_tokens_and_refreshes_the_name(alice, idp):
+def test_signing_in_again_keeps_the_tokens(alice, idp):
     made = make(alice)
     alice.cookies.clear()
-    assert callback(alice, idp, user={**ALICE, "name": "Alice Renamed"}).status_code == 303
+    assert callback(alice, idp).status_code == 303
     listed = alice.get("/api/tokens").json()["tokens"]
     assert [t["id"] for t in listed] == [made["info"]["id"]]
     with script() as s:
         assert s.get("/api/connections", headers=bearer(made["token"])).status_code == 200
 
 
-def test_a_token_carries_the_role_the_person_has_now(alice, idp):
+def test_a_token_with_a_role_that_no_longer_exists_is_refused(alice):
     from app import db
 
     made = make(alice)
-    # A stale role on the row: tokens are only honoured for roles that still exist.
-    db.fetchall("UPDATE api_tokens SET role = 'gone' RETURNING id")
     with script() as s:
-        assert s.get("/api/connections", headers=bearer(made["token"])).status_code == 401
-        alice.cookies.clear()
-        assert callback(alice, idp).status_code == 303  # signing in restores the current role
         assert s.get("/api/connections", headers=bearer(made["token"])).status_code == 200
+        db.fetchall("UPDATE api_tokens SET role = 'gone' RETURNING id")
+        assert s.get("/api/connections", headers=bearer(made["token"])).status_code == 401
 
 
 def test_tokens_stop_when_single_sign_on_is_off_or_points_elsewhere(alice):

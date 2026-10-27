@@ -377,12 +377,12 @@ tokens**.
 curl -H "Authorization: Bearer vcfd_pat_..." https://doctor.example.com/api/connections
 ```
 
-- A token acts as its owner with the role they have now: the same access a
-  signed-in administrator has. A token cannot create or revoke tokens, and the
-  operator password has none; both are managed from a single sign-on session.
+- A token acts as its owner with the role they had when they made it: the same
+  access a signed-in administrator has. A token cannot create or revoke
+  tokens, and the operator password has none; both are managed from a single
+  sign-on session.
 - Lifetime is 30 days unless the person picks another, at most 365. The secret
-  is shown once and only its SHA-256 is stored. A person may hold 25 active
-  tokens.
+  is shown once and only its SHA-256 is stored.
 - Revoking a token stops it at once. So does expiry, turning single sign-on
   off, or pointing it at another provider.
 - A person who is refused at a later sign-in (removed from every admin group)

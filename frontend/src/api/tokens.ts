@@ -11,7 +11,7 @@ let mockTokens: ApiToken[] = [{
 }]
 
 export function listApiTokens(): Promise<ApiTokenList> {
-  if (USE_MOCKS) return delay({ tokens: mockTokens, max_days: 365, default_days: 30, max_active: 25 }, 120)
+  if (USE_MOCKS) return delay({ tokens: mockTokens, max_days: 365, default_days: 30 }, 120)
   return apiGet<ApiTokenList>('/tokens')
 }
 
