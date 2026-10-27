@@ -6,3 +6,5 @@ f1803cc85efa75cf73a19308de72761a48457ab5:docs/DEPLOYMENT.md:curl-auth-header:377
 8c161c40113fd9a04d6682a07948b22d4eee0dda:docs/DEPLOYMENT.md:curl-auth-header:379
 3131fc3a45feb1d49da40e4e995380184c6be6c7:.github/workflows/ci.yml:curl-auth-header:272
 3131fc3a45feb1d49da40e4e995380184c6be6c7:docs/DEPLOYMENT.md:curl-auth-header:411
+a33182f8c7aa871d1d0a8ab0130967328b268953:.github/workflows/ci.yml:curl-auth-header:272
+a33182f8c7aa871d1d0a8ab0130967328b268953:docs/DEPLOYMENT.md:curl-auth-header:411
