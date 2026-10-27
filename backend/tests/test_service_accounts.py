@@ -10,8 +10,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from fastapi.testclient import TestClient
 
-from tests.test_oidc import ADMIN_GROUP, app_client, callback, idp, refused
-from tests.test_tokens import BOB, CONNECTION, bearer, make, script
+from tests.test_oidc import app_client, callback, idp, refused
+from tests.test_tokens import CONNECTION, bearer, make, script
 
 PREFIX = "vcfd_sat_"
 
@@ -195,7 +195,8 @@ def test_an_unknown_account_or_token_is_not_found(alice):
     assert alice.get("/api/service-accounts/nope/tokens").status_code == 404
     assert alice.post("/api/service-accounts/nope/tokens", json={"name": "x"}).status_code == 404
     assert alice.post("/api/service-accounts/nope/disable").status_code == 404
-    assert alice.delete(f"/api/service-accounts/{acct}/tokens/nope").status_code == 404
+    missing = alice.delete(f"/api/service-accounts/{acct}/tokens/nope")
+    assert missing.status_code == 404
     # A token is revoked through its own account only.
     wrong = alice.delete(f"/api/service-accounts/{acct}/tokens/{token['info']['id']}")
     assert wrong.status_code == 404
@@ -210,7 +211,8 @@ def test_the_endpoints_need_a_session(app_client):
     assert app_client.post("/api/service-accounts", json={"name": "x"}).status_code == 401
     assert app_client.post("/api/service-accounts/a/tokens", json={"name": "x"}).status_code == 401
     assert app_client.post("/api/service-accounts/a/disable").status_code == 401
-    assert app_client.delete("/api/service-accounts/a/tokens/b").status_code == 401
+    revoked = app_client.delete("/api/service-accounts/a/tokens/b")
+    assert revoked.status_code == 401
 
 
 def test_the_operator_password_is_an_administrator(operator):
