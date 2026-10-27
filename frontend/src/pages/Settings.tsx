@@ -11,6 +11,7 @@ import HealthScoreCard from '@/components/settings/HealthScoreCard'
 import EncryptionCard from '@/components/settings/EncryptionCard'
 import TrustedProxiesCard from '@/components/settings/TrustedProxiesCard'
 import OidcCard from '@/components/settings/OidcCard'
+import TokensCard from '@/components/settings/TokensCard'
 import AboutCard from '@/components/settings/AboutCard'
 import DatabaseCard from '@/components/settings/DatabaseCard'
 
@@ -186,6 +187,7 @@ function EventsRetentionCard({ value, onChange }: { value: EventPolicy; onChange
 }
 
 export default function SettingsPage() {
+  const { status: authStatus } = useAuth()
   const s = useAsync(() => getSettings(), [])
   const status = useAsync(() => getAssistantStatus(), [s.data])
   const [retention, setRetention] = useState<RetentionPolicy>(DEFAULT_RETENTION)
@@ -290,6 +292,7 @@ export default function SettingsPage() {
           <DatabaseCard />
           <AccessCard />
           <OidcCard />
+          {authStatus?.user ? <TokensCard /> : null}
           <TrustedProxiesCard />
           <AboutCard />
           {err ? <p className="text-sm text-critical">{err}</p> : null}

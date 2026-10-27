@@ -21,6 +21,7 @@ from app.api.health_score_router import router as health_score_router
 from app.api.oidc_router import router as oidc_router
 from app.api.proxies_router import router as proxies_router
 from app.api.router import router as api_router
+from app.api.tokens_router import router as tokens_router
 from app.config import settings
 
 log = logging.getLogger("vcf_doctor")
@@ -72,7 +73,7 @@ _AUDITED_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 @app.middleware("http")
 async def require_session(request: Request, call_next):
     """The session gate for /api, and the audit trail for what gets changed
-    through it: who (a person from single sign-on, or the shared operator
+    through it: who (a person from single sign-on or their API token, or the shared operator
     password), what and with what result."""
     gated = auth.requires_auth(request.url.path)
     session = None
@@ -234,6 +235,7 @@ app.include_router(encryption_router)
 app.include_router(findings_related_router)
 app.include_router(proxies_router)
 app.include_router(oidc_router)
+app.include_router(tokens_router)
 
 try:
     from app.assistant.router import router as assistant_router

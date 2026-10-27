@@ -56,7 +56,9 @@ version of this file is in git history.
   hold across workers and replicas (#74).
 - Single sign-on through any OpenID Connect provider, with admin groups mapped
   from a groups claim and the operator password kept as break-glass (#87,
-  piece 1). Personal and service-account tokens are the follow-up pieces.
+  piece 1). Personal API tokens for scripts, made by a signed-in person and
+  revoked when they are refused at a later sign-in (#87, piece 2). Service
+  account tokens are the follow-up piece.
 - Encryption key rotation in place with the previous key at startup, plus a
   one-click migration off the generated key file; no key is ever entered in
   the interface (#48). See
