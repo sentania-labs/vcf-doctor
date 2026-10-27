@@ -86,7 +86,7 @@ the old SQLite volume, the
 | [Security](docs/SECURITY.md) | Access model, secrets at rest, browser headers, CI gates, supply chain |
 | [Retention, change log and events](docs/RETENTION_EVENTS.md) | How snapshots thin out and what the change log and event store keep |
 | [Resource properties](docs/PROPERTIES.md) | The normalised inventory schema every check and diff keys on |
-| [Status](STATUS.md) | What is delivered, what is owed, open follow-ups |
+| [Status and roadmap](STATUS.md) | What is delivered, what is next in priority order and why, open follow-ups |
 | [MVP plan](docs/PLAN.md), [original plan](docs/ORIGINAL_PLAN.md) | Historical design documents with a dated list of decisions since |
 
 ## Contributing
