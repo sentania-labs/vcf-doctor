@@ -7,8 +7,8 @@ chosen by a person, a plain fast hash is the right one: there is nothing to
 guess and nothing to stretch.
 
 A token belongs to a person (issuer and subject, as in a single sign-on
-session) and carries the role that person had when they made it. Everything here is refused
-unless single sign-on is still pointed at the provider the token's owner came
+session) and carries the role that person had when they made it. A token is
+refused unless single sign-on is still pointed at the provider its owner came
 from and the role is still one it accepts (app/auth.py checks that). A person
 who is refused at a later sign-in loses every token they had.
 """

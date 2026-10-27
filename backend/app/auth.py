@@ -5,9 +5,10 @@ settings table; sessions are HMAC-signed tokens in an HttpOnly cookie. A
 password session is a signed timestamp. A single sign-on session (app/oidc.py)
 is a signed record that also says who signed in: issuer, subject and display
 name. A script uses a personal API token instead (app/tokens.py), which acts as
-the person who made it. The signing secret is generated once and kept in the settings table, so
-it survives restarts and is the same in every worker. The operator password
-stays as break-glass whether or not single sign-on is configured.
+the person who made it. The signing secret is generated once and kept in the
+settings table, so it survives restarts and is the same in every worker. The
+operator password stays as break-glass whether or not single sign-on is
+configured.
 VCF_DOCTOR_AUTH=off disables all of it for deployments that front the app with
 ingress authentication.
 """
