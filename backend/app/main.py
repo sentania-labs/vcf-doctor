@@ -21,6 +21,7 @@ from app.api.health_score_router import router as health_score_router
 from app.api.oidc_router import router as oidc_router
 from app.api.proxies_router import router as proxies_router
 from app.api.router import router as api_router
+from app.api.service_accounts_router import router as service_accounts_router
 from app.api.tokens_router import router as tokens_router
 from app.config import settings
 
@@ -236,6 +237,7 @@ app.include_router(findings_related_router)
 app.include_router(proxies_router)
 app.include_router(oidc_router)
 app.include_router(tokens_router)
+app.include_router(service_accounts_router)
 
 try:
     from app.assistant.router import router as assistant_router

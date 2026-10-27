@@ -58,7 +58,9 @@ version of this file is in git history.
   from a groups claim and the operator password kept as break-glass (#87,
   piece 1). Personal API tokens for scripts, made by a signed-in person and
   revoked when they are refused at a later sign-in (#87, piece 2). Service
-  account tokens are the follow-up piece.
+  accounts: machine identities with a role and any number of tokens, so they
+  rotate without downtime, and disabling one stops all its tokens (#87,
+  piece 3).
 - Encryption key rotation in place with the previous key at startup, plus a
   one-click migration off the generated key file; no key is ever entered in
   the interface (#48). See
