@@ -87,9 +87,7 @@ NOT_CONFIGURED = "not_configured"
 class SignInError(Exception):
     """A sign-in that did not complete. `code` is one of the constants above."""
 
-    def __init__(
-        self, code: str, detail: str = "", *, issuer: str = "", subject: str = ""
-    ) -> None:
+    def __init__(self, code: str, detail: str = "", *, issuer: str = "", subject: str = "") -> None:
         super().__init__(detail or code)
         self.code = code
         self.detail = detail or code
