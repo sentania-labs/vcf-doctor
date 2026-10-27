@@ -4,8 +4,9 @@ Deliberately simple: one password, hashed with PBKDF2 and stored in the
 settings table; sessions are HMAC-signed tokens in an HttpOnly cookie. A
 password session is a signed timestamp. A single sign-on session (app/oidc.py)
 is a signed record that also says who signed in: issuer, subject and display
-name. A script uses a personal API token instead (app/tokens.py), which acts as
-the person who made it. The signing secret is generated once and kept in the
+name. A script uses an API token instead (app/tokens.py): a personal one acts as
+the person who made it, a service account's (app/service_accounts.py) as that
+machine identity. The signing secret is generated once and kept in the
 settings table, so it survives restarts and is the same in every worker. The
 operator password stays as break-glass whether or not single sign-on is
 configured.
@@ -135,7 +136,7 @@ def _unseal(token: str | None) -> bytes | None:
         return None
     try:
         raw = base64.urlsafe_b64decode(token.encode())
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         return None
     payload, sig = raw[:-_SIG_LEN], raw[-_SIG_LEN:]
     expected = hmac.new(_secret(), payload, hashlib.sha256).digest()
@@ -147,13 +148,16 @@ class Session:
     """Who a valid session cookie belongs to. A password session is the shared
     operator; a single sign-on session is one person."""
 
-    method: str  # "password", "oidc", or "token" (a personal API token)
+    # "password", "oidc", "token" (a personal API token) or "service" (a service
+    # account's)
+    method: str
     issued: int
     issuer: str = ""
     subject: str = ""
     name: str = ""
     role: str = ""
     token_name: str = ""
+    account: str = ""  # the service account's name, for "service"
 
     @property
     def sso(self) -> bool:
@@ -165,8 +169,15 @@ class Session:
         """Acting as a named person, in a browser or through an API token."""
         return self.method in ("oidc", "token")
 
+    @property
+    def machine(self) -> bool:
+        """Acting through an API token, whoever it belongs to."""
+        return self.method in ("token", "service")
+
     def describe(self) -> str:
         """For logs. Names are quoted, so a hostile one cannot forge a line."""
+        if self.method == "service":
+            return f"API token {self.token_name!r} of service account {self.account!r}"
         if not self.person:
             return "operator password"
         who = f"{self.name!r} (sub={self.subject}, iss={self.issuer})"
@@ -210,7 +221,7 @@ def read_token(token: str | None) -> Session | None:
             )
         else:
             session = Session(method="password", issued=int(payload))
-    except (ValueError, TypeError, KeyError, AttributeError):
+    except ValueError, TypeError, KeyError, AttributeError:
         return None
     if time.time() - session.issued >= SESSION_TTL:
         return None
@@ -247,12 +258,15 @@ def end_sessions(issuer: str, subject: str) -> None:
 
 
 def _still_trusted(session: Session) -> bool:
+    if session.method == "service":
+        # Belongs to no provider, so only the role is checked.
+        return session.role == oidc.ROLE_ADMIN
     return session.role == oidc.ROLE_ADMIN and oidc.accepts_issuer(session.issuer)
 
 
 def _bearer(request: Request) -> str | None:
     """The secret in an `Authorization: Bearer` header when it is in the format
-    of a personal API token, otherwise None. Any other bearer value belongs to
+    of an API token (`vcfd_pat_` or `vcfd_sat_`), otherwise None. Any other bearer value belongs to
     something else (an authenticating proxy, say) and is left alone."""
     scheme, _, value = request.headers.get("authorization", "").partition(" ")
     value = value.strip()
@@ -260,12 +274,22 @@ def _bearer(request: Request) -> str | None:
 
 
 def token_session(secret: str) -> Session | None:
-    """The session for a personal API token: the person who made it, with the
-    role they have now. Refused with the token's owner's provider gone, like a
-    browser session."""
+    """The session for an API token: the person who made it, with the role they
+    have now, refused with their provider gone like a browser session; or the
+    service account it belongs to, unless that is disabled."""
     record = tokens.authenticate(secret)
     if record is None:
         return None
+    if record["service_account_id"]:
+        session = Session(
+            method="service",
+            issued=int(time.time()),
+            name=record["account_name"],
+            role=record["account_role"],
+            token_name=record["name"],
+            account=record["account_name"],
+        )
+        return session if _still_trusted(session) else None
     session = Session(
         method="token",
         issued=int(time.time()),
@@ -303,9 +327,9 @@ def token_valid(token: str | None) -> bool:
 
 
 def session_for(request: Request) -> Session | None:
-    """The session behind this request, None without one: a personal API token
-    in an Authorization header, otherwise the session cookie. A request that
-    sends a `vcfd_pat_` token is judged by that token alone, so a dead one is
+    """The session behind this request, None without one: an API token in an
+    Authorization header, otherwise the session cookie. A request that sends a
+    `vcfd_pat_` or `vcfd_sat_` token is judged by that token alone, so a dead one is
     never rescued by a cookie; any other bearer value is ignored. With
     authentication off there are no sessions."""
     if not enabled():

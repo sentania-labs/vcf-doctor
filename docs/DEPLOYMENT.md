@@ -398,6 +398,38 @@ curl -H "Authorization: Bearer vcfd_pat_..." https://doctor.example.com/api/conn
   change made with one, and records creation, revocation and the revocation a
   refused sign-in causes. Secrets are never logged.
 
+## Service account tokens
+
+A script or CI job that should not depend on one person's account uses a
+service account: a machine identity with a role and its own tokens. There is
+nothing for a deployer to configure and single sign-on is not required;
+administrators make them on **Settings, Service accounts** (signed in through
+single sign-on or with the operator password).
+
+```sh
+# Make the account, issue it a token there, copy it, then:
+curl -H "Authorization: Bearer vcfd_sat_..." https://doctor.example.com/api/connections
+```
+
+- An account has a name, an optional description and a role (today only
+  `admin`, the same access a signed-in administrator has). Its tokens are
+  `vcfd_sat_...` and work exactly like personal ones: shown once, stored only
+  as a SHA-256, and they expire (30 days unless you choose another, with no
+  upper limit).
+- **Rotation without downtime:** an account can hold any number of live tokens.
+  Issue the new one, move the job over, then revoke the old one.
+- **Disabling** an account stops every token it has at once; enabling it brings
+  back those that were not revoked or expired. Revoking one token ends only
+  that token.
+- A service account belongs to no provider or person, so turning single sign-on
+  off, or removing someone from a group, does not touch its tokens. To cut a
+  job off, revoke its token or disable its account.
+- A token of either kind cannot create or revoke accounts or tokens; that
+  needs a browser session.
+- The log (logger `vcf_doctor.audit`) names the service account and token for
+  every change made with one, and records who created, disabled, enabled or
+  revoked what. Secrets are never logged.
+
 ## Rotating the encryption key
 
 `VCF_DOCTOR_SECRET_KEY` and `VCF_DOCTOR_SECRET_KEY_PREVIOUS` are ordinary

@@ -149,6 +149,14 @@ export interface ApiToken {
 }
 export interface ApiTokenList { tokens: ApiToken[]; max_days: number; default_days: number }
 export interface CreatedApiToken { token: string; info: ApiToken }
+// Service accounts: machine identities with their own tokens (the same ApiToken records).
+export interface ServiceAccount {
+  id: string; name: string; description: string; role: string
+  created_at: string; created_by: string; disabled_at: string | null; disabled_by: string | null
+  active_tokens: number
+}
+export interface ServiceAccountList { accounts: ServiceAccount[]; roles: string[]; default_days: number }
+export interface ServiceAccountTokens { tokens: ApiToken[]; default_days: number }
 export interface SettingsUpdate { retention_policy: RetentionPolicy; event_policy: EventPolicy; assistant: Partial<AssistantSettings> & { api_key?: string }; changes_min_significance?: Significance }
 export interface AssistantEvidenceCount { findings: number; changes: number; resources: number; events: number }
 export type AssistantStreamEvent =

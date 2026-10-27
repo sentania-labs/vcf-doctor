@@ -12,6 +12,7 @@ import EncryptionCard from '@/components/settings/EncryptionCard'
 import TrustedProxiesCard from '@/components/settings/TrustedProxiesCard'
 import OidcCard from '@/components/settings/OidcCard'
 import TokensCard from '@/components/settings/TokensCard'
+import ServiceAccountsCard from '@/components/settings/ServiceAccountsCard'
 import AboutCard from '@/components/settings/AboutCard'
 import DatabaseCard from '@/components/settings/DatabaseCard'
 
@@ -293,6 +294,7 @@ export default function SettingsPage() {
           <AccessCard />
           <OidcCard />
           {authStatus?.user ? <TokensCard /> : null}
+          {authStatus?.enabled ? <ServiceAccountsCard /> : null}
           <TrustedProxiesCard />
           <AboutCard />
           {err ? <p className="text-sm text-critical">{err}</p> : null}
