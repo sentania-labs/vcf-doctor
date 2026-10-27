@@ -35,8 +35,11 @@ who signed in (issuer and subject), and sign-ins, refusals and every change
 made through the API are logged with that identity. The operator password
 stays as break-glass. The client secret is read from a file and is never
 stored, shown or logged. Groups are re-checked at each sign-in, not while a
-session is live: a removed person keeps an existing session until it expires
-or the operator password is changed.
+session is live. A person who is refused at a sign-in (the provider vouches
+for them and they are in no admin group) has every session issued to them
+before that moment ended, as well as their API tokens. A removed person who
+never tries to sign in again keeps an existing session until it expires or the
+operator password is changed.
 
 The console is read-only against vCenter: it only ever reads inventory and
 events, and generated scripts are shown, never executed. Roles beyond admin,
@@ -47,7 +50,7 @@ for scripts (see [personal API tokens](DEPLOYMENT.md#personal-api-tokens)).
 A token is 256 random bits, shown once and stored only as a SHA-256, sent as
 `Authorization: Bearer`, expires (at most 365 days) and acts as its owner with
 the owner's current role. Only a single sign-on browser session can create or
-revoke tokens. A person refused at a later sign-in loses every token. A
+revoke tokens. A person refused at a later sign-in loses every token, and their old sessions can no longer make new ones. A
 request that carries a `vcfd_pat_` bearer token is judged by that token alone;
 any other `Authorization: Bearer` value is ignored and the session cookie
 decides, so a proxy that adds its own bearer header does not disturb browser

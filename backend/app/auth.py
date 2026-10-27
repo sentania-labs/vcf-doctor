@@ -218,7 +218,32 @@ def read_token(token: str | None) -> Session | None:
         # Single sign-on was turned off, or pointed at another provider, since
         # this person signed in: the session is not honoured any more.
         return None
+    if session.sso and session.issued <= session_cutoff(session.issuer, session.subject):
+        # They were refused at a sign-in after this session began.
+        return None
     return session
+
+
+def session_cutoff(issuer: str, subject: str) -> int:
+    """Sessions issued to this person at or before this time (Unix seconds) are
+    refused. 0 when nothing ever ended their sessions."""
+    row = db.fetchone(
+        "SELECT not_before FROM session_cutoffs WHERE issuer = %s AND subject = %s",
+        (issuer, subject),
+    )
+    return int(row["not_before"]) if row else 0
+
+
+def end_sessions(issuer: str, subject: str) -> None:
+    """End every browser session this person holds, and any they were issued
+    before now. A later sign-in (if they are let back in) starts a new one."""
+    with db.transaction() as c:
+        c.execute(
+            "INSERT INTO session_cutoffs(issuer, subject, not_before) VALUES(%s, %s, %s) "
+            "ON CONFLICT(issuer, subject) DO UPDATE SET "
+            "not_before = GREATEST(session_cutoffs.not_before, excluded.not_before)",
+            (issuer, subject, int(time.time())),
+        )
 
 
 def _still_trusted(session: Session) -> bool:

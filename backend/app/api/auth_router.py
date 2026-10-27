@@ -123,22 +123,23 @@ def _login_page(code: str) -> RedirectResponse:
     return response
 
 
-def _take_tokens_away(exc: oidc.SignInError) -> None:
+def _cut_off(exc: oidc.SignInError) -> None:
     """The provider vouched for this person and they are no longer in an admin
-    group: whatever API tokens they made stop working now."""
+    group: the sessions they already hold and the API tokens they made stop
+    working now. Each step is tried on its own so one failing does not spare
+    the other; a failure is logged and never becomes the sign-in's answer."""
+    who = f"sub={exc.subject}, iss={exc.issuer}"
+    try:
+        auth.end_sessions(exc.issuer, exc.subject)
+    except Exception:
+        log.exception("could not end the sessions of %s", who)
     try:
         count = tokens.revoke_all(exc.issuer, exc.subject, tokens.REASON_REFUSED)
     except Exception:
-        # Failing to revoke must not become a sign-in; the log says what to do.
-        log.exception("could not revoke the API tokens of sub=%s, iss=%s", exc.subject, exc.issuer)
+        log.exception("could not revoke the API tokens of %s", who)
         return
     if count:
-        auth.audit.warning(
-            "revoked %d API token(s) of sub=%s, iss=%s: refused at sign-in",
-            count,
-            exc.subject,
-            exc.issuer,
-        )
+        auth.audit.warning("revoked %d API token(s) of %s: refused at sign-in", count, who)
 
 
 @router.get("/oidc/login")
@@ -186,7 +187,7 @@ def oidc_callback(request: Request) -> Response:
     except oidc.SignInError as exc:
         auth.audit.warning("single sign-on refused (%s) from %s: %s", exc.code, ip, exc.detail)
         if exc.code == oidc.NOT_AUTHORIZED and exc.subject:
-            _take_tokens_away(exc)
+            _cut_off(exc)
         return _login_page(exc.code)
     except Exception:
         log.exception("single sign-on failed unexpectedly")

@@ -352,8 +352,9 @@ them in the ID token under the name set as the groups claim.
   change made through the API is written to the log with that identity
   (logger `vcf_doctor.audit`).
 - Groups are checked at every sign-in. Removing someone from a group stops
-  their next sign-in, but a session they already hold lasts until it expires
-  (7 days). To cut everyone off at once, change the operator password, which
+  their next sign-in, and that refusal also ends every session they already
+  hold (and their API tokens). A removed person who never tries to sign in
+  again keeps a session until it expires (7 days). To cut everyone off at once, change the operator password, which
   rotates the signing secret. Turning single sign-on off, or pointing it at
   another provider, ends the sessions it issued.
 - Signing out ends the local session and, when the provider advertises an

@@ -76,7 +76,7 @@ export default function OidcCard() {
             <ul className="text-xs text-faint space-y-1 list-disc pl-4">
               <li>Register this redirect URI at the provider: <span className="font-mono text-muted break-all">{s.data.effective.redirect_uri || s.data.callback_url}</span></li>
               <li>Client secret: {s.data.client_secret ? 'a secret file is mounted and will be used.' : 'no secret file found, so this is treated as a public client (PKCE only). To use a secret, mount it as a file and point VCF_DOCTOR_OIDC_CLIENT_SECRET_FILE at it; it is never entered or stored here.'}</li>
-              <li>A person's groups are checked at every sign-in. Removing someone from a group stops new sign-ins; a session they already have lasts until it expires or the operator password is changed.</li>
+              <li>A person's groups are checked at every sign-in. Removing someone from a group stops new sign-ins, and their next refused sign-in ends the sessions they already have. If they never try again, a session lasts until it expires or the operator password is changed.</li>
             </ul>
             {!s.data.configured && s.data.problems.length > 0 && (form.issuer || form.client_id || groups) ? (
               <p className="text-sm text-muted bg-surface-2 rounded-md px-3 py-2">Not on yet: {s.data.problems.join('; ')}.</p>

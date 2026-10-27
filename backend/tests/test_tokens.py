@@ -323,6 +323,59 @@ def test_a_person_refused_at_a_later_sign_in_loses_their_tokens(alice, idp):
     assert all("refused at a later sign-in" in r["revoked_reason"] for r in rows)
 
 
+def test_a_refused_person_cannot_mint_a_token_with_their_old_session(alice, idp):
+    """The cookie was issued while they were still an admin and has days left.
+    Refusing the next sign-in must end it, so it cannot make a fresh token."""
+    old_cookie = alice.cookies.get("vcfdoctor_session")
+    first = make(alice, "before")
+    alice.cookies.clear()
+    refused(alice, callback(alice, idp, groups=["everyone"]), "not_authorized")
+
+    alice.cookies.set("vcfdoctor_session", old_cookie)
+    assert alice.get("/api/connections").status_code == 401
+    assert alice.get("/api/tokens").status_code == 401
+    minted = alice.post("/api/tokens", json={"name": "after"})
+    assert minted.status_code == 401
+    with script() as s:
+        assert s.get("/api/connections", headers=bearer(first["token"])).status_code == 401
+    from app import db
+
+    assert db.fetchone("SELECT COUNT(*) AS n FROM api_tokens")["n"] == 1
+
+
+def test_refusing_one_person_leaves_another_persons_session_alone(alice, idp):
+    alices_cookie = alice.cookies.get("vcfdoctor_session")
+    alice.cookies.clear()
+    assert callback(alice, idp, user=BOB, groups=[ADMIN_GROUP]).status_code == 303
+    bobs_cookie = alice.cookies.get("vcfdoctor_session")
+    alice.cookies.clear()
+    refused(alice, callback(alice, idp, user=BOB, groups=[]), "not_authorized")
+    alice.cookies.set("vcfdoctor_session", bobs_cookie)
+    assert alice.get("/api/connections").status_code == 401
+    alice.cookies.set("vcfdoctor_session", alices_cookie)
+    assert alice.get("/api/connections").status_code == 200
+
+
+def test_a_person_let_back_in_gets_a_working_session(alice, idp, monkeypatch):
+    import time
+
+    alice.cookies.clear()
+    refused(alice, callback(alice, idp, groups=[]), "not_authorized")
+    real = time.time
+    monkeypatch.setattr(time, "time", lambda: real() + 5)
+    assert callback(alice, idp).status_code == 303
+    assert alice.get("/api/connections").status_code == 200
+    assert alice.post("/api/tokens", json={"name": "again"}).status_code == 201
+
+
+def test_other_failures_do_not_end_a_persons_sessions(alice, idp):
+    cookie = alice.cookies.get("vcfdoctor_session")
+    alice.cookies.clear()
+    refused(alice, callback(alice, idp, groups=[], patch={"nonce": "forged"}), "failed")
+    alice.cookies.set("vcfdoctor_session", cookie)
+    assert alice.get("/api/connections").status_code == 200
+
+
 def test_the_refusal_is_audited_with_the_count(alice, idp, caplog):
     make(alice)
     alice.cookies.clear()
