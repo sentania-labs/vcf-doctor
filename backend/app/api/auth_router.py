@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
-from app import auth, oidc, proxies
+from app import auth, oidc, proxies, tokens
 
 log = logging.getLogger("vcf_doctor.auth")
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -50,7 +50,7 @@ def status(request: Request) -> dict:
     # answers exactly what it always has.
     if auth.enabled() and oidc.configured():
         body["oidc"] = {"enabled": True}
-    if session is not None and session.sso:
+    if session is not None and session.person:
         body["user"] = {"name": session.name, "subject": session.subject, "issuer": session.issuer}
     return body
 
@@ -123,6 +123,24 @@ def _login_page(code: str) -> RedirectResponse:
     return response
 
 
+def _take_tokens_away(exc: oidc.SignInError) -> None:
+    """The provider vouched for this person and they are no longer in an admin
+    group: whatever API tokens they made stop working now."""
+    try:
+        count = tokens.revoke_all(exc.issuer, exc.subject, tokens.REASON_REFUSED)
+    except Exception:
+        # Failing to revoke must not become a sign-in; the log says what to do.
+        log.exception("could not revoke the API tokens of sub=%s, iss=%s", exc.subject, exc.issuer)
+        return
+    if count:
+        auth.audit.warning(
+            "revoked %d API token(s) of sub=%s, iss=%s: refused at sign-in",
+            count,
+            exc.subject,
+            exc.issuer,
+        )
+
+
 @router.get("/oidc/login")
 def oidc_login(request: Request) -> Response:
     """Starts a single sign-on: the browser is sent to the identity provider."""
@@ -167,10 +185,16 @@ def oidc_callback(request: Request) -> Response:
         identity = oidc.complete(cfg, flow, dict(request.query_params))
     except oidc.SignInError as exc:
         auth.audit.warning("single sign-on refused (%s) from %s: %s", exc.code, ip, exc.detail)
+        if exc.code == oidc.NOT_AUTHORIZED and exc.subject:
+            _take_tokens_away(exc)
         return _login_page(exc.code)
     except Exception:
         log.exception("single sign-on failed unexpectedly")
         return _login_page(oidc.FAILED)
+    try:
+        tokens.refresh_role(identity.issuer, identity.subject, identity.role, identity.name)
+    except Exception:
+        log.exception("could not refresh the role of %s's API tokens", identity.subject)
     response = RedirectResponse("/", status_code=303)
     response.delete_cookie(FLOW_COOKIE, path=FLOW_COOKIE_PATH)
     _set_cookie(response, request, identity)

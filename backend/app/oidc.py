@@ -87,10 +87,16 @@ NOT_CONFIGURED = "not_configured"
 class SignInError(Exception):
     """A sign-in that did not complete. `code` is one of the constants above."""
 
-    def __init__(self, code: str, detail: str = "") -> None:
+    def __init__(
+        self, code: str, detail: str = "", *, issuer: str = "", subject: str = ""
+    ) -> None:
         super().__init__(detail or code)
         self.code = code
         self.detail = detail or code
+        # Set when the provider vouched for a person who is not let in, so what
+        # they hold (API tokens) can be taken away.
+        self.issuer = issuer
+        self.subject = subject
 
 
 @dataclass(frozen=True)
@@ -445,7 +451,7 @@ def begin(cfg: Config, redirect_uri: str) -> tuple[str, dict[str, Any]]:
     return url, flow
 
 
-def _clean(text: Any, limit: int) -> str:
+def clean_text(text: Any, limit: int) -> str:
     """Printable, single-line, bounded: it goes into a cookie and into logs."""
     if not isinstance(text, str):
         return ""
@@ -549,16 +555,18 @@ def complete(cfg: Config, flow: Mapping[str, Any], query: Mapping[str, str]) -> 
         raise SignInError(FAILED, "ID token subject is not usable")
     issuer = str(claims["iss"])
     name = (
-        _clean(claims.get("name"), MAX_NAME)
-        or _clean(claims.get("preferred_username"), MAX_NAME)
-        or _clean(claims.get("email"), MAX_NAME)
-        or _clean(subject, MAX_NAME)
+        clean_text(claims.get("name"), MAX_NAME)
+        or clean_text(claims.get("preferred_username"), MAX_NAME)
+        or clean_text(claims.get("email"), MAX_NAME)
+        or clean_text(subject, MAX_NAME)
     )
     if not set(groups or ()) & set(cfg.admin_groups):
         raise SignInError(
             NOT_AUTHORIZED,
             f"{name!r} (sub={subject}, iss={issuer}) is in none of the admin groups"
             + ("" if groups is not None else f"; the provider sent no '{cfg.groups_claim}' claim"),
+            issuer=issuer,
+            subject=subject,
         )
     return Identity(issuer=issuer, subject=subject, name=name, role=ROLE_ADMIN)
 

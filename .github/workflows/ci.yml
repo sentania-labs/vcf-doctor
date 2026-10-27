@@ -266,6 +266,9 @@ jobs:
           # Unauthenticated API access is refused; traversal cannot reach the
           # encryption key file, which is all the volume still holds.
           test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8000/api/overview)" = 401
+          # A made-up API token is no way in either, and the token endpoints need a session.
+          test "$(curl -s -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer vcfd_pat_forged' localhost:8000/api/overview)" = 401
+          test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8000/api/tokens)" = 401
           curl -s --path-as-is localhost:8000/../data/vcf-doctor.key | grep -q '<title>VCF Doctor</title>'
           # The single sign-on routes are public, so neither may be a way in. With
           # no provider configured both send the visitor back to the login page,

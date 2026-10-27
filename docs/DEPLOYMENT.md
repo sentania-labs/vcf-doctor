@@ -364,6 +364,38 @@ them in the ID token under the name set as the groups claim.
   so break-glass exists from the first boot and nobody has to be first to the
   setup page.
 
+## Personal API tokens
+
+Scripts and CI cannot use a browser session, so a person who signed in through
+single sign-on can make API tokens that act as them. There is nothing for a
+deployer to configure: tokens need single sign-on to be set up, and have no
+settings of their own. A person finds them on **Settings, Personal API
+tokens**.
+
+```sh
+# Create one on that page (name, lifetime in days), copy it, then:
+curl -H "Authorization: Bearer vcfd_pat_..." https://doctor.example.com/api/connections
+```
+
+- A token acts as its owner with the role they have now: the same access a
+  signed-in administrator has. A token cannot create or revoke tokens, and the
+  operator password has none; both are managed from a single sign-on session.
+- Lifetime is 30 days unless the person picks another, at most 365. The secret
+  is shown once and only its SHA-256 is stored. A person may hold 25 active
+  tokens.
+- Revoking a token stops it at once. So does expiry, turning single sign-on
+  off, or pointing it at another provider.
+- A person who is refused at a later sign-in (removed from every admin group)
+  loses all their tokens at that moment. Until they try to sign in, the group
+  change at the provider does not reach this console, so a token outlives it;
+  to cut a person off sooner, have them revoke the token, or revoke it for
+  them with the database (`UPDATE api_tokens SET revoked_at = ...`).
+- Changing the operator password does not end tokens (it ends browser
+  sessions by rotating the signing secret).
+- The log (logger `vcf_doctor.audit`) names the person and the token for every
+  change made with one, and records creation, revocation and the revocation a
+  refused sign-in causes. Secrets are never logged.
+
 ## Rotating the encryption key
 
 `VCF_DOCTOR_SECRET_KEY` and `VCF_DOCTOR_SECRET_KEY_PREVIOUS` are ordinary

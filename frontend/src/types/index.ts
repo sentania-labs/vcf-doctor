@@ -141,6 +141,14 @@ export interface OidcSettings {
   callback_url: string
   client_secret: boolean; auth_enabled: boolean
 }
+// Personal API tokens. The secret is only ever in CreatedApiToken, returned once at creation.
+export interface ApiToken {
+  id: string; name: string; hint: string; role: string
+  created_at: string; expires_at: string; last_used_at: string | null
+  revoked_at: string | null; revoked_reason: string | null
+}
+export interface ApiTokenList { tokens: ApiToken[]; max_days: number; default_days: number; max_active: number }
+export interface CreatedApiToken { token: string; info: ApiToken }
 export interface SettingsUpdate { retention_policy: RetentionPolicy; event_policy: EventPolicy; assistant: Partial<AssistantSettings> & { api_key?: string }; changes_min_significance?: Significance }
 export interface AssistantEvidenceCount { findings: number; changes: number; resources: number; events: number }
 export type AssistantStreamEvent =

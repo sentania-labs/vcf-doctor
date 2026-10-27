@@ -4,7 +4,8 @@ Deliberately simple: one password, hashed with PBKDF2 and stored in the
 settings table; sessions are HMAC-signed tokens in an HttpOnly cookie. A
 password session is a signed timestamp. A single sign-on session (app/oidc.py)
 is a signed record that also says who signed in: issuer, subject and display
-name. The signing secret is generated once and kept in the settings table, so
+name. A script uses a personal API token instead (app/tokens.py), which acts as
+the person who made it. The signing secret is generated once and kept in the settings table, so
 it survives restarts and is the same in every worker. The operator password
 stays as break-glass whether or not single sign-on is configured.
 VCF_DOCTOR_AUTH=off disables all of it for deployments that front the app with
@@ -25,7 +26,7 @@ from dataclasses import dataclass
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from app import db, oidc
+from app import db, oidc, tokens
 from app.config import settings
 
 log = logging.getLogger("vcf_doctor.auth")
@@ -145,22 +146,30 @@ class Session:
     """Who a valid session cookie belongs to. A password session is the shared
     operator; a single sign-on session is one person."""
 
-    method: str  # "password" or "oidc"
+    method: str  # "password", "oidc", or "token" (a personal API token)
     issued: int
     issuer: str = ""
     subject: str = ""
     name: str = ""
     role: str = ""
+    token_name: str = ""
 
     @property
     def sso(self) -> bool:
+        """A browser session that came from single sign-on."""
         return self.method == "oidc"
 
+    @property
+    def person(self) -> bool:
+        """Acting as a named person, in a browser or through an API token."""
+        return self.method in ("oidc", "token")
+
     def describe(self) -> str:
-        """For logs. The name is quoted, so a hostile one cannot forge a line."""
-        if not self.sso:
+        """For logs. Names are quoted, so a hostile one cannot forge a line."""
+        if not self.person:
             return "operator password"
-        return f"{self.name!r} (sub={self.subject}, iss={self.issuer})"
+        who = f"{self.name!r} (sub={self.subject}, iss={self.issuer})"
+        return f"API token {self.token_name!r} of {who}" if self.method == "token" else who
 
 
 def issue_token(identity: oidc.Identity | None = None) -> str:
@@ -204,11 +213,41 @@ def read_token(token: str | None) -> Session | None:
         return None
     if time.time() - session.issued >= SESSION_TTL:
         return None
-    if session.sso and (session.role != oidc.ROLE_ADMIN or not oidc.accepts_issuer(session.issuer)):
+    if session.sso and not _still_trusted(session):
         # Single sign-on was turned off, or pointed at another provider, since
         # this person signed in: the session is not honoured any more.
         return None
     return session
+
+
+def _still_trusted(session: Session) -> bool:
+    return session.role == oidc.ROLE_ADMIN and oidc.accepts_issuer(session.issuer)
+
+
+def _bearer(request: Request) -> str | None:
+    """The secret in an `Authorization: Bearer` header, None when there is no
+    such header. A header that is present but empty comes back as ""."""
+    scheme, _, value = request.headers.get("authorization", "").partition(" ")
+    return value.strip() if scheme.lower() == "bearer" else None
+
+
+def token_session(secret: str) -> Session | None:
+    """The session for a personal API token: the person who made it, with the
+    role they have now. Refused with the token's owner's provider gone, like a
+    browser session."""
+    record = tokens.authenticate(secret)
+    if record is None:
+        return None
+    session = Session(
+        method="token",
+        issued=int(time.time()),
+        issuer=record["issuer"],
+        subject=record["subject"],
+        name=record["owner_name"],
+        role=record["role"],
+        token_name=record["name"],
+    )
+    return session if _still_trusted(session) else None
 
 
 def seal_flow(flow: dict) -> str:
@@ -236,10 +275,15 @@ def token_valid(token: str | None) -> bool:
 
 
 def session_for(request: Request) -> Session | None:
-    """The session behind this request's cookie, None without one. With
-    authentication off there are no sessions to read."""
+    """The session behind this request, None without one: a personal API token
+    in an Authorization header, otherwise the session cookie. A request that
+    sends a bearer token is judged by that token alone, so a dead one is never
+    rescued by a cookie. With authentication off there are no sessions."""
     if not enabled():
         return None
+    bearer = _bearer(request)
+    if bearer is not None:
+        return token_session(bearer)
     return read_token(request.cookies.get(COOKIE))
 
 

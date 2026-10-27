@@ -40,7 +40,15 @@ or the operator password is changed.
 
 The console is read-only against vCenter: it only ever reads inventory and
 events, and generated scripts are shown, never executed. Roles beyond admin,
-and personal and service-account API tokens, are not built yet (#87).
+and service-account API tokens, are not built yet (#87).
+
+A person who signed in through single sign-on can make personal API tokens
+for scripts (see [personal API tokens](DEPLOYMENT.md#personal-api-tokens)).
+A token is 256 random bits, shown once and stored only as a SHA-256, sent as
+`Authorization: Bearer`, expires (at most 365 days) and acts as its owner with
+the owner's current role. Only a single sign-on browser session can create or
+revoke tokens. A person refused at a later sign-in loses every token. A
+request that carries a bearer header is judged by that token alone.
 
 `VCF_DOCTOR_AUTH=off` removes the login page. Use it only behind ingress
 authentication.
