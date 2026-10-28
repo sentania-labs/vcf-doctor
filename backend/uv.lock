@@ -1211,7 +1211,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "anthropic", specifier = ">=1.2,<2" },
+    { name = "anthropic", specifier = ">=1.2,<3" },
     { name = "apscheduler", specifier = ">=3.10,<4" },
     { name = "authlib", specifier = ">=1.6" },
     { name = "cryptography", specifier = ">=46" },
