@@ -249,10 +249,7 @@ def test_settings_the_console_seeded_do_not_block_an_import(tmp_path):
 
 
 def test_a_column_the_old_volume_never_had_takes_the_target_default(tmp_path):
-    """Columns were added to the SQLite schema over time, so an older volume is
-    missing some of them, and four of the targets are NOT NULL. A column the
-    source never had is left out of the INSERT so the target's default applies,
-    rather than failing partway through a batched import."""
+    """Older event capture state rows take the target's default flag."""
     path = tmp_path / "vcf-doctor.db"
     raw = sqlite3.connect(path)
     raw.executescript(
@@ -260,7 +257,8 @@ def test_a_column_the_old_volume_never_had_takes_the_target_default(tmp_path):
         CREATE TABLE connections (
             id TEXT PRIMARY KEY, name TEXT NOT NULL, host TEXT NOT NULL,
             username TEXT NOT NULL, password TEXT NOT NULL,
-            verify_tls INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL
+            verify_tls INTEGER NOT NULL DEFAULT 0, kind TEXT NOT NULL DEFAULT 'vcenter',
+            created_at TEXT NOT NULL
         );
         CREATE TABLE event_capture_state (
             connection_id TEXT PRIMARY KEY, last_complete_end TEXT
@@ -268,7 +266,8 @@ def test_a_column_the_old_volume_never_had_takes_the_target_default(tmp_path):
         """
     )
     raw.execute(
-        "INSERT INTO connections VALUES('legacy1','Lab WLD','vc01','svc','encrypted',1,?)",
+        "INSERT INTO connections VALUES('legacy1','Lab WLD','vc01','svc','encrypted',1,"
+        "'vcenter',?)",
         (NOW.isoformat(),),
     )
     raw.execute("INSERT INTO event_capture_state VALUES('legacy1', ?)", (NOW.isoformat(),))
@@ -282,6 +281,20 @@ def test_a_column_the_old_volume_never_had_takes_the_target_default(tmp_path):
     status = events_store.capture_status("legacy1")
     assert status.task_history_unavailable is False
     assert status.last_complete_end == NOW
+
+
+@pytest.mark.parametrize("column", ["resource_count", "resources"])
+def test_missing_required_snapshot_column_fails_and_rolls_back(tmp_path, column):
+    path = tmp_path / "vcf-doctor.db"
+    _legacy_db(path)
+    with sqlite3.connect(path) as source:
+        source.execute(f"ALTER TABLE snapshots DROP COLUMN {column}")
+
+    with pytest.raises(ValueError, match="snapshots.*missing required columns"):
+        import_sqlite.run(path)
+
+    assert all(count == 0 for count in import_sqlite.target_row_counts().values())
+    assert db.get_setting("retention_policy") is None
 
 
 def test_missing_file_is_named_not_a_traceback(tmp_path):

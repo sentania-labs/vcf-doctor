@@ -217,6 +217,10 @@ snapshot still held as JSON text by a pre-gzip build is compressed on the way.
 The old deployment's settings win, so its operator password, retention policy
 and health score weights survive; the encryption key must come across too, or
 the vCenter passwords need re-entering exactly as they would after any key loss.
+Only the two columns that differ between shipped SQLite schemas may be absent
+(`task_history_unavailable`, and `resources_gz` when the snapshot still has the
+older `resources` text column); a source table missing any other column stops
+the import with an error rather than importing a default in its place.
 
 It refuses a target that already holds history, so a second accidental run
 cannot double one; import into an empty, migrated database instead. Nothing

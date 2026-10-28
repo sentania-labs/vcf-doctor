@@ -170,18 +170,18 @@ def target_row_counts() -> dict[str, int]:
 
 
 def _target_columns(table: str, present: set[str]) -> tuple[str, ...]:
-    """The target columns this source table can fill. A column the source never
-    had is left out of the INSERT so the target's own default applies; a volume
-    written before `kind`, `resource_count`, `enabled` or
-    `task_history_unavailable` existed is exactly what this importer is for, and
-    those four targets are NOT NULL."""
-
-    def available(column: str) -> bool:
-        if table == "snapshots" and column == "resources_gz":
-            return bool(present & {"resources_gz", "resources"})
-        return column in present
-
-    return tuple(column for column in TARGET_COLUMNS[table] if available(column))
+    """Allow only columns absent from historical SQLite schema variants."""
+    columns = TARGET_COLUMNS[table]
+    if table == "event_capture_state" and "task_history_unavailable" not in present:
+        columns = tuple(column for column in columns if column != "task_history_unavailable")
+    missing = set(columns) - present
+    if table == "snapshots" and "resources" in present:
+        missing.discard("resources_gz")
+    if missing:
+        raise ValueError(
+            f"SQLite table {table} is missing required columns: {', '.join(sorted(missing))}"
+        )
+    return columns
 
 
 def _value(table: str, column: str, row: sqlite3.Row):
