@@ -29,5 +29,8 @@
     "oxlint": "^1.81.0",
     "typescript": "~7.0.2",
     "vite": "^8.2.2"
+  },
+  "overrides": {
+    "undici": "7.30.1"
   }
 }
