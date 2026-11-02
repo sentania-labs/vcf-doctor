@@ -5,7 +5,7 @@ import { getSettings, updateSettings, getAssistantStatus, changePassword, getAss
 import { ApiError } from '@/api/client'
 import { useAuth } from '@/state/AuthState'
 import { useAsync } from '@/hooks/useAsync'
-import { withRefreshedKeyState } from './settingsForm'
+import { refreshedFormState } from './settingsForm'
 import { Badge, Button, Card, CardHeader, ErrorState, Field, Input, PageHeader, Select, Skeleton, Toggle } from '@/components/ui'
 import HealthScoreCard from '@/components/settings/HealthScoreCard'
 import EncryptionCard from '@/components/settings/EncryptionCard'
@@ -227,7 +227,8 @@ export default function SettingsPage() {
     status.reload()
     try {
       const fresh = await getSettings()
-      setAssistant(a => withRefreshedKeyState(a, fresh.assistant))
+      const next = refreshedFormState({ retention, eventPolicy, minSig, assistant }, fresh)
+      setRetention(next.retention); setEventPolicy(next.eventPolicy); setMinSig(next.minSig); setAssistant(next.assistant)
     } catch { /* the encryption card reports its own status */ }
   }
 
