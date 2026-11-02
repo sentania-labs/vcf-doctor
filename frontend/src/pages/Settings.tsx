@@ -5,7 +5,7 @@ import { getSettings, updateSettings, getAssistantStatus, changePassword, getAss
 import { ApiError } from '@/api/client'
 import { useAuth } from '@/state/AuthState'
 import { useAsync } from '@/hooks/useAsync'
-import { refreshedFormState } from './settingsForm'
+import { refreshedEventPolicy, refreshedMinSig, refreshedRetention, withRefreshedKeyState } from './settingsForm'
 import { Badge, Button, Card, CardHeader, ErrorState, Field, Input, PageHeader, Select, Skeleton, Toggle } from '@/components/ui'
 import HealthScoreCard from '@/components/settings/HealthScoreCard'
 import EncryptionCard from '@/components/settings/EncryptionCard'
@@ -227,8 +227,10 @@ export default function SettingsPage() {
     status.reload()
     try {
       const fresh = await getSettings()
-      const next = refreshedFormState({ retention, eventPolicy, minSig, assistant }, fresh)
-      setRetention(next.retention); setEventPolicy(next.eventPolicy); setMinSig(next.minSig); setAssistant(next.assistant)
+      // Functional updates: each one sees the state as it is when it runs, so an
+      // edit typed while the fetch was in flight is the value carried along.
+      setRetention(prev => refreshedRetention(prev)); setEventPolicy(prev => refreshedEventPolicy(prev))
+      setMinSig(prev => refreshedMinSig(prev)); setAssistant(a => withRefreshedKeyState(a, fresh.assistant))
     } catch { /* the encryption card reports its own status */ }
   }
 

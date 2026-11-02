@@ -1,7 +1,14 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { AssistantSettings, Settings } from '../types/index.ts'
-import { refreshedFormState, withRefreshedKeyState, type SettingsFormState } from './settingsForm.ts'
+import {
+  refreshedEventPolicy,
+  refreshedFormState,
+  refreshedMinSig,
+  refreshedRetention,
+  withRefreshedKeyState,
+  type SettingsFormState,
+} from './settingsForm.ts'
 
 const saved: AssistantSettings = { enabled: true, provider: 'anthropic', model: 'claude-opus-5', api_key_set: true, api_key_unreadable: true }
 
@@ -64,4 +71,26 @@ test('a rotation refresh leaves the other form state untouched, even where the s
   assert.notEqual(next.retention, freshSettings.retention_policy)
   assert.notEqual(next.eventPolicy, freshSettings.event_policy)
   assert.notEqual(next.minSig, freshSettings.changes_min_significance)
+})
+
+// The page applies the refresh inside functional setState calls, so each helper
+// sees the value the field holds when it runs. These mirror that: the last write
+// is the one the helper is handed.
+test('each field keeps the value the functional update hands it, not an earlier snapshot', () => {
+  // Operator edits after the rotation was requested; that later value is what
+  // the updater receives, and it is what the refresh returns.
+  const laterRetention = { ...editedForm.retention, recent_days: 4 }
+  const laterEventPolicy = { ...editedForm.eventPolicy, row_cap: 200000 }
+  assert.equal(refreshedRetention(laterRetention), laterRetention)
+  assert.equal(refreshedEventPolicy(laterEventPolicy), laterEventPolicy)
+  assert.equal(refreshedMinSig('high'), 'high')
+  // The snapshot taken when the refresh started is not what survives.
+  assert.notEqual(refreshedRetention(laterRetention), editedForm.retention)
+  assert.notEqual(refreshedMinSig('high'), editedForm.minSig)
+  // The whole-state helper composes the same per-field decisions.
+  const composed = refreshedFormState({ ...editedForm, retention: laterRetention, eventPolicy: laterEventPolicy, minSig: 'high' }, freshSettings)
+  assert.equal(composed.retention, laterRetention)
+  assert.equal(composed.eventPolicy, laterEventPolicy)
+  assert.equal(composed.minSig, 'high')
+  assert.equal(composed.assistant.api_key_unreadable, false)
 })
