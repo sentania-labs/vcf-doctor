@@ -348,8 +348,8 @@ def database_down_status(reason: str) -> dict:
     (unreachable, or reachable but not migrated): whether sign-in is on, and
     that the database is the reason it cannot say more. No session can be
     verified without the database, so nobody is reported as signed in, and
-    `configured` is left out rather than guessed. `reason` says which of
-    unreachable, unmigrated, credentials or database it is."""
+    `configured` is left out rather than guessed. `reason` says whether the
+    server is unreachable or reachable but not migrated."""
     on = enabled()
     return {"enabled": on, "authenticated": not on, "database": "unavailable", "reason": reason}
 

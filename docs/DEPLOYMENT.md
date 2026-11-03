@@ -579,11 +579,9 @@ a deployment artifact.
   fail while it is down, sign-in included. `GET /api/auth/status` still answers
   (it reports `database: "unavailable"`), and the console then opens on
   Settings, where the database panel reports the outage, instead of the login
-  page. A database that is up but not migrated, one that refuses the console's
-  credentials and one that has no database of the name it asks for get the same
-  answer, with a `reason` (`unmigrated`, `credentials`, `database`; `unreachable`
-  otherwise) that the panel turns into the cause and the next step. A pool that
-  is only busy is not an outage.
+  page. A database that is up but not migrated gets the same answer, with a
+  `reason` (`unmigrated`, otherwise `unreachable`) that the panel turns into the
+  cause and the next step. A pool that is only busy is not an outage.
   A request that carries a session or API token meanwhile gets `503` with the
   same body, not `401`, because the credential cannot be checked, not because
   it is wrong.

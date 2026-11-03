@@ -8,7 +8,7 @@ import { ApiError } from './client'
 export interface AuthStatus {
   enabled: boolean; configured?: boolean; authenticated: boolean
   database?: 'unavailable'
-  reason?: 'unreachable' | 'unmigrated' | 'credentials' | 'database'
+  reason?: 'unreachable' | 'unmigrated'
   oidc?: { enabled: boolean }
   user?: { name: string; subject: string; issuer: string }
 }
