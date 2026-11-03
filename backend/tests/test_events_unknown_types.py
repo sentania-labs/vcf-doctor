@@ -419,6 +419,56 @@ def test_drain_drops_unknown_event_from_captured_multi_event_page(caplog):
     assert any("dropped 1 event(s) of unknown type(s): " + name in m for m in warnings)
 
 
+def test_drain_drops_unknown_sibling_from_prefixed_page():
+    """When a page uses namespace-prefixed xsi:type values (e.g. vim:VmPoweredOnEvent),
+    filtering an unknown sibling preserves the namespace declaration so pyVmomi resolves
+    the surviving event type without error."""
+    unknown = f"VcfProbePrefixedSiblingEvent{uuid4().hex}"
+    page = (
+        b'<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" '
+        b'xmlns:vim="urn:vim25" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">\n'
+        b"<soapenv:Body>\n"
+        b"<ReadNextEventsResponse>\n"
+        b'<returnval xsi:type="vim:VmPoweredOnEvent">\n'
+        b"<key>301</key><chainId>301</chainId><createdTime>2026-09-09T04:50:00Z</createdTime>\n"
+        b"<userName>admin</userName><fullFormattedMessage>Probe 301</fullFormattedMessage>\n"
+        b"</returnval>\n"
+        b'<returnval xsi:type="vim:' + unknown.encode() + b'">\n'
+        b"<key>302</key><chainId>302</chainId><createdTime>2026-09-09T04:50:00Z</createdTime>\n"
+        b"</returnval>\n"
+        b'<returnval xsi:type="vim:VmPoweredOffEvent">\n'
+        b"<key>303</key><chainId>303</chainId><createdTime>2026-09-09T04:50:00Z</createdTime>\n"
+        b"<userName>admin</userName><fullFormattedMessage>Probe 303</fullFormattedMessage>\n"
+        b"</returnval>\n"
+        b"</ReadNextEventsResponse>\n"
+        b"</soapenv:Body>\n"
+        b"</soapenv:Envelope>"
+    )
+
+    class Collector:
+        def __init__(self):
+            self.served = False
+
+        def RewindCollector(self):
+            self.served = False
+
+        def ReadNextEvents(self, size):
+            if self.served:
+                return []
+            self.served = True
+            return _read_events(page)
+
+        def DestroyCollector(self):
+            pass
+
+    collector = Collector()
+    batch = _drain(collector, "ReadNextEvents")
+    assert batch.complete is True
+    assert len(batch.items) == 2
+    assert [item.key for item in batch.items] == [301, 303]
+    assert unknown not in placeholder_types()
+
+
 def test_prescan_and_filter_direct():
     """Direct verification of prescan_and_filter edge cases."""
     from app.collectors.vsphere.events import prescan_and_filter

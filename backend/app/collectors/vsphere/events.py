@@ -28,6 +28,7 @@ Mapping rules
 from __future__ import annotations
 
 import contextvars
+import io
 import logging
 import re
 import threading
@@ -287,6 +288,7 @@ def is_known_type(name: str) -> bool:
         return False
 
 
+EVENT_NS = "urn:vim25"
 XSI_TYPE = "{http://www.w3.org/2001/XMLSchema-instance}type"
 
 
@@ -315,6 +317,18 @@ def prescan_and_filter(xml_bytes: bytes) -> tuple[bytes, list[str]]:
     if b"xsi:type" not in xml_bytes and b":type" not in xml_bytes:
         return xml_bytes, []
 
+    prefix_to_uri: dict[str, str] = {}
+    try:
+        for _, (prefix, uri) in ET.iterparse(io.BytesIO(xml_bytes), events=["start-ns"]):
+            if prefix:
+                prefix_to_uri[prefix] = uri
+                try:
+                    ET.register_namespace(prefix, uri)
+                except ValueError:
+                    pass
+    except Exception:
+        pass
+
     try:
         root = ET.fromstring(xml_bytes)
     except Exception:
@@ -339,6 +353,24 @@ def prescan_and_filter(xml_bytes: bytes) -> tuple[bytes, list[str]]:
                 modified = True
 
     if modified:
+        # Preserve namespace bindings for QName-valued attributes such as xsi:type
+        for elem in root.iter():
+            for k, v in list(elem.attrib.items()):
+                if (
+                    (k == XSI_TYPE or k == "xsi:type" or k.endswith("}type"))
+                    and isinstance(v, str)
+                    and ":" in v
+                ):
+                    pfx, local = v.split(":", 1)
+                    uri = prefix_to_uri.get(pfx)
+                    if not uri and pfx in ("vim", "vim25"):
+                        uri = EVENT_NS
+                        try:
+                            ET.register_namespace(pfx, uri)
+                        except ValueError:
+                            pass
+                    if uri:
+                        elem.attrib[k] = ET.QName(uri, local)
         return ET.tostring(root, encoding="utf-8"), dropped
     return xml_bytes, dropped
 
