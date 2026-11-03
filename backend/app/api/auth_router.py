@@ -50,10 +50,12 @@ def status(request: Request) -> dict:
         db.probe_wait(lambda timeout: db.fetchone("SELECT 1 AS ok", timeout=timeout))
         return _status_body(request)
     except Exception as exc:  # noqa: BLE001  only an unusable database is an answer here
-        unmigrated = isinstance(exc, psycopg.errors.UndefinedTable)
-        if not (unmigrated or db.is_unreachable(exc)):
+        if isinstance(exc, psycopg.errors.UndefinedTable):
+            return auth.database_down_status("unmigrated")
+        reason = db.outage_reason(exc)
+        if reason is None:
             raise
-        return auth.database_down_status()
+        return auth.database_down_status(reason)
 
 
 def _status_body(request: Request) -> dict:
@@ -122,7 +124,7 @@ def logout(request: Request, response: Response) -> dict:
     try:
         session = auth.session_for(request)
     except Exception as exc:  # noqa: BLE001  signing out must work with the database gone
-        if not db.is_unreachable(exc):
+        if db.outage_reason(exc) is None:
             raise
         session = None
     body: dict = {"ok": True}

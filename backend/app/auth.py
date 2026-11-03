@@ -343,14 +343,15 @@ def session_for(request: Request) -> Session | None:
     return read_token(request.cookies.get(COOKIE))
 
 
-def database_down_status() -> dict:
+def database_down_status(reason: str) -> dict:
     """What the console can honestly say when it cannot read its own settings
     (unreachable, or reachable but not migrated): whether sign-in is on, and
     that the database is the reason it cannot say more. No session can be
     verified without the database, so nobody is reported as signed in, and
-    `configured` is left out rather than guessed."""
+    `configured` is left out rather than guessed. `reason` says which of
+    unreachable, unmigrated, credentials or database it is."""
     on = enabled()
-    return {"enabled": on, "authenticated": not on, "database": "unavailable"}
+    return {"enabled": on, "authenticated": not on, "database": "unavailable", "reason": reason}
 
 
 # Paths under /api that never require a session.

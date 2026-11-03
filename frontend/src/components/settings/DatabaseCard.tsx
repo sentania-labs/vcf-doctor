@@ -17,7 +17,7 @@ export default function DatabaseCard() {
   const { databaseHealthy } = useAppState()
   const { status } = useAuth()
   const down = databaseOutage(status, databaseHealthy)
-  const health = databaseHealthPresentation(down ? false : databaseHealthy)
+  const health = databaseHealthPresentation(down ? false : databaseHealthy, down ? status?.reason : undefined)
   if (!health) return null
   const badge = <Badge tone={health.tone} dot>{health.label}</Badge>
 

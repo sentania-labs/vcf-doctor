@@ -169,23 +169,38 @@ def fetchall(sql: str, args: tuple = (), timeout: float | None = None) -> list[d
 PROBE_TIMEOUT = 1.0
 
 
-def reachable() -> bool:
-    """Whether a fresh connection, outside the pool, can be made within about
-    a second. A server that answers but refuses (too many connections, say) is
-    reachable: it is busy, not gone."""
+# A server that answers but turns the console away for good: the credentials
+# are wrong, or the database it asks for does not exist.
+_REFUSED = {"28P01": "credentials", "28000": "credentials", "3D000": "database"}
+
+
+def _probe() -> str | None:
+    """None when a fresh connection, outside the pool, can be made within about
+    a second; otherwise why not: "unreachable", "credentials" or "database". A
+    server that answers but is merely full (too many connections) is reachable."""
     try:
         with psycopg.connect(make_conninfo(conninfo(), connect_timeout=1), **CONNECT_KWARGS):
-            return True
+            return None
     except psycopg.Error as exc:
-        return not is_connection_unavailable(exc)
+        if exc.sqlstate in _REFUSED:
+            return _REFUSED[exc.sqlstate]
+        return "unreachable" if is_connection_unavailable(exc) else None
 
 
-def is_unreachable(exc: BaseException) -> bool:
-    """`is_connection_unavailable`, except that a pool timeout only counts when
-    the server cannot be reached either: a busy pool is not an outage."""
+def reachable() -> bool:
+    return _probe() is None
+
+
+def outage_reason(exc: BaseException) -> str | None:
+    """Why the database cannot be used, or None when `exc` is not an outage:
+    "unreachable", "credentials" or "database". A pool timeout only counts when
+    a direct connection fails too: a busy pool is not an outage. Blocks for up
+    to a second on a pool timeout, so not for the event loop."""
     if isinstance(exc, PoolTimeout):
-        return not reachable()
-    return is_connection_unavailable(exc)
+        return _probe()
+    if isinstance(exc, psycopg.OperationalError) and exc.sqlstate in _REFUSED:
+        return _REFUSED[exc.sqlstate]
+    return "unreachable" if is_connection_unavailable(exc) else None
 
 
 def probe_wait[T](call: Callable[[float | None], T]) -> T:

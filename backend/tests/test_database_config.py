@@ -340,6 +340,7 @@ def test_auth_status_answers_while_the_database_is_down(monkeypatch):
                 "enabled": enabled == "on",
                 "authenticated": authenticated,
                 "database": "unavailable",
+                "reason": "unreachable",
             }
         # Nothing that needs the database is pretended to work.
         monkeypatch.setattr(settings, "auth", "on")
@@ -375,6 +376,7 @@ def test_a_signed_in_request_is_refused_quickly_while_the_database_is_down(monke
                 "enabled": True,
                 "authenticated": False,
                 "database": "unavailable",
+                "reason": "unreachable",
             }, path
         started = time.monotonic()
         scripted = client.get(
@@ -388,6 +390,38 @@ def test_a_signed_in_request_is_refused_quickly_while_the_database_is_down(monke
         assert time.monotonic() - started < 3.0
         assert out.status_code == 200
         assert auth.COOKIE in out.headers["set-cookie"] and "Max-Age=0" in out.headers["set-cookie"]
+    db.close()
+
+
+def test_a_database_that_turns_the_console_away_is_an_outage_with_its_own_reason(monkeypatch):
+    """The server is up and answering, but the database the console asks for is
+    not there: nothing will ever be served, so it is reported at once, with the
+    cause, instead of being waited on as a busy pool."""
+    from fastapi.testclient import TestClient
+    from psycopg.conninfo import make_conninfo
+
+    from app import auth
+    from app.config import settings
+    from app.main import app
+
+    db.reset_for_tests()
+    monkeypatch.setattr(settings, "auth", "on")
+    with TestClient(app) as client:
+        client.cookies.set(auth.COOKIE, auth.issue_token())
+        wrong = make_conninfo(config.database_url_without_password(), dbname="no_such_database")
+        monkeypatch.setattr(cfg, "database_url", wrong)
+        monkeypatch.setattr(cfg, "db_pool_timeout", 10.0)
+        monkeypatch.setattr(db, "PROBE_TIMEOUT", 0.5)
+        db.close()
+        started = time.monotonic()
+        status = client.get("/api/auth/status")
+        gated = client.get("/api/settings")
+        assert time.monotonic() - started < 5.0
+        assert status.status_code == 200
+        assert status.json()["database"] == "unavailable"
+        assert status.json()["reason"] == "database"
+        assert gated.status_code == 503
+        assert gated.json()["reason"] == "database"
     db.close()
 
 
@@ -455,6 +489,7 @@ def test_auth_status_answers_while_the_database_is_not_migrated(monkeypatch):
             assert reply.status_code == 200
             body = reply.json()
             assert body["database"] == "unavailable" and body["authenticated"] is False
+            assert body["reason"] == "unmigrated"
             assert body["enabled"] is True and "configured" not in body
         finally:
             with db.transaction() as c:
