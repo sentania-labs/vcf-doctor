@@ -15,8 +15,21 @@ import os
 from pathlib import Path
 
 from psycopg.conninfo import conninfo_to_dict
-from pydantic import Field
+from pydantic import (
+    Field,
+    ValidationError,
+    ValidationInfo,
+    ValidatorFunctionWrapHandler,
+    field_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from app.models.event import (
+    EVENT_RETENTION_HOURS_MAX,
+    EVENT_RETENTION_HOURS_MIN,
+    EVENT_ROW_CAP_MAX,
+    EVENT_ROW_CAP_MIN,
+)
 
 # Where compose mounts its secret and where the Kubernetes manifest mounts
 # its Secret volume, so one default covers both shapes.
@@ -68,8 +81,10 @@ class Settings(BaseSettings):
     retention_timezone: str = Field(default_factory=_retention_timezone_default)
     # Event history is intentionally independent from snapshot history. The
     # effective values live in the settings table and are editable in the GUI.
-    event_retention_hours: int = 48
-    event_row_cap: int = 250_000
+    event_retention_hours: int = Field(
+        default=48, ge=EVENT_RETENTION_HOURS_MIN, le=EVENT_RETENTION_HOURS_MAX
+    )
+    event_row_cap: int = Field(default=250_000, ge=EVENT_ROW_CAP_MIN, le=EVENT_ROW_CAP_MAX)
     # Scheduler floor in minutes.
     min_interval_minutes: int = 5
     # "on" requires the shared operator password; "off" for deployments that
@@ -93,6 +108,25 @@ class Settings(BaseSettings):
     # Comma-separated group names that get the admin role. No default: which
     # groups may sign in is the deployer's decision.
     oidc_admin_groups: str = ""
+
+    @field_validator("event_retention_hours", "event_row_cap", mode="wrap")
+    @classmethod
+    def validate_event_default(
+        cls, value: object, handler: ValidatorFunctionWrapHandler, info: ValidationInfo
+    ) -> int:
+        """Refuse invalid deployment defaults once, when the environment is read."""
+        try:
+            return handler(value)
+        except ValidationError as exc:
+            low, high = (
+                (EVENT_RETENTION_HOURS_MIN, EVENT_RETENTION_HOURS_MAX)
+                if info.field_name == "event_retention_hours"
+                else (EVENT_ROW_CAP_MIN, EVENT_ROW_CAP_MAX)
+            )
+            variable = f"VCF_DOCTOR_{info.field_name.upper()}"
+            raise ValueError(
+                f"{variable}={value!r} must be an integer in the range {low}..{high} (inclusive)"
+            ) from exc
 
 
 settings = Settings()
