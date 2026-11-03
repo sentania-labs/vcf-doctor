@@ -10,7 +10,9 @@ export function topBarStatus(
   backend: BackendStatus,
   scanStatuses: ScanStatus[],
   allSelected: boolean,
+  databaseDown = false,
 ): TopBarStatus {
+  if (databaseDown) return { dot: 'error', label: 'Database unreachable' }
   if (backend === 'down') return { dot: 'error', label: 'Console unavailable' }
   if (backend === 'checking') return { dot: 'running', label: 'Checking console' }
   if (scanStatuses.includes('running')) return { dot: 'running', label: 'Scanning' }
@@ -26,6 +28,6 @@ export function topBarStatus(
   return { dot: 'none', label: 'Not scanned yet' }
 }
 
-export function canStartScan(backend: BackendStatus, connectionCount: number): boolean {
-  return backend !== 'down' && connectionCount > 0
+export function canStartScan(backend: BackendStatus, connectionCount: number, databaseDown = false): boolean {
+  return backend !== 'down' && !databaseDown && connectionCount > 0
 }

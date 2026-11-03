@@ -5,6 +5,7 @@ import { TopBar } from './TopBar'
 import { AssistantDrawer } from '@/components/assistant/AssistantDrawer'
 import { useAppState } from '@/state/AppState'
 import { databaseUnavailable, useAuth } from '@/state/AuthState'
+import { databaseOutage } from '@/state/databaseOutage'
 import { cn } from '@/lib/cn'
 import { USE_MOCKS } from '@/api'
 
@@ -62,7 +63,7 @@ export function Shell() {
   const { status } = useAuth()
   // With the database out, only Settings (where its status lives) can do anything.
   const outage = databaseUnavailable(status)
-  const databaseDown = outage || databaseHealthy === false
+  const databaseDown = databaseOutage(status, databaseHealthy)
   return (
     <div className="h-full flex bg-bg text-fg">
       <aside className="w-[232px] shrink-0 border-r border-border bg-surface flex flex-col">
@@ -98,7 +99,7 @@ export function Shell() {
               <span className="font-medium">This console cannot serve.</span>
               <span className="text-muted">Its backend is unreachable. Pages show the last data they loaded. Retrying every 5 seconds.</span>
             </>)}
-            {backendError ? <span className="ml-auto font-mono text-xs text-muted">{backendError}</span> : null}
+            {backendError && !databaseDown ? <span className="ml-auto font-mono text-xs text-muted">{backendError}</span> : null}
           </div>
         ) : null}
         <main className="flex-1 min-h-0 overflow-y-auto">

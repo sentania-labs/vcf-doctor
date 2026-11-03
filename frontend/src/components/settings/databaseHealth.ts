@@ -18,6 +18,6 @@ export function databaseHealthPresentation(healthy: boolean | null): DatabaseHea
   return {
     label: 'Not healthy',
     tone: 'critical',
-    message: 'The console cannot use its database. Check that PostgreSQL is running and reachable from the console, and that its migrations have been applied (python3 -m app.migrate upgrade). This page updates when it is back.',
+    message: 'The console cannot use its database. Check that PostgreSQL is running and reachable from the console, and that its schema is up to date. This page updates when it is back.',
   }
 }

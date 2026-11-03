@@ -3,6 +3,7 @@ import type { ConnectionPublic, ScanRun } from '@/types'
 import { getConnections, getReadiness, getScans, triggerScan } from '@/api'
 import { BACKEND_UNREACHABLE_EVENT } from '@/api/client'
 import { useInterval } from '@/hooks/useAsync'
+import { useAuth, databaseUnavailable } from './AuthState'
 import { classifyReadiness, type BackendStatus } from './backendHealth'
 
 const STORAGE_KEY = 'vcfdoctor.connection'
@@ -33,6 +34,9 @@ interface AppState {
 const Ctx = createContext<AppState | null>(null)
 
 export function AppStateProvider({ children }: { children: ReactNode }) {
+  // Known from the auth status before anything else answers; the providers are remounted when it clears.
+  const { status: authStatus } = useAuth()
+  const knownDown = databaseUnavailable(authStatus)
   const [connections, setConnections] = useState<ConnectionPublic[]>([])
   const [connectionsLoading, setConnectionsLoading] = useState(true)
   const [connectionsLoaded, setConnectionsLoaded] = useState(false)   // true only after a successful list load
@@ -86,8 +90,9 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     } catch { /* ignore */ }
   }, [connectionId])
 
-  useEffect(() => { void checkBackend(); void reloadConnections() }, [checkBackend, reloadConnections])
-  useEffect(() => { void reloadScans() }, [reloadScans, refreshKey])
+  // While the database is known to be out these calls can only fail, so they are not made.
+  useEffect(() => { void checkBackend(); if (!knownDown) void reloadConnections() }, [checkBackend, reloadConnections, knownDown])
+  useEffect(() => { if (!knownDown) void reloadScans() }, [reloadScans, refreshKey, knownDown])
 
   // Backend heartbeat; faster while unavailable so recovery is noticed quickly.
   useInterval(
@@ -103,6 +108,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   }, [checkBackend])
   // Poll scans while one is running so the top bar and pages refresh when it lands.
   useInterval(() => {
+    if (knownDown) return
     void (async () => {
       const before = scans.filter(s => s.status === 'running').map(s => s.id).join(',')
       await reloadScans()

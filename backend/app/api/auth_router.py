@@ -3,9 +3,10 @@ import logging
 import psycopg
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
+from psycopg.conninfo import conninfo_to_dict
 from pydantic import BaseModel
 
-from app import auth, db, oidc, proxies, tokens
+from app import auth, config, db, oidc, proxies, tokens
 
 log = logging.getLogger("vcf_doctor.auth")
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -46,7 +47,28 @@ def _database_down_status() -> dict:
     verified without the database, so nobody is reported as signed in, and
     `configured` is left out rather than guessed."""
     enabled = auth.enabled()
-    return {"enabled": enabled, "authenticated": not enabled, "database": "unavailable"}
+    body: dict = {"enabled": enabled, "authenticated": not enabled, "database": "unavailable"}
+    target = _database_target()
+    if target:
+        body["target"] = target
+    return body
+
+
+def _database_target() -> dict | None:
+    """Where the console is trying to connect, so an operator can tell whether
+    the server is down or the deployment points at the wrong one. Host, port,
+    database and user only: the password never comes near this."""
+    try:
+        parts = conninfo_to_dict(config.database_url_without_password())
+    except Exception:  # noqa: BLE001  a malformed or password-bearing URL says nothing here
+        return None
+    target = {
+        "host": parts.get("host"),
+        "port": parts.get("port"),
+        "database": parts.get("dbname"),
+        "user": parts.get("user"),
+    }
+    return {k: str(v) for k, v in target.items() if v}
 
 
 @router.get("/status")

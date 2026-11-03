@@ -112,7 +112,9 @@ def bootstrap_from_env() -> None:
 
 
 def _secret() -> bytes:
-    s = db.get_setting(_SECRET_KEY)
+    # Probe-length wait: with the database out, a request that carries a cookie
+    # must be refused quickly, not held for the ordinary pool timeout.
+    s = db.get_setting(_SECRET_KEY, timeout=db.PROBE_TIMEOUT)
     if not s:
         s = secrets.token_hex(32)
         db.set_setting(_SECRET_KEY, s)
@@ -334,10 +336,17 @@ def session_for(request: Request) -> Session | None:
     authentication off there are no sessions."""
     if not enabled():
         return None
-    bearer = _bearer(request)
-    if bearer is not None:
-        return token_session(bearer)
-    return read_token(request.cookies.get(COOKIE))
+    try:
+        bearer = _bearer(request)
+        if bearer is not None:
+            return token_session(bearer)
+        return read_token(request.cookies.get(COOKIE))
+    except Exception as exc:  # noqa: BLE001  only an unreachable database is an answer here
+        if not db.is_connection_unavailable(exc):
+            raise
+        # A session cannot be verified without the database, so nobody is
+        # signed in: refused at once (401), and sign-out still clears the cookie.
+        return None
 
 
 # Paths under /api that never require a session.

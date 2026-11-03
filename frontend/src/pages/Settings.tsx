@@ -16,6 +16,7 @@ import ServiceAccountsCard from '@/components/settings/ServiceAccountsCard'
 import AboutCard from '@/components/settings/AboutCard'
 import DatabaseCard from '@/components/settings/DatabaseCard'
 import { useAppState } from '@/state/AppState'
+import { databaseOutage } from '@/state/databaseOutage'
 
 function AccessCard() {
   const { status } = useAuth()
@@ -240,8 +241,9 @@ export default function SettingsPage() {
     } catch { /* the encryption card reports its own status */ }
   }
 
-  // With the database out the Database panel is the whole story; a second "unavailable" card would only repeat it.
-  if (s.error && !s.data && databaseHealthy === false) return <div className="anim-fade-up max-w-3xl"><PageHeader title="Settings" subtitle="The rest of Settings is stored in the database and comes back with it." /><DatabaseCard /></div>
+  // With the database out the Database panel is the whole story, and it shows at once: nothing
+  // here waits on a settings load that cannot succeed. A second "unavailable" card would only repeat it.
+  if (!s.data && databaseOutage(authStatus, databaseHealthy)) return <div className="anim-fade-up max-w-3xl"><PageHeader title="Settings" subtitle="The rest of Settings is stored in the database and comes back with it." /><DatabaseCard /></div>
   if (s.error && !s.data) return <div className="anim-fade-up max-w-3xl"><PageHeader title="Settings" /><div className="space-y-5"><DatabaseCard /><Card><ErrorState title="Settings unavailable" error={s.error} onRetry={s.reload} /></Card></div></div>
 
   return (

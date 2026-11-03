@@ -340,11 +340,61 @@ def test_auth_status_answers_while_the_database_is_down(monkeypatch):
                 "enabled": enabled == "on",
                 "authenticated": authenticated,
                 "database": "unavailable",
+                "target": {
+                    "host": "127.0.0.1",
+                    "port": "1",
+                    "database": "nothing",
+                    "user": "nobody",
+                },
             }
         # Nothing that needs the database is pretended to work.
         monkeypatch.setattr(settings, "auth", "on")
         assert client.get("/api/connections").status_code != 200
     db.close()
+
+
+def test_a_signed_in_request_is_refused_quickly_while_the_database_is_down(monkeypatch):
+    """A browser holding a session cookie must not wait out the pool timeout
+    (the settings page sat on skeletons for ten seconds), and signing out must
+    still clear the cookie and succeed."""
+    from fastapi.testclient import TestClient
+
+    from app import auth
+    from app.config import settings
+    from app.main import app
+
+    db.reset_for_tests()
+    monkeypatch.setattr(settings, "auth", "on")
+    with TestClient(app) as client:
+        cookie = auth.issue_token()
+        client.cookies.set(auth.COOKIE, cookie)
+        _unreachable(monkeypatch)
+        monkeypatch.setattr(cfg, "db_pool_timeout", 10.0)  # the real default, longer than the probe
+        for path in ("/api/settings", "/api/connections"):
+            started = time.monotonic()
+            reply = client.get(path)
+            assert time.monotonic() - started < 3.0, path
+            assert reply.status_code == 401, path
+        started = time.monotonic()
+        out = client.post("/api/auth/logout")
+        assert time.monotonic() - started < 3.0
+        assert out.status_code == 200
+        assert auth.COOKIE in out.headers["set-cookie"] and "Max-Age=0" in out.headers["set-cookie"]
+    db.close()
+
+
+def test_the_outage_answer_names_the_target_and_never_the_password(monkeypatch, tmp_path):
+    from app.api import auth_router
+
+    secret = tmp_path / "pw"
+    secret.write_text("hunter2-do-not-leak")
+    monkeypatch.setattr(cfg, "database_url", "postgresql://svc@db.example:5433/doctor")
+    monkeypatch.setattr(cfg, "db_password_file", str(secret))
+    target = auth_router._database_target()
+    assert target == {"host": "db.example", "port": "5433", "database": "doctor", "user": "svc"}
+    assert "hunter2" not in repr(target)
+    monkeypatch.setattr(cfg, "database_url", "postgresql://svc:hunter2@db.example/doctor")
+    assert auth_router._database_target() is None  # refused URL, nothing echoed
 
 
 def test_auth_status_answers_while_the_database_is_not_migrated(monkeypatch):
@@ -363,11 +413,9 @@ def test_auth_status_answers_while_the_database_is_not_migrated(monkeypatch):
         try:
             reply = client.get("/api/auth/status")
             assert reply.status_code == 200
-            assert reply.json() == {
-                "enabled": True,
-                "authenticated": False,
-                "database": "unavailable",
-            }
+            body = reply.json()
+            assert body["database"] == "unavailable" and body["authenticated"] is False
+            assert body["enabled"] is True and "configured" not in body
         finally:
             with db.transaction() as c:
                 c.execute("ALTER TABLE settings_away RENAME TO settings")
