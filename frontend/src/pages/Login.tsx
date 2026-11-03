@@ -4,7 +4,7 @@ import { AlertTriangle, KeyRound, Stethoscope } from 'lucide-react'
 import { login, setupPassword, USE_MOCKS } from '@/api'
 import { ApiError, apiUrl } from '@/api/client'
 import { ssoMessage } from '@/lib/ssoErrors'
-import { isAuthed, useAuth } from '@/state/AuthState'
+import { databaseUnavailable, isAuthed, useAuth } from '@/state/AuthState'
 import { Button, Field, Input, Spinner } from '@/components/ui'
 
 export default function LoginPage() {
@@ -31,6 +31,8 @@ export default function LoginPage() {
   useEffect(() => { if (lockUntil !== null && waitSeconds === 0) setLockUntil(null) }, [lockUntil, waitSeconds])
   const locked = waitSeconds > 0
 
+  // No password can be checked or set without the database; Settings says what is wrong.
+  if (databaseUnavailable(status)) return <Navigate to="/settings" replace />
   if (status && isAuthed(status)) return <Navigate to="/" replace />
   const firstRun = !!status && !status.configured
   const unreachable = !status && !!statusError

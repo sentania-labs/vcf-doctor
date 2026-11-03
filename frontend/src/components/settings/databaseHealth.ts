@@ -6,7 +6,11 @@ interface DatabaseHealthPresentation {
   message: string
 }
 
-export function databaseHealthPresentation(healthy: boolean | null): DatabaseHealthPresentation | null {
+const CAUSES: Record<string, string> = {
+  unmigrated: 'The console reaches its database, but the schema is not up to date. Run the migrations. This page updates when it is back.',
+}
+
+export function databaseHealthPresentation(healthy: boolean | null, reason?: string): DatabaseHealthPresentation | null {
   if (healthy === null) return null
   if (healthy) {
     return {
@@ -18,6 +22,6 @@ export function databaseHealthPresentation(healthy: boolean | null): DatabaseHea
   return {
     label: 'Not healthy',
     tone: 'critical',
-    message: 'The database is not reporting healthy. Check the server log for the reason.',
+    message: (reason && CAUSES[reason]) || 'The console cannot use its database. Check that PostgreSQL is running and reachable from the console, and that its schema is up to date. This page updates when it is back.',
   }
 }

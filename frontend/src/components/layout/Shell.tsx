@@ -4,7 +4,8 @@ import { Activity, Bot, Boxes, Camera, GitCompareArrows, Globe, HeartPulse, Layo
 import { TopBar } from './TopBar'
 import { AssistantDrawer } from '@/components/assistant/AssistantDrawer'
 import { useAppState } from '@/state/AppState'
-import { useAuth } from '@/state/AuthState'
+import { databaseUnavailable, useAuth } from '@/state/AuthState'
+import { databaseOutage } from '@/state/databaseOutage'
 import { cn } from '@/lib/cn'
 import { USE_MOCKS } from '@/api'
 
@@ -58,7 +59,11 @@ function SignOutItem() {
 }
 
 export function Shell() {
-  const { backend, backendError } = useAppState()
+  const { backend, backendError, databaseHealthy } = useAppState()
+  const { status } = useAuth()
+  // With the database out, only Settings (where its status lives) can do anything.
+  const outage = databaseUnavailable(status)
+  const databaseDown = databaseOutage(status, databaseHealthy, backend)
   return (
     <div className="h-full flex bg-bg text-fg">
       <aside className="w-[232px] shrink-0 border-r border-border bg-surface flex flex-col">
@@ -70,10 +75,12 @@ export function Shell() {
           </div>
         </div>
         <nav className="flex-1 px-3 py-4 flex flex-col gap-0.5">
-          {primary.map(n => <NavItem key={n.to} {...n} />)}
-          <div className="my-4 border-t border-border" />
-          {secondary.map(n => <NavItem key={n.to} {...n} />)}
-          <div className="mt-auto pt-4"><SignOutItem /></div>
+          {outage ? null : <>
+            {primary.map(n => <NavItem key={n.to} {...n} />)}
+            <div className="my-4 border-t border-border" />
+          </>}
+          {secondary.filter(n => !outage || n.to === '/settings').map(n => <NavItem key={n.to} {...n} />)}
+          <div className="mt-auto pt-4">{outage ? null : <SignOutItem />}</div>
         </nav>
         <div className="px-5 py-4 border-t border-border text-[11px] text-faint flex items-center justify-between">
           <span>Read-only by design</span>
@@ -85,9 +92,14 @@ export function Shell() {
         {backend === 'down' ? (
           <div className="bg-critical-bg border-b border-critical/40 px-6 py-2.5 text-sm flex items-center gap-2.5 text-fg">
             <span className="h-2 w-2 rounded-full bg-critical anim-pulse" />
-            <span className="font-medium">This console cannot serve.</span>
-            <span className="text-muted">Its backend or its database is unreachable. Pages show the last data they loaded. Retrying every 5 seconds.</span>
-            {backendError ? <span className="ml-auto font-mono text-xs text-muted">{backendError}</span> : null}
+            {databaseDown ? (<>
+              <span className="font-medium">The database is unreachable.</span>
+              <span className="text-muted">The console is running, but it cannot read or save anything until PostgreSQL is back. Retrying every 5 seconds.</span>
+            </>) : (<>
+              <span className="font-medium">This console cannot serve.</span>
+              <span className="text-muted">Its backend is unreachable. Pages show the last data they loaded. Retrying every 5 seconds.</span>
+            </>)}
+            {backendError && !databaseDown ? <span className="ml-auto font-mono text-xs text-muted">{backendError}</span> : null}
           </div>
         ) : null}
         <main className="flex-1 min-h-0 overflow-y-auto">

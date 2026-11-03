@@ -318,6 +318,177 @@ def test_liveness_answers_fast_from_the_first_probe_after_the_database_dies(monk
     proxies.reset_cache()
 
 
+def test_auth_status_answers_while_the_database_is_down(monkeypatch):
+    """The login page and the console shell ask /api/auth/status first. With the
+    database gone it must say so, quickly, rather than 500 and leave the shell
+    blaming a backend that is in fact serving (issue 75)."""
+    from fastapi.testclient import TestClient
+
+    from app.config import settings
+    from app.main import app
+
+    db.reset_for_tests()
+    with TestClient(app) as client:
+        _unreachable(monkeypatch)
+        for enabled, authenticated in (("on", False), ("off", True)):
+            monkeypatch.setattr(settings, "auth", enabled)
+            started = time.monotonic()
+            reply = client.get("/api/auth/status")
+            assert time.monotonic() - started < 2.0
+            assert reply.status_code == 200
+            assert reply.json() == {
+                "enabled": enabled == "on",
+                "authenticated": authenticated,
+                "database": "unavailable",
+                "reason": "unreachable",
+            }
+        # Nothing that needs the database is pretended to work.
+        monkeypatch.setattr(settings, "auth", "on")
+        assert client.get("/api/connections").status_code != 200
+    db.close()
+
+
+def test_a_signed_in_request_is_refused_quickly_while_the_database_is_down(monkeypatch):
+    """A browser holding a session cookie, or a script holding an API token,
+    must not wait out the pool timeout (the settings page sat on skeletons for
+    ten seconds), and must be told the database is the reason (503), not that
+    its credential is bad (401). Signing out must still clear the cookie and
+    succeed."""
+    from fastapi.testclient import TestClient
+
+    from app import auth
+    from app.config import settings
+    from app.main import app
+
+    db.reset_for_tests()
+    monkeypatch.setattr(settings, "auth", "on")
+    with TestClient(app) as client:
+        cookie = auth.issue_token()
+        client.cookies.set(auth.COOKIE, cookie)
+        _unreachable(monkeypatch)
+        monkeypatch.setattr(cfg, "db_pool_timeout", 10.0)  # the real default, longer than the probe
+        for path in ("/api/settings", "/api/connections"):
+            started = time.monotonic()
+            reply = client.get(path)
+            assert time.monotonic() - started < 3.0, path
+            assert reply.status_code == 503, path
+            assert reply.json() == {
+                "enabled": True,
+                "authenticated": False,
+                "database": "unavailable",
+                "reason": "unreachable",
+            }, path
+        started = time.monotonic()
+        scripted = client.get(
+            "/api/connections", headers={"Authorization": "Bearer vcfd_pat_whatever"}
+        )
+        assert time.monotonic() - started < 3.0
+        assert scripted.status_code == 503
+        assert scripted.json()["database"] == "unavailable"
+        started = time.monotonic()
+        out = client.post("/api/auth/logout")
+        assert time.monotonic() - started < 3.0
+        assert out.status_code == 200
+        assert auth.COOKIE in out.headers["set-cookie"] and "Max-Age=0" in out.headers["set-cookie"]
+    db.close()
+
+
+def test_only_a_gone_server_is_an_outage():
+    import psycopg
+
+    refused = psycopg.OperationalError(
+        'connection failed: connection to server at "127.0.0.1", port 1 failed: Connection refused'
+    )
+    assert db.is_unreachable(refused) is True
+    assert db.is_unreachable(ValueError("not a database problem")) is False
+
+
+def test_a_busy_pool_is_not_an_outage(monkeypatch):
+    """Every pooled connection held for longer than the probe wait, with the
+    server up: sign-in state and signed-in requests wait their turn and are
+    answered normally, instead of reporting the database as unavailable."""
+    from fastapi.testclient import TestClient
+
+    from app import auth
+    from app.config import settings
+    from app.main import app
+
+    db.reset_for_tests()
+    monkeypatch.setattr(settings, "auth", "on")
+    with TestClient(app) as client:
+        client.cookies.set(auth.COOKIE, auth.issue_token())
+        db.close()
+        monkeypatch.setattr(cfg, "db_pool_max_size", 1)
+        monkeypatch.setattr(cfg, "db_pool_timeout", 10.0)
+        monkeypatch.setattr(db, "PROBE_TIMEOUT", 0.2)
+        db.pool()
+
+        def saturated_for(seconds: float) -> threading.Thread:
+            held = threading.Event()
+
+            def hold() -> None:
+                with db.pool().connection():
+                    held.set()
+                    time.sleep(seconds)
+
+            holder = threading.Thread(target=hold, daemon=True)
+            holder.start()
+            assert held.wait(5)
+            return holder
+
+        holder = saturated_for(0.6)
+        status = client.get("/api/auth/status")
+        holder.join(5)
+        assert status.status_code == 200
+        assert "database" not in status.json()
+
+        holder = saturated_for(0.6)
+        signed_in = client.get("/api/settings")
+        holder.join(5)
+        assert signed_in.status_code == 200
+    db.close()
+
+
+def test_auth_status_answers_while_the_database_is_not_migrated(monkeypatch):
+    """A reachable server with no tables is as unusable as a missing one, and
+    the shell must still be able to open Settings."""
+    from fastapi.testclient import TestClient
+
+    from app.config import settings
+    from app.main import app
+
+    db.reset_for_tests()
+    monkeypatch.setattr(settings, "auth", "on")
+    with TestClient(app) as client:
+        with db.transaction() as c:
+            c.execute("ALTER TABLE settings RENAME TO settings_away")
+        try:
+            reply = client.get("/api/auth/status")
+            assert reply.status_code == 200
+            body = reply.json()
+            assert body["database"] == "unavailable" and body["authenticated"] is False
+            assert body["reason"] == "unmigrated"
+            assert body["enabled"] is True and "configured" not in body
+        finally:
+            with db.transaction() as c:
+                c.execute("ALTER TABLE settings_away RENAME TO settings")
+    db.close()
+
+
+def test_auth_status_has_no_database_field_when_it_is_up(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app.config import settings
+    from app.main import app
+
+    db.reset_for_tests()
+    monkeypatch.setattr(settings, "auth", "on")
+    with TestClient(app) as client:
+        body = client.get("/api/auth/status").json()
+    assert "database" not in body and body["configured"] is False
+    db.close()
+
+
 def test_readiness_logs_each_database_state_once(monkeypatch, caplog):
     """Readiness is "can this instance serve". Sign-in and every page behind it
     need the database, so an instance that cannot reach it must be taken out of

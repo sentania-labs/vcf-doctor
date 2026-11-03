@@ -161,12 +161,15 @@ def authenticate(secret: str) -> dict | None:
     if not looks_like_token(secret) or len(secret) > 200:
         return None
     now = _now()
-    row = db.fetchone(
-        f"SELECT {_JOINED}, a.name AS account_name, a.role AS account_role FROM api_tokens t "
-        "LEFT JOIN service_accounts a ON a.id = t.service_account_id "
-        "WHERE t.token_hash = %s AND t.revoked_at IS NULL AND t.expires_at > %s "
-        "AND (t.service_account_id IS NULL OR a.disabled_at IS NULL)",
-        (hash_secret(secret), _stamp(now)),
+    row = db.probe_wait(
+        lambda timeout: db.fetchone(
+            f"SELECT {_JOINED}, a.name AS account_name, a.role AS account_role FROM api_tokens t "
+            "LEFT JOIN service_accounts a ON a.id = t.service_account_id "
+            "WHERE t.token_hash = %s AND t.revoked_at IS NULL AND t.expires_at > %s "
+            "AND (t.service_account_id IS NULL OR a.disabled_at IS NULL)",
+            (hash_secret(secret), _stamp(now)),
+            timeout=timeout,
+        )
     )
     if row is None:
         return None

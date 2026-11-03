@@ -2,13 +2,17 @@ import { useEffect, useState } from 'react'
 import { Bot, ChevronDown, RefreshCw } from 'lucide-react'
 import { ALL, useAppState } from '@/state/AppState'
 import { useAssistantDrawer } from '@/state/AssistantState'
+import { useAuth } from '@/state/AuthState'
+import { databaseOutage } from '@/state/databaseOutage'
 import { Button } from '@/components/ui'
 import { relativeTime } from '@/lib/format'
 import { cn } from '@/lib/cn'
 import { canStartScan, topBarStatus } from './topBarState'
 
 export function TopBar() {
-  const { connections, selectedId, setSelectedId, selected, lastScan, scanning, scanNow, scanError, scans, backend } = useAppState()
+  const { connections, selectedId, setSelectedId, selected, lastScan, scanning, scanNow, scanError, scans, backend, databaseHealthy } = useAppState()
+  const { status: authStatus } = useAuth()
+  const databaseDown = databaseOutage(authStatus, databaseHealthy, backend)
   const { openDrawer } = useAssistantDrawer()
   const [, tick] = useState(0)
   useEffect(() => { const id = setInterval(() => tick(t => t + 1), 5000); return () => clearInterval(id) }, [])
@@ -21,13 +25,14 @@ export function TopBar() {
     backend,
     relevant.map(scan => scan.status),
     selectedId === ALL,
+    databaseDown,
   )
   const dotCls = { ok: 'bg-ok', error: 'bg-critical', running: 'bg-warning anim-pulse', none: 'bg-faint' }[dot]
 
   return (
     <header className="h-16 shrink-0 border-b border-border bg-surface/80 backdrop-blur px-6 flex items-center gap-5">
       <div className="relative">
-        <select value={selectedId} onChange={e => setSelectedId(e.target.value)}
+        <select value={selectedId} disabled={databaseDown} onChange={e => setSelectedId(e.target.value)}
           className="appearance-none h-9 pl-3 pr-9 rounded-md border border-border bg-bg text-sm font-medium hover:border-border-strong focus:outline-none focus:border-accent transition-colors min-w-[220px]">
           <option value={ALL}>All connections{connections.length ? ` (${connections.length})` : ''}</option>
           {connections.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -43,8 +48,8 @@ export function TopBar() {
           <span className="text-fg">{statusLabel}</span>
         </span>
         {scanError ? <span className="text-xs text-critical max-w-[240px] truncate" title={scanError}>{scanError}</span> : null}
-        <Button variant="ghost" size="md" onClick={() => openDrawer()} title="Open assistant"><Bot size={16} /> Assistant</Button>
-        <Button variant="primary" onClick={() => void scanNow()} loading={scanning} disabled={!canStartScan(backend, connections.length)}>
+        <Button variant="ghost" size="md" onClick={() => openDrawer()} disabled={databaseDown} title={databaseDown ? 'Unavailable while the database is unreachable' : 'Open assistant'}><Bot size={16} /> Assistant</Button>
+        <Button variant="primary" onClick={() => void scanNow()} loading={scanning} disabled={!canStartScan(backend, connections.length, databaseDown)}>
           {!scanning ? <RefreshCw size={15} /> : null}{scanning ? 'Scanning' : 'Scan Now'}
         </Button>
       </div>

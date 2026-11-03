@@ -1,7 +1,7 @@
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { getAuthStatus, logout as apiLogout, type AuthStatus } from '@/api'
-import { UNAUTHENTICATED_EVENT } from '@/api/client'
+import { DATABASE_UNAVAILABLE_EVENT, UNAUTHENTICATED_EVENT } from '@/api/client'
 
 interface AuthState {
   status: AuthStatus | null      // null until the first status call resolves
@@ -31,15 +31,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => { void refresh() }, [refresh])
 
-  // Any non-auth API call that comes back 401 drops us to the login page.
+  // While the database is out the status is a stopgap, so keep asking; the
+  // console carries on from wherever it is when the database comes back.
+  const databaseDown = status?.database === 'unavailable'
+  useEffect(() => {
+    if (!databaseDown) return
+    const id = setInterval(() => { void getAuthStatus().then(s => { setStatus(s); setError(null) }, () => { /* the next tick tries again */ }) }, 5000)
+    return () => clearInterval(id)
+  }, [databaseDown])
+
+  // Any non-auth API call that comes back 401 drops us to the login page. Not while the
+  // database is out: nobody can sign in then, and Settings is the one place left to go.
+  const outage = useRef(false)
+  outage.current = databaseDown
   useEffect(() => {
     const onUnauth = () => {
+      if (outage.current) return
       setStatus(s => (s ? { ...s, authenticated: false } : s))
       if (location.pathname !== '/login') navigate('/login', { replace: true })
     }
     window.addEventListener(UNAUTHENTICATED_EVENT, onUnauth)
     return () => window.removeEventListener(UNAUTHENTICATED_EVENT, onUnauth)
   }, [navigate, location.pathname])
+
+  // A console that was working when the database dropped learns of it from the API, which
+  // answers 503 with the outage status: the session is neither lost nor confirmed.
+  useEffect(() => {
+    const onDatabaseDown = (e: Event) => { setStatus((e as CustomEvent<AuthStatus>).detail); setError(null) }
+    window.addEventListener(DATABASE_UNAVAILABLE_EVENT, onDatabaseDown)
+    return () => window.removeEventListener(DATABASE_UNAVAILABLE_EVENT, onDatabaseDown)
+  }, [])
 
   const signOut = useCallback(async () => {
     let redirect: string | undefined
@@ -57,6 +78,11 @@ export function useAuth(): AuthState {
   const v = useContext(Ctx)
   if (!v) throw new Error('useAuth outside provider')
   return v
+}
+
+// True while the console is answering but cannot reach its database. Nobody can be signed in or out then.
+export function databaseUnavailable(s: AuthStatus | null): boolean {
+  return s?.database === 'unavailable'
 }
 
 // True when the user may see the console: auth disabled by deployment, or signed in.

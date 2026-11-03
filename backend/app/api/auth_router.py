@@ -1,10 +1,11 @@
 import logging
 
+import psycopg
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
-from app import auth, oidc, proxies, tokens
+from app import auth, db, oidc, proxies, tokens
 
 log = logging.getLogger("vcf_doctor.auth")
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -40,6 +41,23 @@ def _set_cookie(
 
 @router.get("/status")
 def status(request: Request) -> dict:
+    """Public, and it answers during a database outage: the login page and the
+    console shell ask it first, and they need to tell "the database is down"
+    from "the console is down" to send the operator to the right place."""
+    try:
+        # Probe first, with the short timeout the health probe uses, so an
+        # outage answers at once instead of after the ordinary pool wait.
+        db.probe_wait(lambda timeout: db.fetchone("SELECT 1 AS ok", timeout=timeout))
+        return _status_body(request)
+    except Exception as exc:  # noqa: BLE001  only an unusable database is an answer here
+        if isinstance(exc, psycopg.errors.UndefinedTable):
+            return auth.database_down_status("unmigrated")
+        if not db.is_unreachable(exc):
+            raise
+        return auth.database_down_status("unreachable")
+
+
+def _status_body(request: Request) -> dict:
     session = auth.session_for(request)
     body: dict = {
         "enabled": auth.enabled(),
@@ -102,7 +120,12 @@ def logout(request: Request, response: Response) -> dict:
     provider, `redirect` names the provider's end-session page when it has one,
     so the browser can end that session too; with the provider unreachable the
     local session still ends."""
-    session = auth.session_for(request)
+    try:
+        session = auth.session_for(request)
+    except Exception as exc:  # noqa: BLE001  signing out must work with the database gone
+        if not db.is_unreachable(exc):
+            raise
+        session = None
     body: dict = {"ok": True}
     if session is not None:
         auth.audit.info("signed out: %s", session.describe())

@@ -112,7 +112,9 @@ def bootstrap_from_env() -> None:
 
 
 def _secret() -> bytes:
-    s = db.get_setting(_SECRET_KEY)
+    # Probe-length wait: with the database out, a request that carries a cookie
+    # must be refused quickly, not held for the ordinary pool timeout.
+    s = db.probe_wait(lambda timeout: db.get_setting(_SECRET_KEY, timeout=timeout))
     if not s:
         s = secrets.token_hex(32)
         db.set_setting(_SECRET_KEY, s)
@@ -331,13 +333,25 @@ def session_for(request: Request) -> Session | None:
     Authorization header, otherwise the session cookie. A request that sends a
     `vcfd_pat_` or `vcfd_sat_` token is judged by that token alone, so a dead one is
     never rescued by a cookie; any other bearer value is ignored. With
-    authentication off there are no sessions."""
+    authentication off there are no sessions. Raises when the database cannot be
+    reached, which is not the same as there being no session."""
     if not enabled():
         return None
     bearer = _bearer(request)
     if bearer is not None:
         return token_session(bearer)
     return read_token(request.cookies.get(COOKIE))
+
+
+def database_down_status(reason: str) -> dict:
+    """What the console can honestly say when it cannot read its own settings
+    (unreachable, or reachable but not migrated): whether sign-in is on, and
+    that the database is the reason it cannot say more. No session can be
+    verified without the database, so nobody is reported as signed in, and
+    `configured` is left out rather than guessed. `reason` says whether the
+    server is unreachable or reachable but not migrated."""
+    on = enabled()
+    return {"enabled": on, "authenticated": not on, "database": "unavailable", "reason": reason}
 
 
 # Paths under /api that never require a session.

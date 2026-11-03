@@ -19,7 +19,7 @@ means the port changed the engine and not the time model.
 import json
 import logging
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from hashlib import blake2b
 from typing import Any
@@ -167,6 +167,38 @@ def fetchall(sql: str, args: tuple = (), timeout: float | None = None) -> list[d
 # when it is down, a probe that waits ten seconds gets killed and takes a
 # still-serving pod with it.
 PROBE_TIMEOUT = 1.0
+
+
+def reachable() -> bool:
+    """Whether a fresh connection, outside the pool, can be made within about
+    a second. A server that answers but refuses (too many connections, say) is
+    reachable: it is busy, not gone."""
+    try:
+        with psycopg.connect(make_conninfo(conninfo(), connect_timeout=1), **CONNECT_KWARGS):
+            return True
+    except psycopg.Error as exc:
+        return not is_connection_unavailable(exc)
+
+
+def is_unreachable(exc: BaseException) -> bool:
+    """`is_connection_unavailable`, except that a pool timeout only counts when
+    the server cannot be reached either: a busy pool is not an outage. Blocks
+    for up to a second on a pool timeout, so not for the event loop."""
+    if isinstance(exc, PoolTimeout):
+        return not reachable()
+    return is_connection_unavailable(exc)
+
+
+def probe_wait[T](call: Callable[[float | None], T]) -> T:
+    """Run `call` with the probe-length pool wait. If that wait runs out while
+    the server is up, the pool is merely busy: run it again with the ordinary
+    wait. With the server gone, the timeout is raised at once."""
+    try:
+        return call(PROBE_TIMEOUT)
+    except PoolTimeout:
+        if not reachable():
+            raise
+        return call(None)
 
 
 def healthy() -> tuple[bool, str | None]:
