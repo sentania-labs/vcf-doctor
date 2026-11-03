@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { useLocation, useNavigate } from 'react-router-dom'
 import { getAuthStatus, logout as apiLogout, type AuthStatus } from '@/api'
 import { UNAUTHENTICATED_EVENT } from '@/api/client'
+import { outageBehindUnauthorized } from './databaseOutage'
 
 interface AuthState {
   status: AuthStatus | null      // null until the first status call resolves
@@ -42,11 +43,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Any non-auth API call that comes back 401 drops us to the login page. Not while the
   // database is out: nobody can sign in then, and Settings is the one place left to go.
+  // A console that was working when the database dropped learns of it here, from the
+  // status, since the 401 is all the API says.
   const outage = useRef(false)
   outage.current = databaseDown
   useEffect(() => {
-    const onUnauth = () => {
+    const onUnauth = async () => {
       if (outage.current) return
+      const down = await outageBehindUnauthorized(getAuthStatus)
+      if (down) { setStatus(down); setError(null); return }
       setStatus(s => (s ? { ...s, authenticated: false } : s))
       if (location.pathname !== '/login') navigate('/login', { replace: true })
     }
