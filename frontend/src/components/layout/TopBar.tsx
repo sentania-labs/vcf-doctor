@@ -12,7 +12,7 @@ import { canStartScan, topBarStatus } from './topBarState'
 export function TopBar() {
   const { connections, selectedId, setSelectedId, selected, lastScan, scanning, scanNow, scanError, scans, backend, databaseHealthy } = useAppState()
   const { status: authStatus } = useAuth()
-  const databaseDown = databaseOutage(authStatus, databaseHealthy)
+  const databaseDown = databaseOutage(authStatus, databaseHealthy, backend)
   const { openDrawer } = useAssistantDrawer()
   const [, tick] = useState(0)
   useEffect(() => { const id = setInterval(() => tick(t => t + 1), 5000); return () => clearInterval(id) }, [])

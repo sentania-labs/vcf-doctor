@@ -63,7 +63,7 @@ export function Shell() {
   const { status } = useAuth()
   // With the database out, only Settings (where its status lives) can do anything.
   const outage = databaseUnavailable(status)
-  const databaseDown = databaseOutage(status, databaseHealthy)
+  const databaseDown = databaseOutage(status, databaseHealthy, backend)
   return (
     <div className="h-full flex bg-bg text-fg">
       <aside className="w-[232px] shrink-0 border-r border-border bg-surface flex flex-col">

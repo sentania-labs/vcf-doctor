@@ -14,9 +14,9 @@ import { databaseHealthPresentation } from './databaseHealth'
 // down) and the auth status, not a request of its own: one definition of
 // reachability, and the panel follows the database coming back without a reload.
 export default function DatabaseCard() {
-  const { databaseHealthy } = useAppState()
+  const { databaseHealthy, backend } = useAppState()
   const { status } = useAuth()
-  const down = databaseOutage(status, databaseHealthy)
+  const down = databaseOutage(status, databaseHealthy, backend)
   const health = databaseHealthPresentation(down ? false : databaseHealthy, down ? status?.reason : undefined)
   if (!health) return null
   const badge = <Badge tone={health.tone} dot>{health.label}</Badge>

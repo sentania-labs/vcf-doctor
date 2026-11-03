@@ -18,7 +18,6 @@ means the port changed the engine and not the time model.
 
 import json
 import logging
-import re
 import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -170,20 +169,16 @@ def fetchall(sql: str, args: tuple = (), timeout: float | None = None) -> list[d
 PROBE_TIMEOUT = 1.0
 
 
-_NO_SUCH_DATABASE = re.compile(r'database ".*" does not exist')
+_REFUSED = {"28P01": "credentials", "28000": "credentials", "3D000": "database"}
 
 
 def _refusal(exc: BaseException) -> str | None:
     """A server that answers but turns the console away for good: "credentials"
-    when the password is wrong, "database" when the database it asks for does
-    not exist. psycopg gives no SQLSTATE for a failure while connecting, so the
-    server's own FATAL message is what says which."""
-    text = str(exc)
-    if "password authentication failed" in text:
-        return "credentials"
-    if _NO_SUCH_DATABASE.search(text):
-        return "database"
-    return None
+    when the password or role is refused, "database" when the database it asks
+    for does not exist. Told apart by SQLSTATE."""
+    if not isinstance(exc, psycopg.Error):
+        return None
+    return _REFUSED.get(exc.sqlstate or getattr(exc.diag, "sqlstate", None) or "")
 
 
 def _probe() -> str | None:
@@ -193,7 +188,7 @@ def _probe() -> str | None:
         with psycopg.connect(make_conninfo(conninfo(), connect_timeout=1), **CONNECT_KWARGS):
             return None
     except psycopg.Error as exc:
-        if isinstance(exc, psycopg.OperationalError) and (refusal := _refusal(exc)):
+        if refusal := _refusal(exc):
             return refusal
         return "unreachable" if is_connection_unavailable(exc) else None
 
@@ -209,7 +204,7 @@ def outage_reason(exc: BaseException) -> str | None:
     to a second on a pool timeout, so not for the event loop."""
     if isinstance(exc, PoolTimeout):
         return _probe()
-    if isinstance(exc, psycopg.OperationalError) and (refusal := _refusal(exc)):
+    if refusal := _refusal(exc):
         return refusal
     return "unreachable" if is_connection_unavailable(exc) else None
 
