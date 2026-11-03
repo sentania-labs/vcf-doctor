@@ -305,43 +305,51 @@ def test_drain_via_real_pyvmomi_deserializer_recovers(monkeypatch):
     assert name in placeholder_types()
 
 
-def _unknown_event_class_page(class_name: str) -> bytes:
-    """An event whose xsi:type is an event class pyVmomi does not define."""
-    return f"""<obj {XMLNS} xsi:type="{class_name}">
-<key>103</key><chainId>103</chainId><createdTime>2026-09-09T04:50:00Z</createdTime>
-<userName>admin</userName><fullFormattedMessage>Probe</fullFormattedMessage>
-</obj>""".encode()
-
-
-def _captured_multi_event_page(unknown_name: str) -> bytes:
-    """A captured SOAP response envelope containing two known events and one
-    unknown event class."""
+def _event_response(*returnvals: str) -> bytes:
+    """A SOAP ReadNextEvents response envelope around the given returnval elements."""
+    body = "\n".join(returnvals)
     return f"""<soapenv:Envelope {XMLNS} xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
 <soapenv:Body>
 <ReadNextEventsResponse>
-<returnval xsi:type="VmPoweredOnEvent">
-<key>201</key><chainId>201</chainId><createdTime>2026-09-09T04:50:00Z</createdTime>
-<userName>admin</userName><fullFormattedMessage>VM powered on</fullFormattedMessage>
-</returnval>
-<returnval xsi:type="{unknown_name}">
-<key>202</key><chainId>202</chainId><createdTime>2026-09-09T04:51:00Z</createdTime>
-<userName>admin</userName><fullFormattedMessage>Probe unknown</fullFormattedMessage>
-</returnval>
-<returnval xsi:type="VmPoweredOffEvent">
-<key>203</key><chainId>203</chainId><createdTime>2026-09-09T04:52:00Z</createdTime>
-<userName>admin</userName><fullFormattedMessage>VM powered off</fullFormattedMessage>
-</returnval>
+{body}
 </ReadNextEventsResponse>
 </soapenv:Body>
 </soapenv:Envelope>""".encode()
+
+
+def _returnval(key: int, class_name: str) -> str:
+    return f"""<returnval xsi:type="{class_name}">
+<key>{key}</key><chainId>{key}</chainId><createdTime>2026-09-09T04:50:00Z</createdTime>
+<userName>admin</userName><fullFormattedMessage>Probe {key}</fullFormattedMessage>
+</returnval>"""
+
+
+def _unknown_event_class_page(class_name: str) -> bytes:
+    """A response whose only event has an event class pyVmomi does not define."""
+    return _event_response(_returnval(103, class_name))
+
+
+def _captured_multi_event_page(unknown_name: str) -> bytes:
+    """A captured response with two known events and one unknown event class."""
+    return _event_response(
+        _returnval(201, "VmPoweredOnEvent"),
+        _returnval(202, unknown_name),
+        _returnval(203, "VmPoweredOffEvent"),
+    )
+
+
+def _read_events(page: bytes) -> list:
+    """Deserialize a response the way pyVmomi does for a ReadNextEvents call."""
+    from pyVmomi import SoapAdapter, VmomiSupport
+
+    array_type = VmomiSupport.GetVmodlType("vim.event.Event[]")
+    return list(SoapAdapter.SoapResponseDeserializer(None).Deserialize(page, array_type) or [])
 
 
 def test_drain_drops_unknown_event_class_and_logs_warning(caplog):
     """An unknown event class in a single-event page is dropped during pre-scan.
     No placeholder is registered, pyVmomi's registry stays clean, and one warning
     is logged per drain naming the unknown type and count."""
-    from pyVmomi import SoapAdapter, vim
-
     name = f"VcfProbeSoloEvent{uuid4().hex}"
     page = _unknown_event_class_page(name)
 
@@ -358,7 +366,7 @@ def test_drain_drops_unknown_event_class_and_logs_warning(caplog):
             if self.served:
                 return []
             self.served = True
-            return [SoapAdapter.Deserialize(page, vim.event.Event)]
+            return _read_events(page)
 
         def DestroyCollector(self):
             pass
@@ -378,11 +386,8 @@ def test_drain_drops_unknown_event_class_and_logs_warning(caplog):
 def test_drain_drops_unknown_event_from_captured_multi_event_page(caplog):
     """A captured page with mixed known and unknown events drops the unknown event,
     returns the valid events, and logs one warning naming the dropped type."""
-    from pyVmomi import SoapAdapter, VmomiSupport
-
     name = f"VcfProbeMultiEvent{uuid4().hex}"
     page = _captured_multi_event_page(name)
-    array_type = VmomiSupport.GetVmodlType("vim.event.Event[]")
 
     class Collector:
         def __init__(self):
@@ -397,8 +402,7 @@ def test_drain_drops_unknown_event_from_captured_multi_event_page(caplog):
             if self.served:
                 return []
             self.served = True
-            deser = SoapAdapter.SoapResponseDeserializer(None)
-            return list(deser.Deserialize(page, array_type) or [])
+            return _read_events(page)
 
         def DestroyCollector(self):
             pass
@@ -413,37 +417,6 @@ def test_drain_drops_unknown_event_from_captured_multi_event_page(caplog):
     assert name not in placeholder_types()
     warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
     assert any("dropped 1 event(s) of unknown type(s): " + name in m for m in warnings)
-
-
-def test_register_placeholder_type_refuses_data_object_types():
-    """Placeholder types are strictly for ManagedEntity subclasses. Data object
-    types (Event, Fault, Info, Spec) are refused and never registered."""
-    for candidate in ("VcfProbeEvent", "VcfProbeFault", "VcfProbeInfo", "VcfProbeSpec"):
-        assert register_placeholder_type(candidate) is False
-        assert candidate not in placeholder_types()
-
-
-def test_drain_reraises_keyerror_for_data_object_types():
-    """When a KeyError occurs for a data object type, _drain re-raises it without
-    registering a placeholder."""
-
-    class DataObjectCollector:
-        def __init__(self):
-            self.rewinds = 0
-
-        def RewindCollector(self):
-            self.rewinds += 1
-
-        def ReadNextEvents(self, size):
-            raise KeyError("VcfProbeBogusEvent")
-
-        def DestroyCollector(self):
-            pass
-
-    with pytest.raises(KeyError, match="VcfProbeBogusEvent"):
-        _drain(DataObjectCollector(), "ReadNextEvents")
-
-    assert "VcfProbeBogusEvent" not in placeholder_types()
 
 
 def test_prescan_and_filter_direct():
@@ -464,13 +437,6 @@ def test_prescan_and_filter_direct():
         b'xsi:type="VmPoweredOnEvent"><key>1</key></obj>'
     )
     assert prescan_and_filter(known) == (known, [])
-
-    # 4. Single unknown root returns (None, [name])
-    unknown_root = (
-        b'<obj xmlns="urn:vim25" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" '
-        b'xsi:type="NoSuchTypeEvent"><key>1</key></obj>'
-    )
-    assert prescan_and_filter(unknown_root) == (None, ["NoSuchTypeEvent"])
 
 
 def _moref_property_response() -> bytes:
@@ -524,20 +490,16 @@ def test_moref_valued_property_response_is_never_filtered():
 def test_hook_leaves_responses_alone_outside_a_drain():
     """Outside _drain the hook is a pass-through: an unknown event class is not
     pre-scanned or dropped, pyVmomi sees the original bytes."""
-    from pyVmomi import SoapAdapter, vim
-
     name = f"VcfProbeOutsideEvent{uuid4().hex}"
     with pytest.raises(KeyError):
-        SoapAdapter.Deserialize(_unknown_event_class_page(name), vim.event.Event)
+        _read_events(_unknown_event_class_page(name))
 
 
 def test_read_pages_does_not_end_the_window_on_a_page_of_only_unknown_events():
     """A page whose events are all dropped comes back empty. That is not the end
     of the window: later pages still have to be read."""
-    from pyVmomi import SoapAdapter, vim
-
     unknown = _unknown_event_class_page(f"VcfProbeGapEvent{uuid4().hex}")
-    known = _event_page("Datastore")
+    known = _event_response(_returnval(101, "VmPoweredOnEvent"))
 
     class Collector:
         def __init__(self):
@@ -550,7 +512,7 @@ def test_read_pages_does_not_end_the_window_on_a_page_of_only_unknown_events():
             page = self.pages.pop(0)
             if page is None:
                 return []
-            return [SoapAdapter.Deserialize(page, vim.event.Event)]
+            return _read_events(page)
 
         def DestroyCollector(self):
             pass

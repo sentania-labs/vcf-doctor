@@ -307,11 +307,10 @@ def _elem_has_unknown_type(elem: ET.Element) -> str | None:
     return None
 
 
-def prescan_and_filter(xml_bytes: bytes) -> tuple[bytes | None, list[str]]:
+def prescan_and_filter(xml_bytes: bytes) -> tuple[bytes, list[str]]:
     """Scan raw XML for event elements with xsi:type names unknown to pyVmomi.
 
-    Returns (filtered_bytes, list_of_unknown_type_names). If the root element itself
-    is an unknown event object, returns (None, [name]).
+    Returns (filtered_bytes, list_of_unknown_type_names).
     """
     if b"xsi:type" not in xml_bytes and b":type" not in xml_bytes:
         return xml_bytes, []
@@ -319,16 +318,6 @@ def prescan_and_filter(xml_bytes: bytes) -> tuple[bytes | None, list[str]]:
     try:
         root = ET.fromstring(xml_bytes)
     except Exception:
-        return xml_bytes, []
-
-    root_tag = root.tag.split("}")[-1]
-    root_xsi = root.attrib.get(XSI_TYPE) or root.attrib.get("xsi:type")
-    has_event_children = any(c.tag.split("}")[-1] in ("returnval", "item") for c in root.iter())
-    if (root_tag in ("obj", "returnval") or root_xsi) and not has_event_children:
-        if root_xsi:
-            name = root_xsi.split(":")[-1]
-            if not is_known_type(name):
-                return None, [name]
         return xml_bytes, []
 
     dropped: list[str] = []
@@ -354,17 +343,15 @@ def prescan_and_filter(xml_bytes: bytes) -> tuple[bytes | None, list[str]]:
     return xml_bytes, dropped
 
 
-def _filter_event_read(data: Any) -> tuple[Any, bool]:
+def _filter_event_read(data: Any) -> Any:
     """Pre-scan data when an event or task read is in progress.
 
-    Returns (payload, skip). Outside a _drain, or when data is not bytes-like,
-    the payload is returned untouched so every other SOAP response goes
-    straight to pyVmomi. skip is True when the whole payload is one unknown
-    event object that must be dropped.
+    Outside a _drain, or when data is not bytes-like, data is returned
+    untouched so every other SOAP response goes straight to pyVmomi.
     """
     stats = _drain_dropped.get()
     if stats is None:
-        return data, False
+        return data
     if hasattr(data, "read"):
         raw = data.read()
     elif isinstance(data, str):
@@ -372,17 +359,16 @@ def _filter_event_read(data: Any) -> tuple[Any, bool]:
     elif isinstance(data, bytes):
         raw = data
     else:
-        return data, False
+        return data
 
     filtered, dropped = prescan_and_filter(raw)
     for name in dropped:
         stats[name] = stats.get(name, 0) + 1
-    return filtered, filtered is None
+    return filtered
 
 
 def _hook_deserializer() -> None:
     try:
-        from pyVmomi import SoapAdapter
         from pyVmomi.SoapAdapter import SoapResponseDeserializer
     except ImportError:  # pragma: no cover
         return
@@ -390,24 +376,13 @@ def _hook_deserializer() -> None:
     if getattr(SoapResponseDeserializer.Deserialize, "_vcf_doctor_hooked", False):
         return
 
-    orig_response_deserialize = SoapResponseDeserializer.Deserialize
-    orig_adapter_deserialize = SoapAdapter.Deserialize
+    orig_deserialize = SoapResponseDeserializer.Deserialize
 
     def _deserialize_response(self: Any, response: Any, resultType: Any, nsMap: Any = None) -> Any:
-        payload, skip = _filter_event_read(response)
-        if skip:
-            return None
-        return orig_response_deserialize(self, payload, resultType, nsMap)
-
-    def _deserialize_adapter(data: Any, resultType: Any = object, stub: Any = None) -> Any:
-        payload, skip = _filter_event_read(data)
-        if skip:
-            return None
-        return orig_adapter_deserialize(payload, resultType, stub)
+        return orig_deserialize(self, _filter_event_read(response), resultType, nsMap)
 
     _deserialize_response._vcf_doctor_hooked = True  # type: ignore[attr-defined]
     SoapResponseDeserializer.Deserialize = _deserialize_response  # type: ignore[method-assign]
-    SoapAdapter.Deserialize = _deserialize_adapter
 
 
 _hook_deserializer()
@@ -422,17 +397,9 @@ def register_placeholder_type(name: str) -> bool:
     _wsdlName and _moId that map_event and map_task already read, so the row
     is kept with resource_type set to the lower-cased type name. Returns True
     when the type is served by a placeholder (registered now or earlier) and
-    False when pyVmomi defines it natively or when the type is a data object.
+    False when pyVmomi defines it natively.
     """
     from pyVmomi import VmomiSupport
-
-    if (
-        name.endswith("Event")
-        or name.endswith("Fault")
-        or name.endswith("Info")
-        or name.endswith("Spec")
-    ):
-        return False
 
     with _placeholder_lock:
         if name in _placeholders:
