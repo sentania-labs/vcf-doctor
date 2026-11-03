@@ -425,6 +425,28 @@ def test_a_database_that_turns_the_console_away_is_an_outage_with_its_own_reason
     db.close()
 
 
+def test_a_refusal_is_told_from_an_outage_by_the_servers_message():
+    import psycopg
+
+    wrong_password = psycopg.OperationalError(
+        'connection failed: connection to server at "10.0.0.5", port 5432 failed: '
+        'FATAL:  password authentication failed for user "vcf_doctor"'
+    )
+    no_database = psycopg.OperationalError(
+        'connection failed: connection to server at "10.0.0.5", port 5432 failed: '
+        'FATAL:  database "nope" does not exist'
+    )
+    no_role = psycopg.OperationalError('FATAL:  role "ghost" does not exist')
+    refused = psycopg.OperationalError(
+        'connection failed: connection to server at "127.0.0.1", port 1 failed: Connection refused'
+    )
+    assert db.outage_reason(wrong_password) == "credentials"
+    assert db.outage_reason(no_database) == "database"
+    assert db.outage_reason(no_role) == "unreachable"
+    assert db.outage_reason(refused) == "unreachable"
+    assert db.outage_reason(ValueError("not a database problem")) is None
+
+
 def test_a_busy_pool_is_not_an_outage(monkeypatch):
     """Every pooled connection held for longer than the probe wait, with the
     server up: sign-in state and signed-in requests wait their turn and are
