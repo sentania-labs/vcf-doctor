@@ -318,6 +318,49 @@ def test_liveness_answers_fast_from_the_first_probe_after_the_database_dies(monk
     proxies.reset_cache()
 
 
+def test_auth_status_answers_while_the_database_is_down(monkeypatch):
+    """The login page and the console shell ask /api/auth/status first. With the
+    database gone it must say so, quickly, rather than 500 and leave the shell
+    blaming a backend that is in fact serving (issue 75)."""
+    from fastapi.testclient import TestClient
+
+    from app.config import settings
+    from app.main import app
+
+    db.reset_for_tests()
+    with TestClient(app) as client:
+        _unreachable(monkeypatch)
+        for enabled, authenticated in (("on", False), ("off", True)):
+            monkeypatch.setattr(settings, "auth", enabled)
+            started = time.monotonic()
+            reply = client.get("/api/auth/status")
+            assert time.monotonic() - started < 2.0
+            assert reply.status_code == 200
+            assert reply.json() == {
+                "enabled": enabled == "on",
+                "authenticated": authenticated,
+                "database": "unavailable",
+            }
+        # Nothing that needs the database is pretended to work.
+        monkeypatch.setattr(settings, "auth", "on")
+        assert client.get("/api/connections").status_code != 200
+    db.close()
+
+
+def test_auth_status_has_no_database_field_when_it_is_up(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app.config import settings
+    from app.main import app
+
+    db.reset_for_tests()
+    monkeypatch.setattr(settings, "auth", "on")
+    with TestClient(app) as client:
+        body = client.get("/api/auth/status").json()
+    assert "database" not in body and body["configured"] is False
+    db.close()
+
+
 def test_readiness_logs_each_database_state_once(monkeypatch, caplog):
     """Readiness is "can this instance serve". Sign-in and every page behind it
     need the database, so an instance that cannot reach it must be taken out of

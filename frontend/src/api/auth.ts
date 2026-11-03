@@ -3,8 +3,11 @@ import { USE_MOCKS, delay } from './mocks'
 import { ApiError } from './client'
 
 // `oidc` is present only when single sign-on is set up; `user` only for someone who signed in through it.
+// `database` is present only while the console cannot reach its database: it is up and answering, but cannot
+// say whether a password is set or who is signed in, so `configured` is absent too.
 export interface AuthStatus {
-  enabled: boolean; configured: boolean; authenticated: boolean
+  enabled: boolean; configured?: boolean; authenticated: boolean
+  database?: 'unavailable'
   oidc?: { enabled: boolean }
   user?: { name: string; subject: string; issuer: string }
 }

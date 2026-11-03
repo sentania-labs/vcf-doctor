@@ -11,7 +11,7 @@ test('database health has two states and makes no claim without an answer', () =
   assert.deepEqual(databaseHealthPresentation(false), {
     label: 'Not healthy',
     tone: 'critical',
-    message: 'The database is not reporting healthy. Check the server log for the reason.',
+    message: 'The console cannot reach its database. Check that PostgreSQL is running and reachable from the console. This page updates when it is back.',
   })
   assert.equal(databaseHealthPresentation(null), null)
 })

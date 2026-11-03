@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
-from app import auth, oidc, proxies, tokens
+from app import auth, db, oidc, proxies, tokens
 
 log = logging.getLogger("vcf_doctor.auth")
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -38,8 +38,32 @@ def _set_cookie(
     )
 
 
+def _database_down_status() -> dict:
+    """What the console can honestly say when it cannot read its own settings:
+    whether sign-in is on, and that the database is the reason it cannot say
+    more. No session can be verified without the database, so nobody is
+    reported as signed in, and `configured` is left out rather than guessed."""
+    enabled = auth.enabled()
+    return {"enabled": enabled, "authenticated": not enabled, "database": "unavailable"}
+
+
 @router.get("/status")
 def status(request: Request) -> dict:
+    """Public, and it answers during a database outage: the login page and the
+    console shell ask it first, and they need to tell "the database is down"
+    from "the console is down" to send the operator to the right place."""
+    try:
+        # Probe first, with the short timeout the health probe uses, so an
+        # outage answers at once instead of after the ordinary pool wait.
+        db.fetchone("SELECT 1 AS ok", timeout=db.PROBE_TIMEOUT)
+        return _status_body(request)
+    except Exception as exc:  # noqa: BLE001  only an unreachable database is an answer here
+        if not db.is_connection_unavailable(exc):
+            raise
+        return _database_down_status()
+
+
+def _status_body(request: Request) -> dict:
     session = auth.session_for(request)
     body: dict = {
         "enabled": auth.enabled(),
