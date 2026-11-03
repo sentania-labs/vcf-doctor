@@ -426,6 +426,7 @@ def test_register_placeholder_type_refuses_data_object_types():
 def test_drain_reraises_keyerror_for_data_object_types():
     """When a KeyError occurs for a data object type, _drain re-raises it without
     registering a placeholder."""
+
     class DataObjectCollector:
         def __init__(self):
             self.rewinds = 0
@@ -470,6 +471,95 @@ def test_prescan_and_filter_direct():
         b'xsi:type="NoSuchTypeEvent"><key>1</key></obj>'
     )
     assert prescan_and_filter(unknown_root) == (None, ["NoSuchTypeEvent"])
+
+
+def _moref_property_response() -> bytes:
+    return f"""<soapenv:Envelope {XMLNS} xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
+<soapenv:Body>
+<RetrievePropertiesExResponse>
+<returnval>
+<objects>
+<obj type="VirtualMachine">vm-1</obj>
+<propSet>
+<name>datastore</name>
+<val xsi:type="ArrayOfManagedObjectReference">
+<ManagedObjectReference type="Datastore" xsi:type="ManagedObjectReference">
+datastore-1</ManagedObjectReference>
+</val>
+</propSet>
+<propSet>
+<name>parent</name>
+<val type="Folder" xsi:type="ManagedObjectReference">group-v3</val>
+</propSet>
+</objects>
+</returnval>
+</RetrievePropertiesExResponse>
+</soapenv:Body>
+</soapenv:Envelope>""".encode()
+
+
+def test_moref_valued_property_response_is_never_filtered():
+    """Inventory style responses carry xsi:type="ManagedObjectReference" values.
+    They are not event classes and must reach pyVmomi intact, both outside any
+    drain and inside one."""
+    from pyVmomi import SoapAdapter, VmomiSupport
+
+    from app.collectors.vsphere.events import prescan_and_filter
+
+    page = _moref_property_response()
+    assert prescan_and_filter(page) == (page, [])
+
+    result_type = VmomiSupport.GetVmodlType("vmodl.query.PropertyCollector.RetrieveResult")
+    for stats in (None, {}):
+        token = collector_events._drain_dropped.set(stats)
+        try:
+            result = SoapAdapter.SoapResponseDeserializer(None).Deserialize(page, result_type)
+        finally:
+            collector_events._drain_dropped.reset(token)
+        assert result is not None
+        assert [o.obj._moId for o in result.objects] == ["vm-1"]
+        assert not stats
+
+
+def test_hook_leaves_responses_alone_outside_a_drain():
+    """Outside _drain the hook is a pass-through: an unknown event class is not
+    pre-scanned or dropped, pyVmomi sees the original bytes."""
+    from pyVmomi import SoapAdapter, vim
+
+    name = f"VcfProbeOutsideEvent{uuid4().hex}"
+    with pytest.raises(KeyError):
+        SoapAdapter.Deserialize(_unknown_event_class_page(name), vim.event.Event)
+
+
+def test_read_pages_does_not_end_the_window_on_a_page_of_only_unknown_events():
+    """A page whose events are all dropped comes back empty. That is not the end
+    of the window: later pages still have to be read."""
+    from pyVmomi import SoapAdapter, vim
+
+    unknown = _unknown_event_class_page(f"VcfProbeGapEvent{uuid4().hex}")
+    known = _event_page("Datastore")
+
+    class Collector:
+        def __init__(self):
+            self.pages = [unknown, unknown, known, None]
+
+        def RewindCollector(self):
+            pass
+
+        def ReadNextEvents(self, size):
+            page = self.pages.pop(0)
+            if page is None:
+                return []
+            return [SoapAdapter.Deserialize(page, vim.event.Event)]
+
+        def DestroyCollector(self):
+            pass
+
+    collector = Collector()
+    batch = _drain(collector, "ReadNextEvents")
+    assert [item.key for item in batch.items] == [101]
+    assert batch.complete is True
+    assert collector.pages == []
 
 
 def test_capture_logs_the_minimum_window_cap(monkeypatch, caplog, tmp_path):

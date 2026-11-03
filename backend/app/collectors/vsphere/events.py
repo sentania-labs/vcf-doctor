@@ -271,10 +271,15 @@ def unknown_type_name(exc: BaseException) -> str | None:
     return name if _TYPE_NAME.match(name) else None
 
 
+_MOREF_TYPES = frozenset({"ManagedObjectReference", "ArrayOfManagedObjectReference"})
+
+
 def is_known_type(name: str) -> bool:
     """True when pyVmomi defines or has registered a placeholder for name."""
     from pyVmomi import VmomiSupport
 
+    if name in _MOREF_TYPES:
+        return True
     try:
         VmomiSupport.GuessWsdlType(name)
         return True
@@ -349,6 +354,32 @@ def prescan_and_filter(xml_bytes: bytes) -> tuple[bytes | None, list[str]]:
     return xml_bytes, dropped
 
 
+def _filter_event_read(data: Any) -> tuple[Any, bool]:
+    """Pre-scan data when an event or task read is in progress.
+
+    Returns (payload, skip). Outside a _drain, or when data is not bytes-like,
+    the payload is returned untouched so every other SOAP response goes
+    straight to pyVmomi. skip is True when the whole payload is one unknown
+    event object that must be dropped.
+    """
+    stats = _drain_dropped.get()
+    if stats is None:
+        return data, False
+    if hasattr(data, "read"):
+        raw = data.read()
+    elif isinstance(data, str):
+        raw = data.encode("utf-8")
+    elif isinstance(data, bytes):
+        raw = data
+    else:
+        return data, False
+
+    filtered, dropped = prescan_and_filter(raw)
+    for name in dropped:
+        stats[name] = stats.get(name, 0) + 1
+    return filtered, filtered is None
+
+
 def _hook_deserializer() -> None:
     try:
         from pyVmomi import SoapAdapter
@@ -362,61 +393,17 @@ def _hook_deserializer() -> None:
     orig_response_deserialize = SoapResponseDeserializer.Deserialize
     orig_adapter_deserialize = SoapAdapter.Deserialize
 
-    def _deserialize_response(
-        self: Any, response: Any, resultType: Any, nsMap: Any = None
-    ) -> Any:
-        raw: bytes | None
-        if hasattr(response, "read"):
-            raw = response.read()
-        elif isinstance(response, str):
-            raw = response.encode("utf-8")
-        elif isinstance(response, bytes):
-            raw = response
-        else:
-            raw = None
-
-        if raw is None:
-            return orig_response_deserialize(self, response, resultType, nsMap)
-
-        filtered_bytes, dropped = prescan_and_filter(raw)
-        if dropped:
-            stats = _drain_dropped.get()
-            if stats is not None:
-                for name in dropped:
-                    stats[name] = stats.get(name, 0) + 1
-
-        if filtered_bytes is None:
+    def _deserialize_response(self: Any, response: Any, resultType: Any, nsMap: Any = None) -> Any:
+        payload, skip = _filter_event_read(response)
+        if skip:
             return None
+        return orig_response_deserialize(self, payload, resultType, nsMap)
 
-        return orig_response_deserialize(self, filtered_bytes, resultType, nsMap)
-
-    def _deserialize_adapter(
-        data: Any, resultType: Any = object, stub: Any = None
-    ) -> Any:
-        raw: bytes | None
-        if hasattr(data, "read"):
-            raw = data.read()
-        elif isinstance(data, str):
-            raw = data.encode("utf-8")
-        elif isinstance(data, bytes):
-            raw = data
-        else:
-            raw = None
-
-        if raw is None:
-            return orig_adapter_deserialize(data, resultType, stub)
-
-        filtered_bytes, dropped = prescan_and_filter(raw)
-        if dropped:
-            stats = _drain_dropped.get()
-            if stats is not None:
-                for name in dropped:
-                    stats[name] = stats.get(name, 0) + 1
-
-        if filtered_bytes is None:
+    def _deserialize_adapter(data: Any, resultType: Any = object, stub: Any = None) -> Any:
+        payload, skip = _filter_event_read(data)
+        if skip:
             return None
-
-        return orig_adapter_deserialize(filtered_bytes, resultType, stub)
+        return orig_adapter_deserialize(payload, resultType, stub)
 
     _deserialize_response._vcf_doctor_hooked = True  # type: ignore[attr-defined]
     SoapResponseDeserializer.Deserialize = _deserialize_response  # type: ignore[method-assign]
@@ -499,11 +486,15 @@ def _read_pages(collector: Any, reader: str) -> FetchBatch:
     """Rewind a history collector and page through it up to MAX_ITEMS."""
     out: list[Any] = []
     complete = False
+    stats = _drain_dropped.get()
     collector.RewindCollector()
     while len(out) < MAX_ITEMS:
+        dropped_before = sum(stats.values()) if stats else 0
         raw_page = getattr(collector, reader)(min(PAGE_SIZE, MAX_ITEMS - len(out))) or []
         page = [item for item in raw_page if item is not None]
         if not page:
+            if stats and sum(stats.values()) > dropped_before:
+                continue
             complete = True
             break
         out.extend(page)
