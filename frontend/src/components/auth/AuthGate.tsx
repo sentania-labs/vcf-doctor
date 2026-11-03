@@ -1,7 +1,9 @@
 import type { ReactNode } from 'react'
+import { Fragment } from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
 import { Stethoscope } from 'lucide-react'
 import { Spinner } from '@/components/ui'
+import { consoleSession } from './consoleSession'
 import { databaseUnavailable, isAuthed, useAuth } from '@/state/AuthState'
 import LoginPage from '@/pages/Login'
 
@@ -23,7 +25,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
     )
   }
   if (!status && error) return <LoginPage />
-  if (databaseUnavailable(status)) return pathname === '/settings' ? <>{children}</> : <Navigate to="/settings" replace />
+  if (databaseUnavailable(status)) return pathname === '/settings' ? <Fragment key={consoleSession(status)}>{children}</Fragment> : <Navigate to="/settings" replace />
   if (!isAuthed(status)) return <Navigate to="/login" replace />
-  return <>{children}</>
+  // Keyed so leaving an outage remounts the data providers and they load afresh.
+  return <Fragment key={consoleSession(status)}>{children}</Fragment>
 }
