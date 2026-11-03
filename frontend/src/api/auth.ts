@@ -8,8 +8,6 @@ import { ApiError } from './client'
 export interface AuthStatus {
   enabled: boolean; configured?: boolean; authenticated: boolean
   database?: 'unavailable'
-  // Where the console is trying to reach, with `database`. Never carries the password.
-  target?: { host?: string; port?: string; database?: string; user?: string }
   oidc?: { enabled: boolean }
   user?: { name: string; subject: string; issuer: string }
 }

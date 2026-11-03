@@ -8,8 +8,7 @@ import { databaseHealthPresentation } from './databaseHealth'
 
 // Where the database is and what it is called is a deployment binding, not a
 // setting, so it is not edited here. What the console owes an operator is
-// whether it can reach the database at all, and, when it cannot, where it is
-// trying to reach, which is also the one question it can still answer.
+// whether it can reach the database at all, and what to do when it cannot.
 //
 // The answer is the readiness poll the app state already runs (20s, 5s while
 // down) and the auth status, not a request of its own: one definition of
@@ -21,10 +20,6 @@ export default function DatabaseCard() {
   const health = databaseHealthPresentation(down ? false : databaseHealthy)
   if (!health) return null
   const badge = <Badge tone={health.tone} dot>{health.label}</Badge>
-  const t = status?.target
-  const where = down && t && t.host
-    ? `Trying to reach ${t.host}${t.port ? `:${t.port}` : ''}${t.database ? `, database ${t.database}` : ''}${t.user ? `, as ${t.user}` : ''}.`
-    : null
 
   return (
     <Card>
@@ -35,7 +30,7 @@ export default function DatabaseCard() {
           className={cn('flex items-start gap-2 text-[13px] rounded-md px-3 py-2',
             down ? 'bg-critical-bg text-fg border-l-[3px] border-critical' : 'bg-surface-2 text-muted')}>
           <Database size={14} className={cn('mt-0.5 shrink-0', down ? 'text-critical' : 'text-muted')} />
-          <span>{health.message}{where ? <span className="block mt-1 font-mono text-xs">{where}</span> : null}</span>
+          <span>{health.message}</span>
         </div>
       </div>
     </Card>

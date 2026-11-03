@@ -340,12 +340,6 @@ def test_auth_status_answers_while_the_database_is_down(monkeypatch):
                 "enabled": enabled == "on",
                 "authenticated": authenticated,
                 "database": "unavailable",
-                "target": {
-                    "host": "127.0.0.1",
-                    "port": "1",
-                    "database": "nothing",
-                    "user": "nobody",
-                },
             }
         # Nothing that needs the database is pretended to work.
         monkeypatch.setattr(settings, "auth", "on")
@@ -381,20 +375,6 @@ def test_a_signed_in_request_is_refused_quickly_while_the_database_is_down(monke
         assert out.status_code == 200
         assert auth.COOKIE in out.headers["set-cookie"] and "Max-Age=0" in out.headers["set-cookie"]
     db.close()
-
-
-def test_the_outage_answer_names_the_target_and_never_the_password(monkeypatch, tmp_path):
-    from app.api import auth_router
-
-    secret = tmp_path / "pw"
-    secret.write_text("hunter2-do-not-leak")
-    monkeypatch.setattr(cfg, "database_url", "postgresql://svc@db.example:5433/doctor")
-    monkeypatch.setattr(cfg, "db_password_file", str(secret))
-    target = auth_router._database_target()
-    assert target == {"host": "db.example", "port": "5433", "database": "doctor", "user": "svc"}
-    assert "hunter2" not in repr(target)
-    monkeypatch.setattr(cfg, "database_url", "postgresql://svc:hunter2@db.example/doctor")
-    assert auth_router._database_target() is None  # refused URL, nothing echoed
 
 
 def test_auth_status_answers_while_the_database_is_not_migrated(monkeypatch):
