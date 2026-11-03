@@ -12,6 +12,10 @@ export const UNAUTHENTICATED_EVENT = 'vcfdoctor:unauthenticated'
 // failing check cannot re-trigger itself.
 export const BACKEND_UNREACHABLE_EVENT = 'vcfdoctor:backend-unreachable'
 
+// Fired on window when the console answers 503 with `database: unavailable`: it is up, but it cannot
+// check a session without its database. That is not a signed-out session. The detail is the auth status body.
+export const DATABASE_UNAVAILABLE_EVENT = 'vcfdoctor:database-unavailable'
+
 async function request(path: string, init?: RequestInit): Promise<Response> {
   try {
     return await fetch(`${BASE}${path}`, init)
@@ -46,6 +50,9 @@ async function parse<T>(r: Response, path: string, acceptedStatuses: number[] = 
       if (body && typeof body.detail === 'string') detail = body.detail
       else if (body && typeof body.message === 'string') detail = body.message
       if (body && typeof body.retry_after === 'number' && body.retry_after > 0) retryAfter = body.retry_after
+      if (r.status === 503 && body && body.database === 'unavailable') {
+        window.dispatchEvent(new CustomEvent(DATABASE_UNAVAILABLE_EVENT, { detail: body }))
+      }
     } catch { /* body not json */ }
     throw new ApiError(r.status, detail, retryAfter)
   }

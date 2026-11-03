@@ -39,16 +39,6 @@ def _set_cookie(
     )
 
 
-def _database_down_status() -> dict:
-    """What the console can honestly say when it cannot read its own settings
-    (unreachable, or reachable but not migrated): whether sign-in is on, and
-    that the database is the reason it cannot say more. No session can be
-    verified without the database, so nobody is reported as signed in, and
-    `configured` is left out rather than guessed."""
-    enabled = auth.enabled()
-    return {"enabled": enabled, "authenticated": not enabled, "database": "unavailable"}
-
-
 @router.get("/status")
 def status(request: Request) -> dict:
     """Public, and it answers during a database outage: the login page and the
@@ -63,7 +53,7 @@ def status(request: Request) -> dict:
         unmigrated = isinstance(exc, psycopg.errors.UndefinedTable)
         if not (unmigrated or db.is_connection_unavailable(exc)):
             raise
-        return _database_down_status()
+        return auth.database_down_status()
 
 
 def _status_body(request: Request) -> dict:
@@ -129,7 +119,12 @@ def logout(request: Request, response: Response) -> dict:
     provider, `redirect` names the provider's end-session page when it has one,
     so the browser can end that session too; with the provider unreachable the
     local session still ends."""
-    session = auth.session_for(request)
+    try:
+        session = auth.session_for(request)
+    except Exception as exc:  # noqa: BLE001  signing out must work with the database gone
+        if not db.is_connection_unavailable(exc):
+            raise
+        session = None
     body: dict = {"ok": True}
     if session is not None:
         auth.audit.info("signed out: %s", session.describe())

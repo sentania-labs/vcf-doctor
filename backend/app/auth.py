@@ -333,20 +333,24 @@ def session_for(request: Request) -> Session | None:
     Authorization header, otherwise the session cookie. A request that sends a
     `vcfd_pat_` or `vcfd_sat_` token is judged by that token alone, so a dead one is
     never rescued by a cookie; any other bearer value is ignored. With
-    authentication off there are no sessions."""
+    authentication off there are no sessions. Raises when the database cannot be
+    reached, which is not the same as there being no session."""
     if not enabled():
         return None
-    try:
-        bearer = _bearer(request)
-        if bearer is not None:
-            return token_session(bearer)
-        return read_token(request.cookies.get(COOKIE))
-    except Exception as exc:  # noqa: BLE001  only an unreachable database is an answer here
-        if not db.is_connection_unavailable(exc):
-            raise
-        # A session cannot be verified without the database, so nobody is
-        # signed in: refused at once (401), and sign-out still clears the cookie.
-        return None
+    bearer = _bearer(request)
+    if bearer is not None:
+        return token_session(bearer)
+    return read_token(request.cookies.get(COOKIE))
+
+
+def database_down_status() -> dict:
+    """What the console can honestly say when it cannot read its own settings
+    (unreachable, or reachable but not migrated): whether sign-in is on, and
+    that the database is the reason it cannot say more. No session can be
+    verified without the database, so nobody is reported as signed in, and
+    `configured` is left out rather than guessed."""
+    on = enabled()
+    return {"enabled": on, "authenticated": not on, "database": "unavailable"}
 
 
 # Paths under /api that never require a session.

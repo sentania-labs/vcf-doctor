@@ -581,6 +581,9 @@ a deployment artifact.
   Settings, where the database panel reports the outage, instead of the login
   page. A database that is up but not migrated gets the same answer, and the
   panel tells the operator to check the migrations as well as the connection.
+  A request that carries a session or API token meanwhile gets `503` with the
+  same body, not `401`, because the credential cannot be checked, not because
+  it is wrong.
 - **Lost encryption key, database intact**: history is intact; re-enter each
   vCenter password (flagged "Needs password" on Connections) and the
   Anthropic key. See [Security](SECURITY.md).

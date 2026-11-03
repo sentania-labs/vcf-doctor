@@ -1,8 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { getAuthStatus, logout as apiLogout, type AuthStatus } from '@/api'
-import { UNAUTHENTICATED_EVENT } from '@/api/client'
-import { outageBehindUnauthorized } from './databaseOutage'
+import { DATABASE_UNAVAILABLE_EVENT, UNAUTHENTICATED_EVENT } from '@/api/client'
 
 interface AuthState {
   status: AuthStatus | null      // null until the first status call resolves
@@ -43,21 +42,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Any non-auth API call that comes back 401 drops us to the login page. Not while the
   // database is out: nobody can sign in then, and Settings is the one place left to go.
-  // A console that was working when the database dropped learns of it here, from the
-  // status, since the 401 is all the API says.
   const outage = useRef(false)
   outage.current = databaseDown
   useEffect(() => {
-    const onUnauth = async () => {
+    const onUnauth = () => {
       if (outage.current) return
-      const down = await outageBehindUnauthorized(getAuthStatus)
-      if (down) { setStatus(down); setError(null); return }
       setStatus(s => (s ? { ...s, authenticated: false } : s))
       if (location.pathname !== '/login') navigate('/login', { replace: true })
     }
     window.addEventListener(UNAUTHENTICATED_EVENT, onUnauth)
     return () => window.removeEventListener(UNAUTHENTICATED_EVENT, onUnauth)
   }, [navigate, location.pathname])
+
+  // A console that was working when the database dropped learns of it from the API, which
+  // answers 503 with the outage status: the session is neither lost nor confirmed.
+  useEffect(() => {
+    const onDatabaseDown = (e: Event) => { setStatus((e as CustomEvent<AuthStatus>).detail); setError(null) }
+    window.addEventListener(DATABASE_UNAVAILABLE_EVENT, onDatabaseDown)
+    return () => window.removeEventListener(DATABASE_UNAVAILABLE_EVENT, onDatabaseDown)
+  }, [])
 
   const signOut = useCallback(async () => {
     let redirect: string | undefined

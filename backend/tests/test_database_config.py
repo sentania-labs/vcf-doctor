@@ -348,9 +348,11 @@ def test_auth_status_answers_while_the_database_is_down(monkeypatch):
 
 
 def test_a_signed_in_request_is_refused_quickly_while_the_database_is_down(monkeypatch):
-    """A browser holding a session cookie must not wait out the pool timeout
-    (the settings page sat on skeletons for ten seconds), and signing out must
-    still clear the cookie and succeed."""
+    """A browser holding a session cookie, or a script holding an API token,
+    must not wait out the pool timeout (the settings page sat on skeletons for
+    ten seconds), and must be told the database is the reason (503), not that
+    its credential is bad (401). Signing out must still clear the cookie and
+    succeed."""
     from fastapi.testclient import TestClient
 
     from app import auth
@@ -368,7 +370,19 @@ def test_a_signed_in_request_is_refused_quickly_while_the_database_is_down(monke
             started = time.monotonic()
             reply = client.get(path)
             assert time.monotonic() - started < 3.0, path
-            assert reply.status_code == 401, path
+            assert reply.status_code == 503, path
+            assert reply.json() == {
+                "enabled": True,
+                "authenticated": False,
+                "database": "unavailable",
+            }, path
+        started = time.monotonic()
+        scripted = client.get(
+            "/api/connections", headers={"Authorization": "Bearer vcfd_pat_whatever"}
+        )
+        assert time.monotonic() - started < 3.0
+        assert scripted.status_code == 503
+        assert scripted.json()["database"] == "unavailable"
         started = time.monotonic()
         out = client.post("/api/auth/logout")
         assert time.monotonic() - started < 3.0
