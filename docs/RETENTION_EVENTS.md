@@ -142,14 +142,12 @@ pyVmomi version, rewinds and reads the window again. Known names in
 [KNOWN_MISSING_TYPES](../backend/app/collectors/vsphere/events.py) are
 registered before the first fetch. Rows for such an entity keep the
 lower-cased type as `resource_type` (for example `contentlibrary`) and are not
-joined to a snapshot resource. An unknown event class produces the same
-initial pyVmomi error but cannot use a managed object placeholder. That capture
-remains pending for retry, and its warning keeps the real event class name on
-the first and later scans instead of reporting pyVmomi's internal `type` key.
-The unsuccessful placeholder remains in pyVmomi's process-wide registry until
-restart; the collector does not modify pyVmomi's private maps to remove it.
-Hitting that cap in the smallest query window, or a failed task query, is
-logged as a warning as well as being recorded as an incomplete interval.
+joined to a snapshot resource. An unknown event class (a data object type in
+xsi:type) is dropped during pre-scan with a counted warning naming the unknown
+types for that drain; valid events in the batch are preserved and captured, and
+no placeholder is registered in pyVmomi's process-wide registry. Hitting that
+cap in the smallest query window, or a failed task query, is logged as a
+warning as well as being recorded as an incomplete interval.
 
 Pruning deletes rows and stops there. Reclaiming the space is PostgreSQL's
 autovacuum, not the application's, so there is no maintenance schedule to tune,

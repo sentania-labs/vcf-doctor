@@ -27,9 +27,12 @@ Mapping rules
 
 from __future__ import annotations
 
+import contextvars
+import io
 import logging
 import re
 import threading
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from importlib.metadata import PackageNotFoundError
@@ -48,15 +51,18 @@ MAX_ITEMS = 20_000  # safety cap per window per kind
 # ContentLibrary entities and pyVmomi 9.1.0.0 has no such type, so one
 # reference failed the whole page and with it the whole capture for that
 # connection (issue #65). These are registered as placeholder types before
-# the first fetch; any other candidate type met at read time is tried as a
-# placeholder by _drain, which preserves the reported name if the candidate
-# proves to be a data object type instead.
+# the first fetch; any other type pyVmomi names in a KeyError at read time is
+# registered as a placeholder by _drain. Unknown event classes (data object
+# types in xsi:type) are dropped during pre-scan with a counted warning
+# rather than registering a placeholder (issue #66).
 KNOWN_MISSING_TYPES: tuple[str, ...] = ("ContentLibrary",)
 MAX_PLACEHOLDER_TYPES = 8  # distinct registrations per drain before giving up
 _TYPE_NAME = re.compile(r"^[A-Z][A-Za-z0-9_]*$")
 _placeholder_lock = threading.Lock()
 _placeholders: set[str] = set()
-_wrong_placeholders: set[str] = set()
+_drain_dropped: contextvars.ContextVar[dict[str, int] | None] = contextvars.ContextVar(
+    "_drain_dropped", default=None
+)
 
 # (attribute on the event, attribute on the EventArgument holding the moref)
 ENTITY_ARGS: tuple[tuple[str, str], ...] = (
@@ -266,6 +272,157 @@ def unknown_type_name(exc: BaseException) -> str | None:
     return name if _TYPE_NAME.match(name) else None
 
 
+_MOREF_TYPES = frozenset({"ManagedObjectReference", "ArrayOfManagedObjectReference"})
+
+
+def is_known_type(name: str) -> bool:
+    """True when pyVmomi defines or has registered a placeholder for name."""
+    from pyVmomi import VmomiSupport
+
+    if name in _MOREF_TYPES:
+        return True
+    try:
+        VmomiSupport.GuessWsdlType(name)
+        return True
+    except KeyError:
+        return False
+
+
+EVENT_NS = "urn:vim25"
+XSI_TYPE = "{http://www.w3.org/2001/XMLSchema-instance}type"
+
+
+def _elem_has_unknown_type(elem: ET.Element) -> str | None:
+    t = elem.attrib.get(XSI_TYPE) or elem.attrib.get("xsi:type")
+    if t:
+        name = t.split(":")[-1]
+        if not is_known_type(name):
+            return name
+    for desc in elem.iter():
+        if desc is elem:
+            continue
+        dt = desc.attrib.get(XSI_TYPE) or desc.attrib.get("xsi:type")
+        if dt:
+            dname = dt.split(":")[-1]
+            if not is_known_type(dname):
+                return dname
+    return None
+
+
+def prescan_and_filter(xml_bytes: bytes) -> tuple[bytes, list[str]]:
+    """Scan raw XML for event elements with xsi:type names unknown to pyVmomi.
+
+    Returns (filtered_bytes, list_of_unknown_type_names).
+    """
+    if b"xsi:type" not in xml_bytes and b":type" not in xml_bytes:
+        return xml_bytes, []
+
+    prefix_to_uri: dict[str, str] = {}
+    try:
+        for _, (prefix, uri) in ET.iterparse(io.BytesIO(xml_bytes), events=["start-ns"]):
+            if prefix:
+                prefix_to_uri[prefix] = uri
+                try:
+                    ET.register_namespace(prefix, uri)
+                except ValueError:
+                    # Reserved prefix formats like ns0 cannot be registered in ElementTree
+                    pass
+    except Exception:
+        # Non-XML or truncated payloads fall through to the parser below
+        pass
+
+    try:
+        root = ET.fromstring(xml_bytes)
+    except Exception:
+        return xml_bytes, []
+
+    dropped: list[str] = []
+    modified = False
+    for parent in root.iter():
+        parent_tag = parent.tag.split("}")[-1]
+        if parent_tag.endswith("Response") or parent_tag in ("returnval", "ArrayOfEvent", "Body"):
+            to_remove = []
+            for child in list(parent):
+                child_tag = child.tag.split("}")[-1]
+                if child_tag in ("returnval", "item", "obj"):
+                    u = _elem_has_unknown_type(child)
+                    if u:
+                        dropped.append(u)
+                        to_remove.append(child)
+            if to_remove:
+                for c in to_remove:
+                    parent.remove(c)
+                modified = True
+
+    if modified:
+        # Preserve namespace bindings for QName-valued attributes such as xsi:type
+        for elem in root.iter():
+            for k, v in list(elem.attrib.items()):
+                if (
+                    (k == XSI_TYPE or k == "xsi:type" or k.endswith("}type"))
+                    and isinstance(v, str)
+                    and ":" in v
+                ):
+                    pfx, local = v.split(":", 1)
+                    uri = prefix_to_uri.get(pfx)
+                    if not uri and pfx in ("vim", "vim25"):
+                        uri = EVENT_NS
+                        try:
+                            ET.register_namespace(pfx, uri)
+                        except ValueError:
+                            # Reserved prefix formats like ns0 cannot be registered in ElementTree
+                            pass
+                    if uri:
+                        elem.attrib[k] = ET.QName(uri, local)
+        return ET.tostring(root, encoding="utf-8"), dropped
+    return xml_bytes, dropped
+
+
+def _filter_event_read(data: Any) -> Any:
+    """Pre-scan data when an event or task read is in progress.
+
+    Outside a _drain, or when data is not bytes-like, data is returned
+    untouched so every other SOAP response goes straight to pyVmomi.
+    """
+    stats = _drain_dropped.get()
+    if stats is None:
+        return data
+    if hasattr(data, "read"):
+        raw = data.read()
+    elif isinstance(data, str):
+        raw = data.encode("utf-8")
+    elif isinstance(data, bytes):
+        raw = data
+    else:
+        return data
+
+    filtered, dropped = prescan_and_filter(raw)
+    for name in dropped:
+        stats[name] = stats.get(name, 0) + 1
+    return filtered
+
+
+def _hook_deserializer() -> None:
+    try:
+        from pyVmomi.SoapAdapter import SoapResponseDeserializer
+    except ImportError:  # pragma: no cover
+        return
+
+    if getattr(SoapResponseDeserializer.Deserialize, "_vcf_doctor_hooked", False):
+        return
+
+    orig_deserialize = SoapResponseDeserializer.Deserialize
+
+    def _deserialize_response(self: Any, response: Any, resultType: Any, nsMap: Any = None) -> Any:
+        return orig_deserialize(self, _filter_event_read(response), resultType, nsMap)
+
+    _deserialize_response._vcf_doctor_hooked = True  # type: ignore[attr-defined]
+    SoapResponseDeserializer.Deserialize = _deserialize_response  # type: ignore[method-assign]
+
+
+_hook_deserializer()
+
+
 def register_placeholder_type(name: str) -> bool:
     """Teach pyVmomi a managed object type it does not define.
 
@@ -331,10 +488,15 @@ def _read_pages(collector: Any, reader: str) -> FetchBatch:
     """Rewind a history collector and page through it up to MAX_ITEMS."""
     out: list[Any] = []
     complete = False
+    stats = _drain_dropped.get()
     collector.RewindCollector()
     while len(out) < MAX_ITEMS:
-        page = list(getattr(collector, reader)(min(PAGE_SIZE, MAX_ITEMS - len(out))) or [])
+        dropped_before = sum(stats.values()) if stats else 0
+        raw_page = getattr(collector, reader)(min(PAGE_SIZE, MAX_ITEMS - len(out))) or []
+        page = [item for item in raw_page if item is not None]
         if not page:
+            if stats and sum(stats.values()) > dropped_before:
+                continue
             complete = True
             break
         out.extend(page)
@@ -346,42 +508,37 @@ def _drain(collector: Any, reader: str) -> FetchBatch:
     does not know.
 
     A vCenter newer than the installed pyVmomi can hand back a reference to a
-    type pyVmomi cannot deserialize. pyVmomi raises KeyError naming the type
-    and the whole page is lost with it, which used to fail the capture for the
-    connection. Register a placeholder for that type, log which read expected
+    managed object type pyVmomi cannot deserialize (such as ContentLibrary).
+    Register a placeholder ManagedEntity for that type, log which read expected
     it, rewind and read the window again. Bounded: the same name twice, more
     than MAX_PLACEHOLDER_TYPES names, a KeyError that names no type, or a type
-    pyVmomi already defines all re-raise the original error. A KeyError that
-    names no type after a registration means the latest placeholder was wrong
-    (the name was a data object type, not a managed one), so the latest error,
-    the one naming the real type, is what surfaces. On a later drain no
-    registration happens, so the cause is a placeholder recorded earlier: with
-    one such name it is named as the cause, and with several the error says a
-    previously registered unknown class failed the read and lists those names as
-    candidates rather than blaming them all.
+    pyVmomi already defines all re-raise the original error. Unknown event
+    classes (data object types in xsi:type) are dropped during pre-scan with
+    a counted warning rather than registering a placeholder.
     """
     registered: list[str] = []
-    last_error: KeyError | None = None
     try:
         while True:
             try:
-                return _read_pages(collector, reader)
+                dropped: dict[str, int] = {}
+                token = _drain_dropped.set(dropped)
+                try:
+                    batch = _read_pages(collector, reader)
+                finally:
+                    _drain_dropped.reset(token)
+
+                if dropped:
+                    total = sum(dropped.values())
+                    names = ", ".join(sorted(dropped.keys()))
+                    log.warning(
+                        "%s dropped %d event(s) of unknown type(s): %s",
+                        reader,
+                        total,
+                        names,
+                    )
+                return batch
             except KeyError as exc:
                 name = unknown_type_name(exc)
-                if name is None:
-                    if last_error is not None:
-                        with _placeholder_lock:
-                            _wrong_placeholders.add(registered[-1])
-                        raise last_error from exc
-                    with _placeholder_lock:
-                        wrong_names = sorted(_wrong_placeholders)
-                    if len(wrong_names) == 1:
-                        raise KeyError(wrong_names[0]) from exc
-                    if wrong_names:
-                        raise KeyError(
-                            "read failed on a previously registered unknown class; "
-                            f"possible causes: {', '.join(wrong_names)}"
-                        ) from exc
                 if (
                     name is None
                     or name in registered
@@ -389,7 +546,6 @@ def _drain(collector: Any, reader: str) -> FetchBatch:
                     or not register_placeholder_type(name)
                 ):
                     raise
-                last_error = exc
                 registered.append(name)
                 log.warning(
                     "%s returned managed object type %r that pyVmomi %s does not define; "

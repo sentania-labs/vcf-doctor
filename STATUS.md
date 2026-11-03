@@ -79,7 +79,8 @@ version of this file is in git history.
   PostgreSQL's autovacuum since #59; the bounded compaction #61 added was
   SQLite-only and is gone.
 - Event capture tolerates managed object types the installed pyVmomi does
-  not define, such as `ContentLibrary` on vCenter 9.1 (#65).
+  not define, such as `ContentLibrary` on vCenter 9.1 (#65); unknown event
+  classes are dropped during pre-scan with a counted warning (#66).
 - 672 backend tests and 9 frontend tests pass against a real PostgreSQL 16
   (`make test`, 2026-09-10).
 
