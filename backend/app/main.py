@@ -82,7 +82,7 @@ async def require_session(request: Request, call_next):
         try:
             session = await run_in_threadpool(auth.session_for, request)
         except Exception as exc:  # noqa: BLE001  only an unreachable database is an answer here
-            if not db.is_connection_unavailable(exc):
+            if not db.is_unreachable(exc):
                 raise
             return JSONResponse(auth.database_down_status(), status_code=503)
         if session is None and auth.enabled():

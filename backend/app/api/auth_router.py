@@ -47,11 +47,11 @@ def status(request: Request) -> dict:
     try:
         # Probe first, with the short timeout the health probe uses, so an
         # outage answers at once instead of after the ordinary pool wait.
-        db.fetchone("SELECT 1 AS ok", timeout=db.PROBE_TIMEOUT)
+        db.probe_wait(lambda timeout: db.fetchone("SELECT 1 AS ok", timeout=timeout))
         return _status_body(request)
     except Exception as exc:  # noqa: BLE001  only an unusable database is an answer here
         unmigrated = isinstance(exc, psycopg.errors.UndefinedTable)
-        if not (unmigrated or db.is_connection_unavailable(exc)):
+        if not (unmigrated or db.is_unreachable(exc)):
             raise
         return auth.database_down_status()
 
@@ -122,7 +122,7 @@ def logout(request: Request, response: Response) -> dict:
     try:
         session = auth.session_for(request)
     except Exception as exc:  # noqa: BLE001  signing out must work with the database gone
-        if not db.is_connection_unavailable(exc):
+        if not db.is_unreachable(exc):
             raise
         session = None
     body: dict = {"ok": True}

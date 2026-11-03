@@ -114,7 +114,7 @@ def bootstrap_from_env() -> None:
 def _secret() -> bytes:
     # Probe-length wait: with the database out, a request that carries a cookie
     # must be refused quickly, not held for the ordinary pool timeout.
-    s = db.get_setting(_SECRET_KEY, timeout=db.PROBE_TIMEOUT)
+    s = db.probe_wait(lambda timeout: db.get_setting(_SECRET_KEY, timeout=timeout))
     if not s:
         s = secrets.token_hex(32)
         db.set_setting(_SECRET_KEY, s)

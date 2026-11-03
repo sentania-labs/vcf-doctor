@@ -391,6 +391,52 @@ def test_a_signed_in_request_is_refused_quickly_while_the_database_is_down(monke
     db.close()
 
 
+def test_a_busy_pool_is_not_an_outage(monkeypatch):
+    """Every pooled connection held for longer than the probe wait, with the
+    server up: sign-in state and signed-in requests wait their turn and are
+    answered normally, instead of reporting the database as unavailable."""
+    from fastapi.testclient import TestClient
+
+    from app import auth
+    from app.config import settings
+    from app.main import app
+
+    db.reset_for_tests()
+    monkeypatch.setattr(settings, "auth", "on")
+    with TestClient(app) as client:
+        client.cookies.set(auth.COOKIE, auth.issue_token())
+        db.close()
+        monkeypatch.setattr(cfg, "db_pool_max_size", 1)
+        monkeypatch.setattr(cfg, "db_pool_timeout", 10.0)
+        monkeypatch.setattr(db, "PROBE_TIMEOUT", 0.2)
+        db.pool()
+
+        def saturated_for(seconds: float) -> threading.Thread:
+            held = threading.Event()
+
+            def hold() -> None:
+                with db.pool().connection():
+                    held.set()
+                    time.sleep(seconds)
+
+            holder = threading.Thread(target=hold, daemon=True)
+            holder.start()
+            assert held.wait(5)
+            return holder
+
+        holder = saturated_for(0.6)
+        status = client.get("/api/auth/status")
+        holder.join(5)
+        assert status.status_code == 200
+        assert "database" not in status.json()
+
+        holder = saturated_for(0.6)
+        signed_in = client.get("/api/settings")
+        holder.join(5)
+        assert signed_in.status_code == 200
+    db.close()
+
+
 def test_auth_status_answers_while_the_database_is_not_migrated(monkeypatch):
     """A reachable server with no tables is as unusable as a missing one, and
     the shell must still be able to open Settings."""
