@@ -347,6 +347,33 @@ def test_auth_status_answers_while_the_database_is_down(monkeypatch):
     db.close()
 
 
+def test_auth_status_answers_while_the_database_is_not_migrated(monkeypatch):
+    """A reachable server with no tables is as unusable as a missing one, and
+    the shell must still be able to open Settings."""
+    from fastapi.testclient import TestClient
+
+    from app.config import settings
+    from app.main import app
+
+    db.reset_for_tests()
+    monkeypatch.setattr(settings, "auth", "on")
+    with TestClient(app) as client:
+        with db.transaction() as c:
+            c.execute("ALTER TABLE settings RENAME TO settings_away")
+        try:
+            reply = client.get("/api/auth/status")
+            assert reply.status_code == 200
+            assert reply.json() == {
+                "enabled": True,
+                "authenticated": False,
+                "database": "unavailable",
+            }
+        finally:
+            with db.transaction() as c:
+                c.execute("ALTER TABLE settings_away RENAME TO settings")
+    db.close()
+
+
 def test_auth_status_has_no_database_field_when_it_is_up(monkeypatch):
     from fastapi.testclient import TestClient
 

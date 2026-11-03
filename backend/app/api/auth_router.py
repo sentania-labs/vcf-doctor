@@ -1,5 +1,6 @@
 import logging
 
+import psycopg
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
@@ -39,10 +40,11 @@ def _set_cookie(
 
 
 def _database_down_status() -> dict:
-    """What the console can honestly say when it cannot read its own settings:
-    whether sign-in is on, and that the database is the reason it cannot say
-    more. No session can be verified without the database, so nobody is
-    reported as signed in, and `configured` is left out rather than guessed."""
+    """What the console can honestly say when it cannot read its own settings
+    (unreachable, or reachable but not migrated): whether sign-in is on, and
+    that the database is the reason it cannot say more. No session can be
+    verified without the database, so nobody is reported as signed in, and
+    `configured` is left out rather than guessed."""
     enabled = auth.enabled()
     return {"enabled": enabled, "authenticated": not enabled, "database": "unavailable"}
 
@@ -57,8 +59,9 @@ def status(request: Request) -> dict:
         # outage answers at once instead of after the ordinary pool wait.
         db.fetchone("SELECT 1 AS ok", timeout=db.PROBE_TIMEOUT)
         return _status_body(request)
-    except Exception as exc:  # noqa: BLE001  only an unreachable database is an answer here
-        if not db.is_connection_unavailable(exc):
+    except Exception as exc:  # noqa: BLE001  only an unusable database is an answer here
+        unmigrated = isinstance(exc, psycopg.errors.UndefinedTable)
+        if not (unmigrated or db.is_connection_unavailable(exc)):
             raise
         return _database_down_status()
 

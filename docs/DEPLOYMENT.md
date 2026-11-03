@@ -579,8 +579,8 @@ a deployment artifact.
   fail while it is down, sign-in included. `GET /api/auth/status` still answers
   (it reports `database: "unavailable"`), and the console then opens on
   Settings, where the database panel reports the outage, instead of the login
-  page. That panel also covers the common partial case of a database that is up
-  but not migrated.
+  page. A database that is up but not migrated gets the same answer, and the
+  panel tells the operator to check the migrations as well as the connection.
 - **Lost encryption key, database intact**: history is intact; re-enter each
   vCenter password (flagged "Needs password" on Connections) and the
   Anthropic key. See [Security](SECURITY.md).

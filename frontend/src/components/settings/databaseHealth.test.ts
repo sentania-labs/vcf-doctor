@@ -11,7 +11,7 @@ test('database health has two states and makes no claim without an answer', () =
   assert.deepEqual(databaseHealthPresentation(false), {
     label: 'Not healthy',
     tone: 'critical',
-    message: 'The console cannot reach its database. Check that PostgreSQL is running and reachable from the console. This page updates when it is back.',
+    message: 'The console cannot use its database. Check that PostgreSQL is running and reachable from the console, and that its migrations have been applied (python3 -m app.migrate upgrade). This page updates when it is back.',
   })
   assert.equal(databaseHealthPresentation(null), null)
 })
