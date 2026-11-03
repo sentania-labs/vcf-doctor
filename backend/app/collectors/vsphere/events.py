@@ -50,10 +50,10 @@ MAX_ITEMS = 20_000  # safety cap per window per kind
 # ContentLibrary entities and pyVmomi 9.1.0.0 has no such type, so one
 # reference failed the whole page and with it the whole capture for that
 # connection (issue #65). These are registered as placeholder types before
-# the first fetch; any other candidate type met at read time is tried as a
-# placeholder by _drain if it is a managed entity type. Unknown event classes
-# (data object types in xsi:type) are dropped during pre-scan with a counted
-# warning rather than registering a placeholder (issue #66).
+# the first fetch; any other type pyVmomi names in a KeyError at read time is
+# registered as a placeholder by _drain. Unknown event classes (data object
+# types in xsi:type) are dropped during pre-scan with a counted warning
+# rather than registering a placeholder (issue #66).
 KNOWN_MISSING_TYPES: tuple[str, ...] = ("ContentLibrary",)
 MAX_PLACEHOLDER_TYPES = 8  # distinct registrations per drain before giving up
 _TYPE_NAME = re.compile(r"^[A-Z][A-Za-z0-9_]*$")
