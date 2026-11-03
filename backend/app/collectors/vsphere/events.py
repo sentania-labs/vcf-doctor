@@ -325,8 +325,10 @@ def prescan_and_filter(xml_bytes: bytes) -> tuple[bytes, list[str]]:
                 try:
                     ET.register_namespace(prefix, uri)
                 except ValueError:
+                    # Reserved prefix formats like ns0 cannot be registered in ElementTree
                     pass
     except Exception:
+        # Non-XML or truncated payloads fall through to the parser below
         pass
 
     try:
@@ -368,6 +370,7 @@ def prescan_and_filter(xml_bytes: bytes) -> tuple[bytes, list[str]]:
                         try:
                             ET.register_namespace(pfx, uri)
                         except ValueError:
+                            # Reserved prefix formats like ns0 cannot be registered in ElementTree
                             pass
                     if uri:
                         elem.attrib[k] = ET.QName(uri, local)
