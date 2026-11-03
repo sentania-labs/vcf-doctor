@@ -96,8 +96,9 @@ Readiness gets `timeoutSeconds: 5` because it does read the database, and while
 that is unreachable it answers in about three seconds rather than stalling on
 the ten-second connection pool timeout.
 
-Both are public: they need no session, and they are the only endpoints that
-stay useful during a database outage.
+Both are public: they need no session. Together with `GET /api/auth/status`,
+which the console shell asks first, they are the only endpoints that answer
+during a database outage.
 
 ## The database
 
@@ -575,9 +576,11 @@ a deployment artifact.
   answers in milliseconds and readiness uses a bounded database probe. Deferred
   startup work retries after the database returns, while readiness turns green
   as soon as the database is usable. Everything that needs the database does
-  fail while it is down, sign-in included; the Settings database panel reports
-  the outage once a page is reachable, which covers the common partial case of
-  a database that is up but not migrated.
+  fail while it is down, sign-in included. `GET /api/auth/status` still answers
+  (it reports `database: "unavailable"`), and the console then opens on
+  Settings, where the database panel reports the outage, instead of the login
+  page. That panel also covers the common partial case of a database that is up
+  but not migrated.
 - **Lost encryption key, database intact**: history is intact; re-enter each
   vCenter password (flagged "Needs password" on Connections) and the
   Anthropic key. See [Security](SECURITY.md).
