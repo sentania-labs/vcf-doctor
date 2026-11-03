@@ -425,6 +425,61 @@ def test_a_database_that_turns_the_console_away_is_an_outage_with_its_own_reason
     db.close()
 
 
+def test_a_wrong_password_is_an_outage_with_its_own_reason(monkeypatch, tmp_path):
+    """Against the real server: a throwaway role with a password, and the
+    console connecting as it with the wrong one. Needs a server that checks
+    passwords; the disposable trust-auth container `make test` starts waves
+    every password through, so there this skips."""
+    import psycopg
+    from fastapi.testclient import TestClient
+    from psycopg.conninfo import make_conninfo
+
+    from app import auth
+    from app.config import settings
+    from app.main import app
+
+    db.reset_for_tests()
+    admin = db.conninfo()
+    role = "vcfd_wrong_password_probe"
+    wrong_url = make_conninfo(config.database_url_without_password(), user=role)
+    wrong_file = tmp_path / "wrong-password"
+    wrong_file.write_text("not-the-password")
+    with psycopg.connect(admin, autocommit=True) as setup:
+        try:
+            setup.execute(f"DROP ROLE IF EXISTS {role}")
+            setup.execute(f"CREATE ROLE {role} LOGIN PASSWORD 'the-real-password'")
+        except psycopg.errors.InsufficientPrivilege:
+            pytest.skip("the test database user cannot create a role")
+    try:
+        try:
+            psycopg.connect(
+                make_conninfo(wrong_url, password="not-the-password", connect_timeout=2)
+            ).close()
+        except psycopg.OperationalError:
+            pass
+        else:
+            pytest.skip("the test server does not check passwords")
+        monkeypatch.setattr(settings, "auth", "on")
+        with TestClient(app) as client:
+            client.cookies.set(auth.COOKIE, auth.issue_token())
+            monkeypatch.setattr(cfg, "database_url", wrong_url)
+            monkeypatch.setattr(cfg, "db_password_file", str(wrong_file))
+            monkeypatch.setattr(cfg, "db_pool_timeout", 10.0)
+            monkeypatch.setattr(db, "PROBE_TIMEOUT", 0.5)
+            db.close()
+            status = client.get("/api/auth/status")
+            gated = client.get("/api/settings")
+            assert status.status_code == 200
+            assert status.json()["database"] == "unavailable"
+            assert status.json()["reason"] == "credentials"
+            assert gated.status_code == 503
+            assert gated.json()["reason"] == "credentials"
+    finally:
+        db.close()
+        with psycopg.connect(admin, autocommit=True) as teardown:
+            teardown.execute(f"DROP ROLE IF EXISTS {role}")
+
+
 def test_a_refusal_is_told_from_an_outage_by_the_servers_message():
     import psycopg
 
