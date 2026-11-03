@@ -468,6 +468,27 @@ def test_drain_drops_unknown_sibling_from_prefixed_page():
     assert [item.key for item in batch.items] == [301, 303]
     assert unknown not in placeholder_types()
 
+    # pyVmomi ignores the prefix, so also check the serialized bytes: every
+    # xsi:type QName prefix in the filtered page must resolve to a declared namespace.
+    import io
+    import xml.etree.ElementTree as ET
+
+    from app.collectors.vsphere.events import prescan_and_filter
+
+    filtered, dropped = prescan_and_filter(page)
+    assert dropped == [unknown]
+    declared = {
+        prefix for _, (prefix, _uri) in ET.iterparse(io.BytesIO(filtered), events=["start-ns"])
+    }
+    xsi_type = "{http://www.w3.org/2001/XMLSchema-instance}type"
+    prefixes = [
+        el.attrib[xsi_type].split(":", 1)[0]
+        for el in ET.fromstring(filtered).iter()
+        if ":" in el.attrib.get(xsi_type, "")
+    ]
+    assert len(prefixes) == 2
+    assert set(prefixes) <= declared
+
 
 def test_prescan_and_filter_direct():
     """Direct verification of prescan_and_filter edge cases."""
