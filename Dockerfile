@@ -7,7 +7,9 @@ RUN npm ci
 COPY frontend/ .
 RUN npm run build
 
-FROM python:3.14-slim@sha256:35caba83af2fe6da9a5d922f9b0156f21d1246a48278c58a08bd253303ba42e8 AS backend
+# 3.14.10-slim-trixie: the first slim build whose Debian 13.7 layer has apt and
+# libapt-pkg7.0 3.0.4, which is what closes CVE-2026-109518.
+FROM python:3.14-slim@sha256:af8a5aa14780025dbfbcfbc81bd8a91ebd87711dd5b0f48ed71090949dd7cb1d AS backend
 ARG BUILD_VERSION=dev
 ARG BUILD_SHA=unknown
 ARG BUILD_DATE=unknown
