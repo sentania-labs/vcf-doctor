@@ -42,16 +42,18 @@ export function TopBar() {
       {selected ? <span className="text-xs text-faint font-mono whitespace-nowrap hidden lg:inline">{selected.host}</span> : null}
 
       <div className="ml-auto flex flex-wrap items-center gap-5 text-sm">
-        <span className="text-muted whitespace-nowrap hidden md:inline">Last scan: <span className="text-fg tnum">{relativeTime(lastScan)}</span></span>
+        <span className="text-muted whitespace-nowrap hidden min-[960px]:inline">Last scan: <span className="text-fg tnum">{relativeTime(lastScan)}</span></span>
         <span className="inline-flex items-center gap-2 text-muted whitespace-nowrap">
           <span className={cn('h-2 w-2 rounded-full', dotCls)} />
           <span className="text-fg">{statusLabel}</span>
         </span>
         {scanError ? <span className="text-xs text-critical max-w-[240px] truncate" title={scanError}>{scanError}</span> : null}
-        <Button variant="ghost" size="md" className="whitespace-nowrap" onClick={() => openDrawer()} disabled={databaseDown} title={databaseDown ? 'Unavailable while the database is unreachable' : 'Open assistant'}><Bot size={16} /> Assistant</Button>
-        <Button variant="primary" className="whitespace-nowrap" onClick={() => void scanNow()} loading={scanning} disabled={!canStartScan(backend, connections.length, databaseDown)}>
-          {!scanning ? <RefreshCw size={15} /> : null}{scanning ? 'Scanning' : 'Scan Now'}
-        </Button>
+        <div className="flex items-center gap-3 shrink-0">
+          <Button variant="ghost" size="md" className="whitespace-nowrap" onClick={() => openDrawer()} disabled={databaseDown} title={databaseDown ? 'Unavailable while the database is unreachable' : 'Open assistant'}><Bot size={16} /> Assistant</Button>
+          <Button variant="primary" className="whitespace-nowrap" onClick={() => void scanNow()} loading={scanning} disabled={!canStartScan(backend, connections.length, databaseDown)}>
+            {!scanning ? <RefreshCw size={15} /> : null}{scanning ? 'Scanning' : 'Scan Now'}
+          </Button>
+        </div>
       </div>
     </header>
   )
