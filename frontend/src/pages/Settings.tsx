@@ -80,7 +80,7 @@ function AccessCard() {
                 <Input type="password" value={confirm} onChange={e => setConfirm(e.target.value)} autoComplete="new-password" name="confirm_password" disabled={busy} />
               </Field>
             </div>
-            {locked ? <p className="text-sm text-critical bg-critical-bg rounded-md px-3 py-2" role="alert">Too many incorrect current passwords. Try again in {waitSeconds}s. Signing in is paused for the same period.</p> : err ? <p className="text-sm text-critical bg-critical-bg rounded-md px-3 py-2" role="alert">{err}</p> : null}
+            {locked ? <p className="lat-banner lat-banner--bad" role="alert">Too many incorrect current passwords. Try again in {waitSeconds}s. Signing in is paused for the same period.</p> : err ? <p className="lat-banner lat-banner--bad" role="alert">{err}</p> : null}
             <div className="flex items-center gap-3">
               <Button type="submit" loading={busy} disabled={locked || !current || !next || !confirm}><ShieldCheck size={15} /> {locked ? `Locked (${waitSeconds}s)` : 'Change password'}</Button>
               {done ? <span className="text-sm text-ok inline-flex items-center gap-1.5"><CheckCircle2 size={15} /> Password changed</span> : null}
@@ -146,7 +146,7 @@ function RetentionCard({ value, onChange }: { value: RetentionPolicy; onChange: 
             <p>Daily retention and Snapshots page groups use midnight {value.timezone}.</p>
           </div>
         </div>
-        {problem ? <p className="text-sm text-critical bg-critical-bg rounded-md px-3 py-2" role="alert">{problem.message}</p>
+        {problem ? <p className="lat-banner lat-banner--bad" role="alert">{problem.message}</p>
           : <p className="text-sm text-muted">Every scan for {value.recent_days} {value.recent_days === 1 ? 'day' : 'days'}, then hourly to {value.hourly_days} {value.hourly_days === 1 ? 'day' : 'days'}, then daily to {value.daily_days} {value.daily_days === 1 ? 'day' : 'days'}.</p>}
         <ul className="text-xs text-faint space-y-1 list-disc pl-4">
           <li>Manual snapshots are never pruned. Scheduled snapshots follow the tiers above.</li>
@@ -179,7 +179,7 @@ function EventsRetentionCard({ value, onChange }: { value: EventPolicy; onChange
             <Input type="number" min={1000} max={10000000} inputMode="numeric" value={value.row_cap || ''} onChange={set('row_cap')} aria-invalid={problem?.field === 'row_cap'} className={problem?.field === 'row_cap' ? 'border-critical focus:border-critical focus:ring-critical/25' : undefined} />
           </Field>
         </div>
-        {problem ? <p className="text-sm text-critical bg-critical-bg rounded-md px-3 py-2" role="alert">{problem.message}</p> : null}
+        {problem ? <p className="lat-banner lat-banner--bad" role="alert">{problem.message}</p> : null}
         <div className="flex items-start gap-2 text-xs text-faint bg-surface-2 rounded-md px-3 py-2">
           <Database size={14} className="mt-0.5 shrink-0" />
           <span>Rows past these limits are deleted after a scan. PostgreSQL reclaims the space on its own, so there is nothing to run here.</span>
@@ -243,11 +243,11 @@ export default function SettingsPage() {
 
   // With the database out the Database panel is the whole story, and it shows at once: nothing
   // here waits on a settings load that cannot succeed. A second "unavailable" card would only repeat it.
-  if (!s.data && databaseOutage(authStatus, databaseHealthy, backend)) return <div className="anim-fade-up max-w-3xl"><PageHeader title="Settings" subtitle="The rest of Settings is stored in the database and comes back with it." /><DatabaseCard /></div>
-  if (s.error && !s.data) return <div className="anim-fade-up max-w-3xl"><PageHeader title="Settings" /><div className="space-y-5"><DatabaseCard /><Card><ErrorState title="Settings unavailable" error={s.error} onRetry={s.reload} /></Card></div></div>
+  if (!s.data && databaseOutage(authStatus, databaseHealthy, backend)) return <div className=" max-w-3xl"><PageHeader title="Settings" subtitle="The rest of Settings is stored in the database and comes back with it." /><DatabaseCard /></div>
+  if (s.error && !s.data) return <div className=" max-w-3xl"><PageHeader title="Settings" /><div className="space-y-5"><DatabaseCard /><Card><ErrorState title="Settings unavailable" error={s.error} onRetry={s.reload} /></Card></div></div>
 
   return (
-    <div className="anim-fade-up max-w-3xl">
+    <div className=" max-w-3xl">
       <PageHeader title="Settings" subtitle="Working defaults are in place. Nothing here is required to start."
         actions={<>{saved ? <span className="text-sm text-ok inline-flex items-center gap-1.5"><CheckCircle2 size={15} /> Saved</span> : null}<Button variant="primary" onClick={() => void save()} loading={saving} disabled={!s.data || retentionInvalid} title={retentionInvalid ? 'Fix the retention windows first' : undefined}>Save changes</Button></>} />
 
@@ -274,7 +274,7 @@ export default function SettingsPage() {
             <CardHeader title="Assistant" subtitle="Evidence-grounded explanations and scripts. Never executes anything."
               action={status.data ? <Badge tone={status.data.available ? 'ok' : 'warning'} dot>{status.data.available ? 'Available' : 'Unavailable'}</Badge> : null} />
             <div className="px-5 pb-5 space-y-5">
-              {status.data && !status.data.available && status.data.reason ? <p className="text-sm text-warning bg-warning-bg rounded-md px-3 py-2">{status.data.reason}</p> : null}
+              {status.data && !status.data.available && status.data.reason ? <p className="lat-banner lat-banner--warn">{status.data.reason}</p> : null}
               <Toggle checked={assistant.enabled} onChange={v => setAssistant(a => ({ ...a, enabled: v }))} label="Assistant enabled" />
               <div className="grid sm:grid-cols-2 gap-4">
                 <Field label="Provider" hint={assistant.provider === 'mock' ? 'Mock answers from canned evidence and needs no key. Not real analysis; switch to Anthropic for real answers.' : 'Answers come from the Anthropic API.'}>
@@ -298,7 +298,7 @@ export default function SettingsPage() {
                   <Badge tone={assistant.api_key_unreadable ? 'critical' : assistant.api_key_set ? 'ok' : 'neutral'} className="shrink-0"><KeyRound size={11} /> {assistant.api_key_unreadable ? (assistant.api_key_set ? 'Re-enter key (env in use)' : 'Re-enter key') : assistant.api_key_set ? 'Key set' : 'No key'}</Badge>
                 </div>
               </Field>
-              {assistant.api_key_unreadable ? <p className="text-sm text-critical bg-critical-bg rounded-md px-3 py-2" role="alert">The stored API key was encrypted with a different key and cannot be read.{assistant.api_key_set ? ' The ANTHROPIC_API_KEY environment variable is being used meanwhile.' : ''} Enter it again to store it under the current encryption key.</p> : null}
+              {assistant.api_key_unreadable ? <p className="lat-banner lat-banner--bad" role="alert">The stored API key was encrypted with a different key and cannot be read.{assistant.api_key_set ? ' The ANTHROPIC_API_KEY environment variable is being used meanwhile.' : ''} Enter it again to store it under the current encryption key.</p> : null}
             </div>
           </Card>
 

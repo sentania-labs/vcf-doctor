@@ -36,9 +36,9 @@ export default function AssistantPage() {
   }, [findings.data, changes.data, resources.data, events.data])
 
   return (
-    <div className="anim-fade-up h-[calc(100vh-8rem)] min-h-[560px] flex flex-col">
+    <div className=" h-[calc(100vh-8rem)] min-h-[560px] flex flex-col">
       <div className="mb-5">
-        <h1 className="text-2xl font-semibold tracking-tight">Assistant</h1>
+        <h1 className="page-title">Assistant</h1>
         <p className="text-sm text-muted mt-1">Evidence-grounded explanations, investigation plans and reviewable scripts. Read-only: nothing here executes against your environment.</p>
       </div>
       <Card className="flex-1 min-h-0 overflow-hidden">

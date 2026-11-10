@@ -77,20 +77,20 @@ export default function EnvironmentPage() {
   }
 
   return (
-    <div className="anim-fade-up">
+    <div className="">
       <PageHeader title="Environment Changes" subtitle="What changed across every connection between two points in time, rolled up from each scan's recorded differences"
         actions={minSig ? (
           <Segmented value={minSig} onChange={setMinSig} options={[
             { value: 'low', label: 'All' },
-            { value: 'medium', label: <><span className="h-1.5 w-1.5 rounded-full bg-warning" />Medium and above</> },
-            { value: 'high', label: <><span className="h-1.5 w-1.5 rounded-full bg-critical" />High only</> },
+            { value: 'medium', label: <><span className="h-1.5 w-1.5 rounded-full bg-warn" />Medium and above</> },
+            { value: 'high', label: <><span className="h-1.5 w-1.5 rounded-full bg-bad" />High only</> },
           ]} />
         ) : null} />
 
       <Card className="px-5 py-4 mb-6">
         <div className="flex flex-wrap items-center gap-3">
           <Segmented value={preset} onChange={p => { setPreset(p); if (p === 'custom') setApplied(null) }} options={PRESETS} />
-          {result.loading && data ? <span className="ml-auto inline-flex items-center gap-2 text-sm text-muted"><Spinner className="h-4 w-4" /> Loading window</span> : null}
+          {result.loading && data ? <span className="ml-auto inline-flex items-center gap-2 text-sm text-muted"><Spinner label="Loading window" /></span> : null}
           {data && !result.loading ? (
             <span className="text-sm text-muted ml-auto tnum" title={`${data.since} to ${data.until}`}>
               {formatDateTime(data.since)} to {formatDateTime(data.until)}
@@ -123,13 +123,13 @@ export default function EnvironmentPage() {
         : !data ? (
           <div className="space-y-4"><div className="grid gap-4 md:grid-cols-5">{[0, 1, 2, 3, 4].map(i => <Skeleton key={i} className="h-24" />)}</div>{[0, 1].map(i => <Skeleton key={i} className="h-40" />)}</div>
         ) : (
-          <div className={cn(result.loading && 'opacity-50 transition-opacity')} aria-busy={result.loading}>
+          <div className={cn(result.loading && 'opacity-50')} aria-busy={result.loading}>
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5 mb-8">
               <StatCard label="Connections covered" value={<>{data.totals.covered}<span className="text-lg text-muted font-medium"> of {data.totals.connections}</span></>}
                 sub={data.totals.no_data > 0 ? `${data.totals.no_data} with no data in window` : 'every connection scanned in this window'} icon={<Globe size={16} />}
                 tone={data.totals.no_data > 0 ? 'warning' : undefined} />
               <StatCard label="Changes" value={data.totals.changes.total} icon={<History size={16} />}
-                sub={<span className="flex flex-wrap gap-x-3"><Summary n={data.totals.changes.high} label="high" dot="bg-critical" /><Summary n={data.totals.changes.medium} label="medium" dot="bg-warning" /><Summary n={data.totals.changes.low} label="low" dot="bg-faint" /></span>} />
+                sub={<span className="flex flex-wrap gap-x-3"><Summary n={data.totals.changes.high} label="high" dot="bg-bad" /><Summary n={data.totals.changes.medium} label="medium" dot="bg-warn" /><Summary n={data.totals.changes.low} label="low" dot="bg-faint" /></span>} />
               <StatCard label="High impact" value={data.totals.changes.high} tone={data.totals.changes.high > 0 ? 'critical' : undefined} icon={<AlertTriangle size={16} />}
                 sub={data.min_significance === 'high' ? 'showing high only' : 'across all connections'} />
               <StatCard label="Findings appeared" value={data.totals.findings_appeared} tone={data.totals.findings_appeared > 0 ? 'warning' : undefined} icon={<ShieldAlert size={16} />}
@@ -175,8 +175,8 @@ function ConnectionSection({ section, minSig, since, until, onCompare, onFinding
         {section.has_data ? (
           <span className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-1">
             <span className="text-xs text-faint tnum">{section.snapshots_in_window} {section.snapshots_in_window === 1 ? 'scan' : 'scans'} in window</span>
-            <Summary n={section.counts.high} label="high" dot="bg-critical" />
-            <Summary n={section.counts.medium} label="medium" dot="bg-warning" />
+            <Summary n={section.counts.high} label="high" dot="bg-bad" />
+            <Summary n={section.counts.medium} label="medium" dot="bg-warn" />
             <Summary n={section.counts.low} label="low" dot="bg-faint" />
             {appeared.length ? <Badge tone="warning" dot>{appeared.length} {appeared.length === 1 ? 'finding' : 'findings'} appeared</Badge> : null}
             {cleared.length ? <Badge tone="ok" dot>{cleared.length} cleared</Badge> : null}
@@ -234,7 +234,7 @@ function FindingsList({ title, findings, tone, note, onFinding }: { title: strin
   return (
     <Card className="px-4 py-3">
       <h3 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-faint mb-2.5">
-        <span className={cn('h-2 w-2 rounded-full', tone === 'warning' ? 'bg-warning' : 'bg-ok')} />{title} <span className="tnum">{findings.length}</span>
+        <span className={cn('h-2 w-2 rounded-full', tone === 'warning' ? 'bg-warn' : 'bg-good')} />{title} <span className="tnum">{findings.length}</span>
         <span className="ml-auto font-normal normal-case tracking-normal">{note}</span>
       </h3>
       <div className="space-y-2">

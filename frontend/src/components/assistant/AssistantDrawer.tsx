@@ -18,7 +18,7 @@ export function AssistantDrawer() {
             <h2 className="text-[15px] font-semibold tracking-tight">Assistant</h2>
             <p className="text-xs text-muted">Read-only guidance from the evidence in view</p>
           </div>
-          <button onClick={() => { closeDrawer(); nav('/assistant') }} className="ml-auto text-muted hover:text-fg rounded-md p-1 transition-colors" title="Open full page"><Maximize2 size={15} /></button>
+          <button onClick={() => { closeDrawer(); nav('/assistant') }} className="ml-auto text-muted hover:text-fg rounded-md p-1" title="Open full page"><Maximize2 size={15} /></button>
         </div>
       }>
       <AssistantPanel seed={seed} seedKey={seedKey} context={empty} compact />

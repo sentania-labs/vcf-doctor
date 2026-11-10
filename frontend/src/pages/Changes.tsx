@@ -32,7 +32,7 @@ export default function ChangesPage() {
 
   if (!connectionId) {
     return (
-      <div className="anim-fade-up">
+      <div className="">
         <PageHeader title="What Changed?" subtitle="The change log and snapshot comparisons for one vCenter" />
         <Card>
           <EmptyState icon={<GitCompareArrows size={20} />} title="Pick a connection"
@@ -48,13 +48,13 @@ export default function ChangesPage() {
   }
 
   return (
-    <div className="anim-fade-up">
+    <div className="">
       <PageHeader title="What Changed?" subtitle={view === 'timeline' ? 'Every difference each scan recorded, newest first' : 'Semantic differences between two snapshots, most important first'}
         actions={minSig ? (
           <Segmented value={minSig} onChange={setMinSig} options={[
             { value: 'low', label: 'All' },
-            { value: 'medium', label: <><span className="h-1.5 w-1.5 rounded-full bg-warning" />Medium and above</> },
-            { value: 'high', label: <><span className="h-1.5 w-1.5 rounded-full bg-critical" />High only</> },
+            { value: 'medium', label: <><span className="h-1.5 w-1.5 rounded-full bg-warn" />Medium and above</> },
+            { value: 'high', label: <><span className="h-1.5 w-1.5 rounded-full bg-bad" />High only</> },
           ]} />
         ) : null} />
 
@@ -73,7 +73,7 @@ export default function ChangesPage() {
 function Tab({ active, onClick, icon, children }: { active: boolean; onClick: () => void; icon: React.ReactNode; children: React.ReactNode }) {
   return (
     <button role="tab" aria-selected={active} onClick={onClick}
-      className={cn('inline-flex items-center gap-2 px-3 h-10 text-sm font-medium border-b-2 -mb-px transition-colors',
+      className={cn('inline-flex items-center gap-2 px-3 h-10 text-sm font-medium border-b-2 -mb-px',
         active ? 'border-accent text-fg' : 'border-transparent text-muted hover:text-fg')}>
       {icon}{children}
     </button>
@@ -104,8 +104,8 @@ function Timeline({ connectionId, minSig, setMinSig, refreshKey, onCompare }: { 
         {log.data ? (
           <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1 ml-auto text-sm">
             <span className="text-xl font-semibold tracking-tight tnum">{rows.length}{rows.length >= limit ? '+' : ''} <span className="text-sm text-muted font-medium">{rows.length === 1 ? 'change' : 'changes'}</span></span>
-            <Summary n={counts.high} label="high impact" dot="bg-critical" />
-            <Summary n={counts.medium} label="medium" dot="bg-warning" />
+            <Summary n={counts.high} label="high impact" dot="bg-bad" />
+            <Summary n={counts.medium} label="medium" dot="bg-warn" />
             <Summary n={counts.low} label="informational" dot="bg-faint" />
           </div>
         ) : null}
@@ -195,8 +195,8 @@ function Compare({ connectionId, minSig, setMinSig, refreshKey, initialFrom, ini
           <>
             <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2 mb-6">
               <span className="text-3xl font-semibold tracking-tight tnum">{total} <span className="text-lg text-muted font-medium">{total === 1 ? 'change' : 'changes'}</span></span>
-              <Summary n={groups.high.length} label="high impact" dot="bg-critical" />
-              <Summary n={groups.medium.length} label="medium" dot="bg-warning" />
+              <Summary n={groups.high.length} label="high impact" dot="bg-bad" />
+              <Summary n={groups.medium.length} label="medium" dot="bg-warn" />
               <Summary n={groups.low.length} label="informational" dot="bg-faint" />
               {fromSnap && toSnap ? <span className="text-sm text-muted ml-auto">{formatDateTime(fromSnap.created_at)} to {formatDateTime(toSnap.created_at)}</span> : null}
             </div>
@@ -209,7 +209,7 @@ function Compare({ connectionId, minSig, setMinSig, refreshKey, initialFrom, ini
                 {(['high', 'medium', 'low'] as Significance[]).map(sig => groups[sig].length === 0 ? null : (
                   <section key={sig}>
                     <h2 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-faint mb-3">
-                      <span className={cn('h-2 w-2 rounded-full', sig === 'high' ? 'bg-critical' : sig === 'medium' ? 'bg-warning' : 'bg-faint')} />
+                      <span className={cn('h-2 w-2 rounded-full', sig === 'high' ? 'bg-bad' : sig === 'medium' ? 'bg-warn' : 'bg-faint')} />
                       {significanceLabel[sig]} <span className="tnum">{groups[sig].length}</span>
                     </h2>
                     <div className="grid gap-3 lg:grid-cols-2">

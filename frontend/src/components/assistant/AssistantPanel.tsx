@@ -3,7 +3,7 @@ import { AlertCircle, Bot, Send, Sparkles, Square, User } from 'lucide-react'
 import type { AssistantEvidenceCount, AssistantRequest, AssistantTask, Change, Event, Finding, Resource, ScriptFormat } from '@/types'
 import { getAssistantStatus, streamAssistant } from '@/api'
 import { useAsync } from '@/hooks/useAsync'
-import { Button, Select, Skeleton } from '@/components/ui'
+import { Button, Select, Skeleton, Spinner } from '@/components/ui'
 import { Markdown } from './Markdown'
 import { SeverityBadge } from '@/components/domain'
 import { cn } from '@/lib/cn'
@@ -132,24 +132,24 @@ export function AssistantPanel({ seed, seedKey, context, compact }: {
 
       {/* Unavailable banner */}
       {status.data && !available ? (
-        <div className="mx-5 mt-4 rounded-lg border border-warning/40 bg-warning-bg px-4 py-3 text-sm flex gap-2.5 shrink-0">
+        <div className="lat-banner lat-banner--warn mx-5 mt-4 flex gap-2.5 shrink-0">
           <AlertCircle size={16} className="text-warning shrink-0 mt-0.5" />
           <div>
-            <p className="font-medium text-fg">Assistant unavailable</p>
-            <p className="text-muted mt-0.5">{status.data.reason ?? 'The assistant provider is not configured.'} Health and Changes keep working without it; configure a provider in Settings.</p>
+            <p className="font-medium">Assistant unavailable</p>
+            <p className="mt-0.5">{status.data.reason ?? 'The assistant provider is not configured.'} Health and Changes keep working without it; configure a provider in Settings.</p>
           </div>
         </div>
       ) : status.error ? (
-        <div className="mx-5 mt-4 rounded-lg border border-critical/40 bg-critical-bg px-4 py-3 text-sm flex gap-2.5 shrink-0">
+        <div className="lat-banner lat-banner--bad mx-5 mt-4 flex gap-2.5 shrink-0">
           <AlertCircle size={16} className="text-critical shrink-0 mt-0.5" />
-          <div><p className="font-medium">Could not reach the assistant</p><p className="text-muted mt-0.5 font-mono text-xs">{status.error.message}</p></div>
+          <div><p className="font-medium">Could not reach the assistant</p><p className="mt-0.5 font-mono text-xs">{status.error.message}</p></div>
         </div>
       ) : null}
 
       {/* Transcript */}
       <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-5 py-5 space-y-5">
         {messages.length === 0 ? (
-          <div className={cn('anim-fade-up', compact ? '' : 'max-w-2xl')}>
+          <div className={cn('', compact ? '' : 'max-w-2xl')}>
             <div className="h-10 w-10 rounded-lg bg-surface-2 border border-border flex items-center justify-center text-accent mb-4"><Bot size={20} /></div>
             <h3 className="text-base font-semibold tracking-tight">Evidence-grounded assistant</h3>
             <p className="text-sm text-muted mt-1 leading-relaxed">Answers come only from the findings, changes, resources and vCenter events shown above. Scripts are produced for your review and are never executed.</p>
@@ -157,7 +157,7 @@ export function AssistantPanel({ seed, seedKey, context, compact }: {
               {STARTERS.map(s => (
                 <button key={s.label} disabled={!available || busy}
                   onClick={() => { setTask(s.task); void send(s.task, s.question) }}
-                  className="text-left rounded-lg border border-border bg-surface px-4 py-2.5 text-sm hover:border-border-strong hover:bg-surface-2 transition-colors disabled:opacity-50 flex items-center justify-between gap-3">
+                  className="text-left rounded-lg border border-border bg-surface px-4 py-2.5 text-sm hover:border-border-strong hover:bg-surface-2 disabled:opacity-50 flex items-center justify-between gap-3">
                   <span>{s.label}</span>
                   <span className="text-[11px] uppercase tracking-wider text-faint font-semibold">{TASK_LABEL[s.task]}</span>
                 </button>
@@ -170,14 +170,14 @@ export function AssistantPanel({ seed, seedKey, context, compact }: {
       {/* Composer */}
       <div className="border-t border-border px-5 py-4 shrink-0 bg-surface">
         <div className="flex items-center gap-2 mb-2.5 flex-wrap">
-          <Select value={task} onChange={e => setTask(e.target.value as AssistantTask)} className="h-8 text-[13px]" disabled={busy}>
+          <Select value={task} onChange={e => setTask(e.target.value as AssistantTask)} className="h-8 w-auto text-[13px]" disabled={busy}>
             <option value="ask">Ask</option>
             <option value="explain">Explain</option>
             <option value="investigate">Investigate</option>
             <option value="generate-script">Generate script</option>
           </Select>
           {task === 'generate-script' ? (
-            <Select value={format} onChange={e => setFormat(e.target.value as ScriptFormat)} className="h-8 text-[13px]" disabled={busy}>
+            <Select value={format} onChange={e => setFormat(e.target.value as ScriptFormat)} className="h-8 w-auto text-[13px]" disabled={busy}>
               <option value="powercli">PowerCLI</option>
               <option value="python">Python</option>
               <option value="shell">Shell</option>
@@ -190,7 +190,7 @@ export function AssistantPanel({ seed, seedKey, context, compact }: {
             value={input} onChange={e => setInput(e.target.value)} rows={2} disabled={!available || busy}
             onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(task, input) } }}
             placeholder={available ? 'Ask about the evidence in view. Enter to send, Shift+Enter for a new line.' : 'Assistant unavailable'}
-            className="flex-1 resize-none rounded-md border border-border bg-bg px-3 py-2 text-sm placeholder:text-faint focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/25 disabled:opacity-50"
+            className="lat-textarea flex-1 min-w-0 resize-none text-sm placeholder:text-muted disabled:opacity-50"
           />
           {busy
             ? <Button type="button" variant="secondary" onClick={stop} aria-label="Stop"><Square size={14} /> Stop</Button>
@@ -204,8 +204,8 @@ export function AssistantPanel({ seed, seedKey, context, compact }: {
 function MessageView({ m }: { m: Message }) {
   if (m.role === 'user') {
     return (
-      <div className="flex gap-3 anim-fade-up">
-        <div className="h-7 w-7 rounded-md bg-surface-3 flex items-center justify-center text-muted shrink-0"><User size={14} /></div>
+      <div className="flex gap-3">
+        <div className="h-7 w-7 rounded-md bg-surface-2 flex items-center justify-center text-muted shrink-0"><User size={14} /></div>
         <div className="min-w-0">
           <div className="text-[11px] uppercase tracking-wider text-faint font-semibold mb-1">{m.task ? TASK_LABEL[m.task] : 'You'}</div>
           <p className="text-sm">{m.text}</p>
@@ -215,11 +215,11 @@ function MessageView({ m }: { m: Message }) {
   }
   const refused = m.stopReason === 'refusal'
   return (
-    <div className="flex gap-3 anim-fade-up">
+    <div className="flex gap-3">
       <div className="h-7 w-7 rounded-md bg-info-bg flex items-center justify-center text-accent shrink-0"><Bot size={14} /></div>
       <div className="min-w-0 flex-1">
         <div className="text-[11px] uppercase tracking-wider text-faint font-semibold mb-1.5">Assistant</div>
-        {m.text ? <Markdown text={m.text} /> : m.streaming ? <div className="flex items-center gap-1.5 h-5"><span className="h-1.5 w-1.5 rounded-full bg-muted anim-pulse" /><span className="h-1.5 w-1.5 rounded-full bg-muted anim-pulse [animation-delay:200ms]" /><span className="h-1.5 w-1.5 rounded-full bg-muted anim-pulse [animation-delay:400ms]" /></div> : null}
+        {m.text ? <Markdown text={m.text} /> : m.streaming ? <Spinner label="Generating response" /> : null}
         {refused ? <p className="mt-2 text-sm text-warning">The model declined to answer this request. Try rephrasing or narrowing the evidence.</p> : null}
         {m.error ? <p className="mt-2 text-sm text-critical flex items-center gap-1.5"><AlertCircle size={14} />{m.error}</p> : null}
         {m.evidence && !m.streaming ? (

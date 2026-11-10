@@ -1,66 +1,40 @@
 @import "tailwindcss";
+@import "../public/lattice/lattice.css" layer(components);
 
+/* Map existing utility names onto the shared Lattice palette. */
 :root {
-  color-scheme: dark;
-  --bg: #0b0d11;
-  --surface: #12151b;
-  --surface-2: #181c24;
-  --surface-3: #1f242e;
-  --border: #262c37;
-  --border-strong: #343b48;
-  --fg: #e7e9ee;
-  --fg-muted: #9aa1ad;
-  --fg-faint: #6b7280;
-  --accent: #6d9cff;
-  --accent-fg: #0b0d11;
-  --critical: #ef5350;
-  --critical-bg: rgba(239, 83, 80, 0.12);
-  --warning: #f0a840;
-  --warning-bg: rgba(240, 168, 64, 0.12);
-  --info: #5b9cf6;
-  --info-bg: rgba(91, 156, 246, 0.12);
-  --ok: #3ec27a;
-  --ok-bg: rgba(62, 194, 122, 0.12);
-  --shadow: 0 1px 2px rgba(0,0,0,0.5), 0 8px 24px -12px rgba(0,0,0,0.6);
+  --surface-2: var(--surface-sunken);
+  --border: var(--line);
+  --border-strong: var(--ink-subtle);
+  --fg: var(--ink);
+  --fg-muted: var(--ink-muted);
+  /* Lattice's --ink-subtle is 4.0:1 on the sunken surface in light and 4.07:1 in dark; these clear 4.5:1 on both surfaces. */
+  --fg-faint: #616d7e;
+  --accent-fg: var(--on-accent);
+  --critical: var(--bad-ink);
+  --critical-bg: var(--bad-soft);
+  --warning: var(--warn-ink);
+  --warning-bg: var(--warn-soft);
+  --info: var(--accent-ink);
+  --info-bg: var(--accent-soft);
+  --ok-bg: var(--ok-soft);
 }
-
-@media (prefers-color-scheme: light) {
-  :root {
-    color-scheme: light;
-    --bg: #f3f4f7;
-    --surface: #ffffff;
-    --surface-2: #f6f7f9;
-    --surface-3: #eceef2;
-    --border: #e1e4ea;
-    --border-strong: #cdd2db;
-    --fg: #15181f;
-    --fg-muted: #5f6673;
-    --fg-faint: #8b929e;
-    --accent: #2f63d8;
-    --accent-fg: #ffffff;
-    --critical: #d3302f;
-    --critical-bg: rgba(211, 48, 47, 0.10);
-    --warning: #c47b0c;
-    --warning-bg: rgba(196, 123, 12, 0.10);
-    --info: #2f63d8;
-    --info-bg: rgba(47, 99, 216, 0.10);
-    --ok: #1f9a5a;
-    --ok-bg: rgba(31, 154, 90, 0.10);
-    --shadow: 0 1px 2px rgba(20,24,32,0.06), 0 8px 24px -12px rgba(20,24,32,0.12);
-  }
-}
-
 @theme inline {
   --color-bg: var(--bg);
   --color-surface: var(--surface);
   --color-surface-2: var(--surface-2);
-  --color-surface-3: var(--surface-3);
   --color-border: var(--border);
   --color-border-strong: var(--border-strong);
   --color-fg: var(--fg);
   --color-muted: var(--fg-muted);
   --color-faint: var(--fg-faint);
   --color-accent: var(--accent);
+  --color-link: var(--link);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-ink: var(--accent-ink);
+  --color-bad: var(--bad);
+  --color-warn: var(--warn);
+  --color-good: var(--ok);
   --color-accent-fg: var(--accent-fg);
   --color-critical: var(--critical);
   --color-critical-bg: var(--critical-bg);
@@ -68,38 +42,35 @@
   --color-warning-bg: var(--warning-bg);
   --color-info: var(--info);
   --color-info-bg: var(--info-bg);
-  --color-ok: var(--ok);
+  --color-ok: var(--ok-ink);
   --color-ok-bg: var(--ok-bg);
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  --shadow-card: var(--shadow);
 }
-
 html, body, #root { height: 100%; }
-body {
-  margin: 0;
-  background: var(--bg);
-  color: var(--fg);
-  font-family: var(--font-sans);
-  -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --bg: #1b1f24; --surface: #23282f; --surface-sunken: #2a3038; --line: #363d47; --line-soft: #2a3038;
+    --ink: #f2f4f7; --ink-muted: #b7bfca; --ink-subtle: #868f9c;
+    --accent: #3987e5; --accent-strong: #5a9cec; --on-accent: #0b1220; --link: var(--accent-strong);
+    --accent-soft: rgba(57,135,229,0.16); --accent-ink: #8fbcf5;
+    --ok: #199e70; --ok-soft: rgba(25,158,112,0.16); --ok-ink: #67c9a2;
+    --warn: #e0a400; --warn-soft: rgba(224,164,0,0.09); --warn-ink: #e0a400;
+    --bad: #c64e1e; --bad-soft: rgba(217,89,38,0.12); --bad-ink: #ea8c64;
+    color-scheme: dark;
+    --fg-faint: #929aa6;
+  }
 }
-.tnum { font-variant-numeric: tabular-nums; }
-
-::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
-::-webkit-scrollbar-track { background: transparent; }
-
-@keyframes fade-up { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
-@keyframes slide-in-right { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
-@keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
-.anim-fade-up { animation: fade-up 240ms ease-out both; }
-.anim-slide-in { animation: slide-in-right 220ms cubic-bezier(.2,.8,.2,1) both; }
-.anim-pulse { animation: pulse-dot 1.4s ease-in-out infinite; }
-
+@keyframes spin { to { transform: rotate(360deg); } }
+.spin { animation: spin 1s linear infinite; }
+.spin-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 @media (prefers-reduced-motion: reduce) {
-  .anim-fade-up, .anim-slide-in, .anim-pulse { animation: none; }
+  .spin { animation: none; }
+  .spin-icon { display: none; }
+  .spin-label { position: static; width: auto; height: auto; overflow: visible; clip: auto; }
 }
+html[data-theme="dark"] { color-scheme: dark; --fg-faint: #929aa6; }
+html[data-theme="light"] { color-scheme: light; }
+.lat-input[aria-invalid="true"] { border-color: var(--bad); }
+.tnum { font-variant-numeric: tabular-nums; }
 
 .prose-md > * + * { margin-top: 0.75rem; }
 .prose-md h1, .prose-md h2, .prose-md h3 { font-weight: 600; letter-spacing: -0.01em; color: var(--fg); }
@@ -110,5 +81,5 @@ body {
 .prose-md ul { list-style: disc; padding-left: 1.25rem; }
 .prose-md ol { list-style: decimal; padding-left: 1.25rem; }
 .prose-md li + li { margin-top: 0.25rem; }
-.prose-md code.inline { font-family: var(--font-mono); font-size: 0.85em; background: var(--surface-3); padding: 0.1em 0.35em; border-radius: 4px; }
+.prose-md code.inline { font-family: var(--font-mono); font-size: 0.85em; background: var(--surface-2); padding: 0.1em 0.35em; border-radius: 4px; }
 .prose-md strong { font-weight: 600; }

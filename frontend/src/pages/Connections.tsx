@@ -25,7 +25,7 @@ export default function ConnectionsPage() {
   }
 
   return (
-    <div className="anim-fade-up">
+    <div className="">
       <PageHeader title="Connections" subtitle="Each vCenter scans on its own schedule and keeps its own snapshots"
         actions={<Button variant="primary" onClick={() => setAdding(true)}><Plus size={15} /> Add vCenter</Button>} />
 
@@ -109,11 +109,11 @@ function ConnectionCard({ c, onDelete }: { c: ConnectionPublic; onDelete: () => 
         <div className="flex items-center gap-2">
           <Button size="sm" onClick={() => { setPwOpen(o => c.needs_credentials ? true : !o); setPwMsg(null) }} title="Update the stored password"><KeyRound size={13} /> Password</Button>
           <Button size="sm" onClick={() => void runTest()} loading={testing} disabled={!!c.needs_credentials}>Test</Button>
-          <button onClick={onDelete} className="text-faint hover:text-critical transition-colors p-1.5 rounded" title="Remove connection"><Trash2 size={15} /></button>
+          <button onClick={onDelete} className="text-faint hover:text-critical p-1.5 rounded" title="Remove connection"><Trash2 size={15} /></button>
         </div>
       </div>
       {c.needs_credentials ? (
-        <p className="mt-3 text-sm text-critical bg-critical-bg rounded-md px-3 py-2" role="alert">The stored password was encrypted with a different key and cannot be read (the encryption key was lost or rotated). Scans fail until it is entered again; nothing else about this connection is affected.</p>
+        <p className="mt-3 lat-banner lat-banner--bad" role="alert">The stored password was encrypted with a different key and cannot be read (the encryption key was lost or rotated). Scans fail until it is entered again; nothing else about this connection is affected.</p>
       ) : null}
       {pwOpen ? (
         <form className="mt-3 flex items-end gap-3 flex-wrap" onSubmit={e => { e.preventDefault(); void savePassword() }}>

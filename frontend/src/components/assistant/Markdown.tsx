@@ -78,7 +78,7 @@ export function CodeBlock({ code, lang, modifies }: { code: string; lang: string
             : <Badge tone="ok"><Eye size={11} /> Read only</Badge>}
           {lang ? <span className="font-mono text-faint">{lang}</span> : null}
         </div>
-        <button onClick={copy} className="inline-flex items-center gap-1 text-muted hover:text-fg transition-colors">
+        <button onClick={copy} className="inline-flex items-center gap-1 text-muted hover:text-fg">
           {copied ? <Check size={13} /> : <Copy size={13} />}{copied ? 'Copied' : 'Copy'}
         </button>
       </div>

@@ -27,7 +27,7 @@ export function TierBadge({ snapshot }: { snapshot: Pick<SnapshotSummary, 'tier'
 
 /* ---------- vCenter event categories ---------- */
 export const eventCategoryLabel: Record<EventCategory, string> = { user: 'User action', warning: 'Warning', error: 'Error', info: 'Info' }
-export const eventCategoryDot: Record<EventCategory, string> = { user: 'bg-accent', warning: 'bg-warning', error: 'bg-critical', info: 'bg-faint' }
+export const eventCategoryDot: Record<EventCategory, string> = { user: 'bg-accent', warning: 'bg-warn', error: 'bg-bad', info: 'bg-faint' }
 export function EventCategoryDot({ category, className }: { category: EventCategory; className?: string }) {
   return <span aria-hidden className={cn('inline-block h-2 w-2 rounded-full shrink-0', eventCategoryDot[category] ?? 'bg-faint', className)} title={eventCategoryLabel[category] ?? category} />
 }
@@ -95,10 +95,10 @@ export function EvidenceTable({ evidence }: { evidence: Record<string, unknown> 
 
 export function FindingRow({ finding, onClick, compact }: { finding: Finding; onClick?: () => void; compact?: boolean }) {
   return (
-    <button onClick={onClick} className={cn('w-full text-left group rounded-lg border border-border bg-surface hover:border-border-strong hover:bg-surface-2 transition-colors duration-150',
+    <button onClick={onClick} className={cn('w-full text-left group rounded-lg border border-border bg-surface hover:border-border-strong hover:bg-surface-2',
       compact ? 'px-4 py-3' : 'px-5 py-4')}>
       <div className="flex items-start gap-3">
-        <span className={cn('mt-1.5 h-2 w-2 rounded-full shrink-0', finding.severity === 'critical' ? 'bg-critical' : finding.severity === 'warning' ? 'bg-warning' : 'bg-info')} />
+        <span className={cn('mt-1.5 h-2 w-2 rounded-full shrink-0', finding.severity === 'critical' ? 'bg-bad' : finding.severity === 'warning' ? 'bg-warn' : 'bg-accent')} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
             <SeverityBadge severity={finding.severity} />
@@ -107,7 +107,7 @@ export function FindingRow({ finding, onClick, compact }: { finding: Finding; on
           <p className={cn('font-semibold tracking-tight mt-1.5', compact ? 'text-sm' : 'text-[15px]')}>{finding.title}</p>
           {!compact ? <p className="text-sm text-muted mt-1 leading-relaxed line-clamp-2">{finding.summary}</p> : null}
         </div>
-        <ArrowRight size={16} className="text-faint opacity-0 group-hover:opacity-100 transition-opacity mt-1 shrink-0" />
+        <ArrowRight size={16} className="text-faint opacity-0 group-hover:opacity-100 mt-1 shrink-0" />
       </div>
     </button>
   )
@@ -258,7 +258,7 @@ export function ListDiff({ propertyKey, oldList, newList, compact }: { propertyK
 export function StatCard({ label, value, sub, icon, tone }: { label: string; value: ReactNode; sub?: ReactNode; icon?: ReactNode; tone?: Tone }) {
   const toneText: Record<Tone, string> = { critical: 'text-critical', warning: 'text-warning', info: 'text-info', ok: 'text-ok', neutral: 'text-fg', accent: 'text-accent' }
   return (
-    <div className="rounded-xl border border-border bg-surface shadow-card px-5 py-4 flex flex-col gap-2 min-w-0">
+    <div className="rounded-xl border border-border bg-surface px-5 py-4 flex flex-col gap-2 min-w-0">
       <div className="flex items-center justify-between text-muted">
         <span className="text-xs font-medium uppercase tracking-wider">{label}</span>
         {icon}

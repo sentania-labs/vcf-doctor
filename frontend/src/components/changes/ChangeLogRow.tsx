@@ -13,7 +13,7 @@ export function ChangeLogRow({ row, open, onToggle, onCompare }: { row: ChangeLo
   return (
     <div className={cn(open && 'bg-surface-2/50')}>
       <button onClick={onToggle} aria-expanded={open}
-        className="w-full text-left px-4 py-2.5 grid grid-cols-[76px_auto_minmax(0,1fr)_16px] items-center gap-3 hover:bg-surface-2 transition-colors">
+        className="w-full text-left px-4 py-2.5 grid grid-cols-[76px_auto_minmax(0,1fr)_16px] items-center gap-3 hover:bg-surface-2">
         <span className="text-[13px] text-muted tnum" title={formatDateTime(row.observed_at)}>{formatTime(row.observed_at)}</span>
         <span className="flex items-center gap-1.5">
           <Badge tone={significanceTone[row.significance]} dot>{row.significance}</Badge>
@@ -31,7 +31,7 @@ export function ChangeLogRow({ row, open, onToggle, onCompare }: { row: ChangeLo
           <PropertyChanges change={row} />
           <div className="flex items-center gap-3 text-xs text-faint">
             <span>{n} {n === 1 ? 'property' : 'properties'} changed, observed {relativeTime(row.observed_at)}</span>
-            {onCompare ? <button className="text-accent hover:underline ml-auto" onClick={() => onCompare(row.from_snapshot_id, row.to_snapshot_id)}>Compare these two snapshots</button>
+            {onCompare ? <button className="text-link hover:underline ml-auto" onClick={() => onCompare(row.from_snapshot_id, row.to_snapshot_id)}>Compare these two snapshots</button>
               : <span className="ml-auto">One of the two snapshots is no longer kept, so they cannot be compared</span>}
           </div>
         </div>

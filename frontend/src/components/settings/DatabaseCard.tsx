@@ -27,9 +27,9 @@ export default function DatabaseCard() {
       <div className="px-5 pb-5">
         {/* Error: the critical pairing, text in the full foreground colour. Healthy: muted text on the sunken surface. */}
         <div role={down ? 'alert' : undefined}
-          className={cn('flex items-start gap-2 text-[13px] rounded-md px-3 py-2',
-            down ? 'bg-critical-bg text-fg border-l-[3px] border-critical' : 'bg-surface-2 text-muted')}>
-          <Database size={14} className={cn('mt-0.5 shrink-0', down ? 'text-critical' : 'text-muted')} />
+          className={cn('lat-banner flex items-start gap-2',
+            down && 'lat-banner--bad')}>
+          <Database size={14} className={cn('mt-0.5 shrink-0', down ? '' : 'text-muted')} />
           <span>{health.message}</span>
         </div>
       </div>

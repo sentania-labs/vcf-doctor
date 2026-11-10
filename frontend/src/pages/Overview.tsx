@@ -11,13 +11,13 @@ import { cn } from '@/lib/cn'
 
 function HealthRing({ score }: { score: number }) {
   const r = 54, c = 2 * Math.PI * r
-  const tone = score >= 90 ? 'var(--ok)' : score >= 70 ? 'var(--warning)' : 'var(--critical)'
+  const tone = score >= 90 ? 'var(--ok)' : score >= 70 ? 'var(--warn)' : 'var(--bad)'
   return (
     <div className="relative h-32 w-32 shrink-0">
       <svg viewBox="0 0 128 128" className="h-32 w-32 -rotate-90">
-        <circle cx="64" cy="64" r={r} fill="none" stroke="var(--surface-3)" strokeWidth="9" />
+        <circle cx="64" cy="64" r={r} fill="none" stroke="var(--surface-sunken)" strokeWidth="9" />
         <circle cx="64" cy="64" r={r} fill="none" stroke={tone} strokeWidth="9" strokeLinecap="round"
-          strokeDasharray={c} strokeDashoffset={c * (1 - Math.max(0, Math.min(100, score)) / 100)} style={{ transition: 'stroke-dashoffset 700ms cubic-bezier(.2,.8,.2,1)' }} />
+          strokeDasharray={c} strokeDashoffset={c * (1 - Math.max(0, Math.min(100, score)) / 100)} />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
         <span className="text-4xl font-semibold tracking-tight tnum">{Math.round(score)}</span>
@@ -52,10 +52,10 @@ export default function OverviewPage() {
   const verdictTone = !d ? '' : d.counts.critical > 0 ? 'text-critical' : d.counts.warning > 0 ? 'text-warning' : 'text-ok'
 
   return (
-    <div className="space-y-6 anim-fade-up">
+    <div className="space-y-6">
       <div className="flex items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Environment Health</h1>
+          <h1 className="page-title">Environment Health</h1>
           <p className="text-sm text-muted mt-1">{scope}{d?.last_scan ? `. Scanned ${relativeTime(d.last_scan)}` : ''}</p>
         </div>
       </div>
@@ -69,9 +69,9 @@ export default function OverviewPage() {
             {d ? <>
               <p className={cn('text-xl font-semibold tracking-tight leading-snug', verdictTone)}>{verdict}</p>
               <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm">
-                <Row dot="bg-critical" label="critical" n={d.counts.critical} />
-                <Row dot="bg-warning" label={d.counts.warning === 1 ? 'warning' : 'warnings'} n={d.counts.warning} />
-                <Row dot="bg-info" label="info" n={d.counts.info} />
+                <Row dot="bg-bad" label="critical" n={d.counts.critical} />
+                <Row dot="bg-warn" label={d.counts.warning === 1 ? 'warning' : 'warnings'} n={d.counts.warning} />
+                <Row dot="bg-accent" label="info" n={d.counts.info} />
               </dl>
               <HealthChecks health={d.health} />
             </> : <div className="space-y-2"><Skeleton className="h-6 w-56" /><Skeleton className="h-4 w-40" /><Skeleton className="h-4 w-32" /></div>}
@@ -88,7 +88,7 @@ export default function OverviewPage() {
       <div className="grid gap-5 xl:grid-cols-2 2xl:grid-cols-3">
         <Card>
           <CardHeader title="Important findings" subtitle="Highest severity first"
-            action={<Link to="/health" className="text-sm text-accent hover:underline inline-flex items-center gap-1 whitespace-nowrap shrink-0">All findings <ArrowRight size={14} /></Link>} />
+            action={<Link to="/health" className="text-sm text-link hover:underline inline-flex items-center gap-1 whitespace-nowrap shrink-0">All findings <ArrowRight size={14} /></Link>} />
           <div className="px-5 pb-5 space-y-2">
             {!d ? [0, 1, 2].map(i => <Skeleton key={i} className="h-16" />)
               : d.top_findings.length === 0 ? <EmptyState title="No findings" body="Every diagnostic check passed on the last scan." />
@@ -97,7 +97,7 @@ export default function OverviewPage() {
         </Card>
         <Card>
           <CardHeader title="Recent changes" subtitle="Since the previous snapshot, at the significance set in Settings"
-            action={<Link to="/changes" className="text-sm text-accent hover:underline inline-flex items-center gap-1 whitespace-nowrap shrink-0">Time machine <ArrowRight size={14} /></Link>} />
+            action={<Link to="/changes" className="text-sm text-link hover:underline inline-flex items-center gap-1 whitespace-nowrap shrink-0">Time machine <ArrowRight size={14} /></Link>} />
           <div className="px-5 pb-5 space-y-2">
             {!d ? [0, 1, 2].map(i => <Skeleton key={i} className="h-16" />)
               : d.recent_changes.length === 0 ? <EmptyState title="No changes" body="Nothing has changed between the last two snapshots." />
@@ -107,7 +107,7 @@ export default function OverviewPage() {
         {ev.data !== null || ev.loading ? (
           <Card className="xl:col-span-2 2xl:col-span-1">
             <CardHeader title="Recent events" subtitle="User actions, warnings and errors vCenter recorded in the last day"
-              action={<Link to="/events" className="text-sm text-accent hover:underline inline-flex items-center gap-1 whitespace-nowrap shrink-0">All events <ArrowRight size={14} /></Link>} />
+              action={<Link to="/events" className="text-sm text-link hover:underline inline-flex items-center gap-1 whitespace-nowrap shrink-0">All events <ArrowRight size={14} /></Link>} />
             <div className="px-5 pb-5">
               {!ev.data ? <div className="space-y-2">{[0, 1, 2].map(i => <Skeleton key={i} className="h-10" />)}</div>
                 : ev.data.length === 0 ? <EmptyState title="Quiet day" body="No user actions, warnings or errors in the last 24 hours." />
@@ -153,9 +153,9 @@ function HealthChecks({ health }: { health: Overview['health'] }) {
         <span title={tip} aria-label="How the score is calculated" className="inline-flex cursor-help text-muted"><Info size={13} /></span>
       </div>
       <dl className="mt-1.5 grid grid-cols-3 gap-x-4 gap-y-1">
-        <Row dot="bg-ok" label="passed" n={health.passed} />
-        <Row dot="bg-critical" label="findings" n={health.findings} />
-        <Row dot="bg-surface-3" label="not evaluated" n={health.not_evaluated} title="No applicable objects on the last scan, or the check compares against a previous snapshot that does not exist yet." />
+        <Row dot="bg-good" label="passed" n={health.passed} />
+        <Row dot="bg-bad" label="findings" n={health.findings} />
+        <Row dot="bg-border-strong" label="not evaluated" n={health.not_evaluated} title="No applicable objects on the last scan, or the check compares against a previous snapshot that does not exist yet." />
       </dl>
       <p className="mt-1.5 text-xs text-faint">Score is 100 minus {health.deduction} lost across checks with findings, weighted by severity and by the share of objects affected.</p>
     </div>
@@ -165,7 +165,7 @@ function HealthChecks({ health }: { health: Overview['health'] }) {
 function Row({ dot, label, n, title }: { dot: string; label: string; n: number; title?: string }) {
   return (
     <div className="flex items-center gap-2.5" title={title}>
-      <span className={cn('h-2 w-2 rounded-full', dot)} />
+      <span className={cn('h-2 w-2 shrink-0 rounded-full', dot)} />
       <span className="font-semibold tnum w-8">{n}</span>
       <span className="text-muted">{label}</span>
     </div>
