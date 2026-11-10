@@ -1,3 +1,4 @@
+import DeploymentHelp from '@/components/settings/DeploymentHelp'
 import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react'
 import { AlertTriangle, CheckCircle2, Database, KeyRound, ShieldCheck } from 'lucide-react'
 import type { AssistantSettings, EventPolicy, RetentionPolicy, Settings, Significance } from '@/types'
@@ -66,7 +67,7 @@ function AccessCard() {
         action={status && !status.enabled ? <Badge tone="neutral">Disabled</Badge> : status?.enabled ? <Badge tone="ok" dot>Enabled</Badge> : null} />
       <div className="px-5 pb-5">
         {status && !status.enabled ? (
-          <p className="text-sm text-muted bg-surface-2 rounded-md px-3 py-2">Authentication is disabled by the deployment (VCF_DOCTOR_AUTH=off).</p>
+          <div className="space-y-2"><p className="text-sm text-muted bg-surface-2 rounded-md px-3 py-2">Authentication is disabled by the deployment.</p><DeploymentHelp>VCF_DOCTOR_AUTH=off</DeploymentHelp></div>
         ) : (
           <form onSubmit={e => void submit(e)} className="space-y-4" noValidate>
             <div className="grid sm:grid-cols-3 gap-4">
@@ -274,7 +275,7 @@ export default function SettingsPage() {
             <CardHeader title="Assistant" subtitle="Evidence-grounded explanations and scripts. Never executes anything."
               action={status.data ? <Badge tone={status.data.available ? 'ok' : 'warning'} dot>{status.data.available ? 'Available' : 'Unavailable'}</Badge> : null} />
             <div className="px-5 pb-5 space-y-5">
-              {status.data && !status.data.available && status.data.reason ? <p className="lat-banner lat-banner--warn">{status.data.reason}</p> : null}
+              {status.data && !status.data.available && status.data.reason ? <p className="lat-banner lat-banner--warn">{status.data.reason.replace('Set ANTHROPIC_API_KEY or enter a key on the Settings page.', 'Enter a key below or supply one in the deployment.')}</p> : null}
               <Toggle checked={assistant.enabled} onChange={v => setAssistant(a => ({ ...a, enabled: v }))} label="Assistant enabled" />
               <div className="grid sm:grid-cols-2 gap-4">
                 <Field label="Provider" hint={assistant.provider === 'mock' ? 'Mock answers from canned evidence and needs no key. Not real analysis; switch to Anthropic for real answers.' : 'Answers come from the Anthropic API.'}>
@@ -292,13 +293,14 @@ export default function SettingsPage() {
                   </Select>
                 </Field>
               </div>
-              <Field label="Anthropic API key" hint="Write-only. The key is stored on the server and never shown again. A key saved here takes precedence over the ANTHROPIC_API_KEY environment variable; clear it to fall back to the environment.">
+              <Field label="Anthropic API key" hint="Write-only. The key is stored on the server and never shown again. A key saved here takes precedence over a deployment key; clear it to fall back to the deployment key.">
                 <div className="flex items-center gap-3">
                   <Input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder={assistant.api_key_set ? 'Enter a new key to replace the stored one' : 'sk-ant-...'} autoComplete="new-password" disabled={assistant.provider === 'mock'} />
                   <Badge tone={assistant.api_key_unreadable ? 'critical' : assistant.api_key_set ? 'ok' : 'neutral'} className="shrink-0"><KeyRound size={11} /> {assistant.api_key_unreadable ? (assistant.api_key_set ? 'Re-enter key (env in use)' : 'Re-enter key') : assistant.api_key_set ? 'Key set' : 'No key'}</Badge>
                 </div>
               </Field>
-              {assistant.api_key_unreadable ? <p className="lat-banner lat-banner--bad" role="alert">The stored API key was encrypted with a different key and cannot be read.{assistant.api_key_set ? ' The ANTHROPIC_API_KEY environment variable is being used meanwhile.' : ''} Enter it again to store it under the current encryption key.</p> : null}
+              <DeploymentHelp>Assistant key: ANTHROPIC_API_KEY</DeploymentHelp>
+              {assistant.api_key_unreadable ? <p className="lat-banner lat-banner--bad" role="alert">The stored API key was encrypted with a different key and cannot be read.{assistant.api_key_set ? ' The deployment key is being used meanwhile.' : ''} Enter it again to store it under the current encryption key.</p> : null}
             </div>
           </Card>
 

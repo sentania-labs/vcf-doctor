@@ -1,3 +1,4 @@
+import DeploymentHelp from './DeploymentHelp'
 import { useEffect, useState, type FormEvent } from 'react'
 import { AlertTriangle, CheckCircle2, Network } from 'lucide-react'
 import { getTrustedProxies, updateTrustedProxies } from '@/api'
@@ -38,7 +39,7 @@ export default function TrustedProxiesCard() {
       <div className="px-5 pb-5 space-y-4">
         {s.error && !s.data ? <ErrorState title="Trusted proxies unavailable" error={s.error} onRetry={s.reload} /> : !s.data ? <Skeleton className="h-24 rounded-md" /> : (
           <form onSubmit={e => void submit(e)} className="space-y-4" noValidate>
-            {s.data.env_problem ? <p className="lat-banner lat-banner--warn" role="alert">{s.data.env_problem} Nothing is trusted until it is fixed.</p> : null}
+            {s.data.env_problem ? <p className="lat-banner lat-banner--warn" role="alert">The deployment proxy list is invalid. Nothing is trusted until it is fixed.</p> : null}
             {s.data.ignored_forwarded_headers && s.data.peer ? (
               <div className="lat-banner lat-banner--warn flex items-start gap-2.5" role="status">
                 <AlertTriangle size={16} className="text-warning mt-0.5 shrink-0" />
@@ -50,9 +51,10 @@ export default function TrustedProxiesCard() {
             ) : null}
             {pinned ? (
               <p className="text-sm text-muted bg-surface-2 rounded-md px-3 py-2">
-                VCF_DOCTOR_TRUSTED_PROXIES is set on the deployment and wins over this page. In effect: <span className="font-mono">{s.data.trusted_proxies.join(', ')}</span>. Unset the variable to manage the list here.
+                The deployment sets the trusted proxy list and takes precedence over this page. In effect: <span className="font-mono">{s.data.trusted_proxies.join(', ')}</span>. Remove the deployment override to manage the list here.
               </p>
             ) : null}
+            {(pinned || s.data.env_problem) ? <DeploymentHelp>VCF_DOCTOR_TRUSTED_PROXIES{s.data.env_problem ? `: ${s.data.env_problem}` : ''}</DeploymentHelp> : null}
             <Field label="Trusted proxy addresses" hint="One IP or CIDR range per line, for example 10.42.0.0/16 for the ingress controller pods. Empty trusts nobody.">
               <textarea
                 value={text} onChange={e => setText(e.target.value)} disabled={busy || pinned} rows={3} spellCheck={false}
