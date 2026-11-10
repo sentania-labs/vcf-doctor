@@ -14,8 +14,8 @@ ARG BUILD_VERSION=dev
 ARG BUILD_SHA=unknown
 ARG BUILD_DATE=unknown
 # zlib1g 1.3.1-1+b1 carries CVE-2026-76844 and CVE-2026-85091, fixed in
-# 1.3.1-1+deb13u1, which the newest slim digest does not ship yet. Drop this
-# step once the base image does.
+# 1:1.3.dfsg+really1.3.1-1+deb13u1, which the newest slim digest does not ship
+# yet. Drop this step once the base image does.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends --only-upgrade zlib1g \
     && rm -rf /var/lib/apt/lists/*
