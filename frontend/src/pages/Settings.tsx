@@ -1,4 +1,3 @@
-import { apiKeyPlaceholder, modelHint } from './assistantCopy'
 import DeploymentHelp from '@/components/settings/DeploymentHelp'
 import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react'
 import { AlertTriangle, CheckCircle2, Database, KeyRound, ShieldCheck } from 'lucide-react'
@@ -208,8 +207,7 @@ export default function SettingsPage() {
   const [modelSource, setModelSource] = useState<'live' | 'curated' | null>(null)
   useEffect(() => {
     let cancelled = false
-    setModelSource(null)
-    getAssistantModels().then(r => { if (!cancelled) { setModels(r.models); setModelSource(r.source) } }).catch(() => { if (!cancelled) { setModels([]); setModelSource('curated') } })
+    getAssistantModels().then(r => { if (!cancelled) { setModels(r.models); setModelSource(r.source) } }).catch(() => { if (!cancelled) setModels([]) })
     return () => { cancelled = true }
   }, [assistant.api_key_set])
   const [apiKey, setApiKey] = useState('')
@@ -286,7 +284,7 @@ export default function SettingsPage() {
                     <option value="mock">Mock (no key, canned answers)</option>
                   </Select>
                 </Field>
-                <Field label="Model" hint={modelHint(modelSource, assistant.api_key_set)}>
+                <Field label="Model" hint={modelSource === 'live' ? 'List comes from your Anthropic account.' : 'Add an API key to list the models available to your account.'}>
                   <Select value={assistant.model} onChange={e => setAssistant(a => ({ ...a, model: e.target.value }))} disabled={assistant.provider === 'mock'}>
                     {(models.length ? models : [{ id: assistant.model, display_name: assistant.model, recommended: false }]).map(m => (
                       <option key={m.id} value={m.id}>{m.display_name}{m.recommended ? ' (recommended)' : ''}</option>
@@ -297,7 +295,7 @@ export default function SettingsPage() {
               </div>
               <Field label="Anthropic API key" hint="Write-only. The key is stored on the server and never shown again. A key saved here takes precedence over a deployment key; clear it to fall back to the deployment key.">
                 <div className="flex items-center gap-3">
-                  <Input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder={apiKeyPlaceholder(assistant.api_key_set)} autoComplete="new-password" disabled={assistant.provider === 'mock'} />
+                  <Input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder={assistant.api_key_set ? 'Enter a new key to replace the stored one' : 'sk-ant-...'} autoComplete="new-password" disabled={assistant.provider === 'mock'} />
                   <Badge tone={assistant.api_key_unreadable ? 'critical' : assistant.api_key_set ? 'ok' : 'neutral'} className="shrink-0"><KeyRound size={11} /> {assistant.api_key_unreadable ? (assistant.api_key_set ? 'Re-enter key (deployment key in use)' : 'Re-enter key') : assistant.api_key_set ? 'Key set' : 'No key'}</Badge>
                 </div>
               </Field>
