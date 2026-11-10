@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import { strict as assert } from 'node:assert'
-import { encryptionErrorMessage, keyFileDescription } from './encryptionError.ts'
+import { encryptionErrorMessage, keyFileDescription, plainRotation } from './encryptionError.ts'
 
 test('explains how to recover when the encryption key file cannot be created', () => {
   const message = encryptionErrorMessage('cannot create encryption key file /data/vcf-doctor.key: Permission denied. Point VCF_DOCTOR_DATA_DIR at a writable directory, or set VCF_DOCTOR_SECRET_KEY and no file is needed.')
@@ -27,4 +27,15 @@ test('the key file description is shown only when the file key is available', ()
   assert.match(keyFileDescription('file', null) ?? '', /persistent volume/)
   assert.equal(keyFileDescription('file', 'cannot create encryption key file /data/key'), null)
   assert.equal(keyFileDescription('env', null), null)
+})
+
+const names = { key_env_var: 'VCF_DOCTOR_SECRET_KEY', key_previous_env_var: 'VCF_DOCTOR_SECRET_KEY_PREVIOUS' }
+
+test('rotation text names no environment variables', () => {
+  const source = plainRotation('VCF_DOCTOR_SECRET_KEY_PREVIOUS', names)
+  assert.equal(source, 'the previous deployment key')
+  const message = plainRotation('2 stored secrets are encrypted with a key that was not supplied, so they were left untouched. Restart with that key in VCF_DOCTOR_SECRET_KEY_PREVIOUS, or re-enter those credentials.', names)
+  assert.match(message, /Restart with that key in the previous deployment key,/)
+  assert.doesNotMatch(message, /VCF_DOCTOR_/)
+  assert.equal(plainRotation('the generated key file', names), 'the generated key file')
 })

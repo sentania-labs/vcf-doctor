@@ -1,5 +1,5 @@
 import DeploymentHelp from './DeploymentHelp'
-import { encryptionErrorMessage, keyFileDescription } from './encryptionError'
+import { encryptionErrorMessage, keyFileDescription, plainRotation } from './encryptionError'
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AlertTriangle, CheckCircle2, FileKey, KeyRound, Lock } from 'lucide-react'
@@ -8,11 +8,6 @@ import type { EncryptionStatus } from '@/types'
 import { useAsync } from '@/hooks/useAsync'
 import { useAppState } from '@/state/AppState'
 import { Badge, Button, Card, CardHeader, Skeleton } from '@/components/ui'
-
-function plainRotation(text: string, status: EncryptionStatus): string {
-  if (text.startsWith('cannot create encryption key file ')) return encryptionErrorMessage(text)
-  return text.replaceAll(status.key_previous_env_var, 'the previous deployment key').replaceAll(status.key_env_var, 'the deployment key')
-}
 
 // Settings > Encryption: what protects stored secrets and whether anything needs re-entering.
 export default function EncryptionCard({ reloadKey, onRotated }: { reloadKey?: unknown; onRotated?: () => void }) {
@@ -48,7 +43,7 @@ export default function EncryptionCard({ reloadKey, onRotated }: { reloadKey?: u
             ) : null}
             {last ? (
               <p className={`text-xs rounded-md px-3 py-2 ${last.error && problems ? 'text-critical bg-critical-bg' : 'text-faint bg-surface-2'}`} role={last.error && problems ? 'alert' : undefined}>
-                {`${last.error ? 'Rotation attempted' : 'Last rotation'} ${new Date(last.at).toLocaleString()} with the previous key from ${plainRotation(last.source, d)}. ${plainRotation(last.message, d)}`}
+                {`${last.error ? 'Rotation attempted' : 'Last rotation'} ${new Date(last.at).toLocaleString()} using ${plainRotation(last.source, d)}. ${plainRotation(last.message, d)}`}
               </p>
             ) : null}
             {problems ? (
