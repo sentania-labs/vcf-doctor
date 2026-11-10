@@ -8,7 +8,7 @@
   --border-strong: var(--ink-subtle);
   --fg: var(--ink);
   --fg-muted: var(--ink-muted);
-  --fg-faint: var(--ink-muted);
+  --fg-faint: var(--ink-subtle);
   --accent-fg: var(--on-accent);
   --critical: var(--bad-ink);
   --critical-bg: var(--bad-soft);
@@ -28,6 +28,7 @@
   --color-muted: var(--fg-muted);
   --color-faint: var(--fg-faint);
   --color-accent: var(--accent);
+  --color-link: var(--link);
   --color-accent-soft: var(--accent-soft);
   --color-accent-ink: var(--accent-ink);
   --color-bad: var(--bad);
@@ -67,8 +68,7 @@ html, body, #root { height: 100%; }
 html[data-theme="dark"] { color-scheme: dark; }
 html[data-theme="light"] { color-scheme: light; }
 .lat-input[aria-invalid="true"] { border-color: var(--bad); }
-.console-nav a { color: var(--ink-muted); }
-.console-nav a:hover, .console-nav a[aria-current="page"] { color: var(--ink); }
+.bg-surface-2 .text-faint { color: var(--ink-muted); }
 .tnum { font-variant-numeric: tabular-nums; }
 
 .prose-md > * + * { margin-top: 0.75rem; }

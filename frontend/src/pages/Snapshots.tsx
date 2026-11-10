@@ -76,7 +76,7 @@ export default function SnapshotsPage() {
               <span className="page-title tnum">{list.length} <span className="text-base text-muted font-medium">{list.length === 1 ? 'snapshot' : 'snapshots'}</span></span>
               {TIER_ORDER.filter(t => tierCounts[t] > 0).map(t => <span key={t} className="text-muted"><span className="font-semibold text-fg tnum">{tierCounts[t]}</span> {tierLabel[t].toLowerCase()}</span>)}
               <span className="text-muted">Day groups: <span className="font-medium text-fg">{groupingTimezone}</span></span>
-              {needle ? <span className="text-muted ml-auto">{filtered.length} match{filtered.length === 1 ? '' : 'es'} <button className="text-accent hover:underline ml-1" onClick={() => setQ('')}>clear</button></span> : null}
+              {needle ? <span className="text-muted ml-auto">{filtered.length} match{filtered.length === 1 ? '' : 'es'} <button className="text-link hover:underline ml-1" onClick={() => setQ('')}>clear</button></span> : null}
             </div>
             {filtered.length === 0 ? (
               <Card><EmptyState icon={<Search size={20} />} title="No snapshots match" body={`Nothing matches "${q}".`} action={<Button onClick={() => setQ('')}>Clear filter</Button>} /></Card>

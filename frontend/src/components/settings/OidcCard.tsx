@@ -15,7 +15,7 @@ function splitGroups(text: string): string[] {
   return text.split(/[\n,]/).map(s => s.trim()).filter(Boolean)
 }
 
-const textareaCls = 'w-full rounded-md border border-border bg-bg px-3 py-2 text-sm font-mono text-fg placeholder:text-faint focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/25 disabled:opacity-50'
+const textareaCls = 'lat-textarea w-full text-sm font-mono placeholder:text-muted disabled:opacity-50'
 
 export default function OidcCard() {
   const s = useAsync(() => getOidcSettings(), [])

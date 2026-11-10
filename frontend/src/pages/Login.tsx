@@ -81,8 +81,8 @@ export default function LoginPage() {
                   <AlertTriangle size={16} className="text-critical mt-0.5 shrink-0" />
                   <div>
                     <div className="font-medium">Backend unreachable.</div>
-                    <div className="text-muted mt-0.5">The VCF Doctor API did not answer. Check the container is running, then retry.</div>
-                    {statusError ? <div className="font-mono text-xs text-muted mt-1.5">{statusError}</div> : null}
+                    <div className="mt-0.5">The VCF Doctor API did not answer. Check the container is running, then retry.</div>
+                    {statusError ? <div className="font-mono text-xs mt-1.5">{statusError}</div> : null}
                   </div>
                 </div>
                 <Button className="w-full" onClick={() => void refresh()} loading={loading}>Retry</Button>
@@ -136,7 +136,7 @@ export default function LoginPage() {
             )}
           </div>
         </div>
-        <div className="mt-4 text-[11px] text-faint flex items-center justify-between px-1">
+        <div className="mt-4 text-[11px] text-muted flex items-center justify-between px-1">
           <span>Read-only by design</span>
           {USE_MOCKS ? <span className="rounded bg-warning-bg text-warning px-1.5 py-0.5 font-semibold uppercase tracking-wider">mock data</span> : null}
         </div>

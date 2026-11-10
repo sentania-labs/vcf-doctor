@@ -18,7 +18,7 @@ export function Button({ variant = 'secondary', size = 'md', loading, className,
         variantCls[variant], sizeCls[size], className)}
       disabled={disabled || loading} {...rest}
     >
-      {loading ? <Loader2 size={15} className="spin" /> : null}
+      {loading ? <><Loader2 size={15} className="spin spin-icon" aria-hidden="true" /><span className="spin-label">Loading</span></> : null}
       {children}
     </button>
   )
@@ -42,7 +42,7 @@ export function CardHeader({ title, subtitle, action, className }: { title: Reac
         <h3 className="text-[15px] font-semibold tracking-tight">{title}</h3>
         {subtitle ? <p className="text-sm text-muted mt-0.5">{subtitle}</p> : null}
       </div>
-      {action}
+      {action ? <div className="shrink-0">{action}</div> : null}
     </div>
   )
 }
@@ -55,7 +55,7 @@ const toneCls: Record<Tone, string> = {
 }
 export function Badge({ tone = 'neutral', children, className, dot }: { tone?: Tone; children: ReactNode; className?: string; dot?: boolean }) {
   return (
-    <span className={cn('lat-badge inline-flex items-center gap-1.5', toneCls[tone], className)}>
+    <span className={cn('lat-badge inline-flex items-center gap-1.5 whitespace-nowrap', toneCls[tone], className)}>
       {dot ? <span className="h-1.5 w-1.5 rounded-full bg-current" /> : null}
       {children}
     </span>
@@ -99,7 +99,7 @@ export function Toggle({ checked, onChange, label, disabled }: { checked: boolea
       className={cn('inline-flex items-center gap-2.5 disabled:opacity-50', label && 'text-sm')}>
       <span className={cn('relative inline-flex h-5 w-9 shrink-0 items-center rounded-full border',
         checked ? 'bg-accent border-accent' : 'bg-surface-2 border-border-strong')}>
-        <span className={cn('absolute h-3.5 w-3.5 rounded-full bg-white', checked ? 'translate-x-[18px]' : 'translate-x-[3px]')} />
+        <span className={cn('absolute h-3.5 w-3.5 rounded-full', checked ? 'translate-x-[18px] bg-accent-fg' : 'translate-x-[3px] bg-border-strong')} />
       </span>
       {label ? <span>{label}</span> : null}
     </button>
@@ -109,10 +109,10 @@ export function Toggle({ checked, onChange, label, disabled }: { checked: boolea
 /* ---------- Segmented control ---------- */
 export function Segmented<T extends string>({ value, onChange, options }: { value: T; onChange: (v: T) => void; options: Array<{ value: T; label: ReactNode }> }) {
   return (
-    <div className="inline-flex rounded-lg border border-border bg-surface p-0.5">
+    <div className="inline-flex max-w-full flex-wrap rounded-lg border border-border bg-surface p-0.5">
       {options.map(o => (
         <button key={o.value} onClick={() => onChange(o.value)}
-          className={cn('h-8 rounded-md border px-3 text-[13px] font-medium inline-flex items-center gap-1.5',
+          className={cn('h-8 whitespace-nowrap rounded-md border px-3 text-[13px] font-medium inline-flex items-center gap-1.5',
             value === o.value ? 'border-accent bg-accent-soft text-accent-ink' : 'border-transparent text-muted hover:text-fg')}>
           {o.label}
         </button>
@@ -182,12 +182,12 @@ export function Spinner({ className, label = 'Loading' }: { className?: string; 
   return (
     <span role="status" className={cn('inline-flex items-center gap-2 text-muted', className)}>
       <Loader2 size={18} className="spin spin-icon" aria-hidden="true" />
-      <span className="spin-label">{label}</span>
+      <span>{label}</span>
     </span>
   )
 }
 export function Skeleton({ className }: { className?: string }) {
-  return <div className={cn('rounded-md bg-surface-2', className)} />
+  return <div role="status" aria-live="polite" className={cn('rounded-md border border-border-strong bg-surface-2 min-h-8 flex items-center justify-center px-2 text-xs text-muted', className)}><Loader2 size={14} className="spin spin-icon mr-2" aria-hidden="true" />Loading</div>
 }
 export function EmptyState({ icon, title, body, action }: { icon?: ReactNode; title: string; body?: ReactNode; action?: ReactNode }) {
   return (
@@ -202,7 +202,7 @@ export function EmptyState({ icon, title, body, action }: { icon?: ReactNode; ti
 export function ErrorState({ title = 'Could not load', error, onRetry }: { title?: string; error: Error | string | null; onRetry?: () => void }) {
   const msg = typeof error === 'string' ? error : error?.message
   return (
-    <div className="lat-banner lat-banner--bad flex flex-col items-center justify-center text-center py-12 px-6" role="alert">
+    <div className="lat-banner lat-banner--bad m-5 flex flex-col items-center justify-center text-center py-12 px-6" role="alert">
       <div className="mb-4"><AlertTriangle size={20} /></div>
       <h3 className="text-[15px] font-semibold">{title}</h3>
       {msg ? <p className="text-sm mt-1.5">{msg}</p> : null}

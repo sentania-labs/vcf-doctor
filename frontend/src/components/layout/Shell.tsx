@@ -30,7 +30,7 @@ function NavItem({ to, label, icon: Icon, end }: { to: string; label: string; ic
       className={({ isActive }) => cn('flex items-center gap-3 rounded-md px-3 h-9 text-[13.5px] font-medium',
         isActive ? 'bg-accent-soft text-fg' : 'text-muted hover:text-fg hover:bg-surface-2')}>
       {({ isActive }) => (<>
-        <Icon size={16} className={isActive ? 'text-accent' : 'text-faint'} />
+        <Icon size={16} className={isActive ? 'text-accent-ink' : 'text-muted'} />
         {label}
       </>)}
     </NavLink>
@@ -71,7 +71,7 @@ export function Shell() {
           <div className="h-8 w-8 rounded-lg bg-accent text-accent-fg flex items-center justify-center"><Stethoscope size={17} /></div>
           <div className="leading-tight">
             <div className="text-[15px] font-semibold tracking-tight">VCF Doctor</div>
-            <div className="text-[11px] text-faint">Operations console</div>
+            <div className="text-[11px] text-muted">Operations console</div>
           </div>
         </div>
         <nav className="console-nav flex-1 px-3 py-4 flex flex-col gap-0.5">
@@ -82,7 +82,7 @@ export function Shell() {
           {secondary.filter(n => !outage || n.to === '/settings').map(n => <NavItem key={n.to} {...n} />)}
           <div className="mt-auto pt-4">{outage ? null : <SignOutItem />}</div>
         </nav>
-        <div className="px-5 py-4 border-t border-border text-[11px] text-faint flex items-center justify-between">
+        <div className="px-5 py-4 border-t border-border text-[11px] text-muted flex items-center justify-between">
           <span>Read-only by design</span>
           {USE_MOCKS ? <span className="rounded bg-warning-bg text-warning px-1.5 py-0.5 font-semibold uppercase tracking-wider">mock data</span> : null}
         </div>
@@ -90,16 +90,18 @@ export function Shell() {
       <div className="flex-1 min-w-0 flex flex-col">
         <TopBar />
         {backend === 'down' ? (
-          <div className="lat-banner lat-banner--bad flex flex-wrap items-center gap-2.5" role="alert">
-            <span className="h-2 w-2 rounded-full bg-bad" />
+          <div className="lat-banner lat-banner--bad rounded-none flex items-start gap-2.5" role="alert">
+            <span className="h-2 w-2 mt-1.5 shrink-0 rounded-full bg-current" />
+            <div className="flex-1 min-w-0">
             {databaseDown ? (<>
               <span className="font-medium">The database is unreachable.</span>
-              <span>The console is running, but it cannot read or save anything until PostgreSQL is back. Retrying every 5 seconds.</span>
+              {' '}<span>The console is running, but it cannot read or save anything until PostgreSQL is back. Retrying every 5 seconds.</span>
             </>) : (<>
               <span className="font-medium">This console cannot serve.</span>
-              <span>Its backend is unreachable. Pages show the last data they loaded. Retrying every 5 seconds.</span>
+              {' '}<span>Its backend is unreachable. Pages show the last data they loaded. Retrying every 5 seconds.</span>
             </>)}
-            {backendError && !databaseDown ? <span className="ml-auto font-mono text-xs text-muted">{backendError}</span> : null}
+            {backendError && !databaseDown ? <span className="ml-2 font-mono text-xs">{backendError}</span> : null}
+            </div>
           </div>
         ) : null}
         <main className="flex-1 min-h-0 overflow-y-auto">

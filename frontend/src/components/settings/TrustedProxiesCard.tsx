@@ -40,11 +40,11 @@ export default function TrustedProxiesCard() {
           <form onSubmit={e => void submit(e)} className="space-y-4" noValidate>
             {s.data.env_problem ? <p className="lat-banner lat-banner--warn" role="alert">{s.data.env_problem} Nothing is trusted until it is fixed.</p> : null}
             {s.data.ignored_forwarded_headers && s.data.peer ? (
-              <div className="flex items-start gap-2.5 rounded-md bg-warning-bg px-3 py-2.5 text-sm" role="status">
+              <div className="lat-banner lat-banner--warn flex items-start gap-2.5" role="status">
                 <AlertTriangle size={16} className="text-warning mt-0.5 shrink-0" />
                 <div>
                   <div className="font-medium">Requests arrive from <span className="font-mono">{s.data.peer}</span>, which is not trusted, and carry forwarded headers that are being ignored.</div>
-                  <div className="text-muted mt-0.5">If that is your ingress, add it (or its network) below. Until then every visitor shares one lockout and the console treats the connection as plain {s.data.scheme}: no HSTS, no Secure cookie flag.</div>
+                  <div className="mt-0.5">If that is your ingress, add it (or its network) below. Until then every visitor shares one lockout and the console treats the connection as plain {s.data.scheme}: no HSTS, no Secure cookie flag.</div>
                 </div>
               </div>
             ) : null}
@@ -57,7 +57,7 @@ export default function TrustedProxiesCard() {
               <textarea
                 value={text} onChange={e => setText(e.target.value)} disabled={busy || pinned} rows={3} spellCheck={false}
                 placeholder={'10.42.0.0/16'}
-                className="w-full rounded-md border border-border bg-bg px-3 py-2 text-sm font-mono text-fg placeholder:text-faint focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/25 disabled:opacity-50"
+                className="lat-textarea w-full text-sm font-mono placeholder:text-muted disabled:opacity-50"
               />
             </Field>
             <ul className="text-xs text-faint space-y-1 list-disc pl-4">

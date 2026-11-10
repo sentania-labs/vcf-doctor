@@ -3,7 +3,7 @@ import { AlertCircle, Bot, Send, Sparkles, Square, User } from 'lucide-react'
 import type { AssistantEvidenceCount, AssistantRequest, AssistantTask, Change, Event, Finding, Resource, ScriptFormat } from '@/types'
 import { getAssistantStatus, streamAssistant } from '@/api'
 import { useAsync } from '@/hooks/useAsync'
-import { Button, Select, Skeleton } from '@/components/ui'
+import { Button, Select, Skeleton, Spinner } from '@/components/ui'
 import { Markdown } from './Markdown'
 import { SeverityBadge } from '@/components/domain'
 import { cn } from '@/lib/cn'
@@ -132,17 +132,17 @@ export function AssistantPanel({ seed, seedKey, context, compact }: {
 
       {/* Unavailable banner */}
       {status.data && !available ? (
-        <div className="mx-5 mt-4 rounded-lg border border-warning/40 bg-warning-bg px-4 py-3 text-sm flex gap-2.5 shrink-0">
+        <div className="lat-banner lat-banner--warn mx-5 mt-4 flex gap-2.5 shrink-0">
           <AlertCircle size={16} className="text-warning shrink-0 mt-0.5" />
           <div>
-            <p className="font-medium text-fg">Assistant unavailable</p>
-            <p className="text-muted mt-0.5">{status.data.reason ?? 'The assistant provider is not configured.'} Health and Changes keep working without it; configure a provider in Settings.</p>
+            <p className="font-medium">Assistant unavailable</p>
+            <p className="mt-0.5">{status.data.reason ?? 'The assistant provider is not configured.'} Health and Changes keep working without it; configure a provider in Settings.</p>
           </div>
         </div>
       ) : status.error ? (
         <div className="lat-banner lat-banner--bad mx-5 mt-4 flex gap-2.5 shrink-0">
           <AlertCircle size={16} className="text-critical shrink-0 mt-0.5" />
-          <div><p className="font-medium">Could not reach the assistant</p><p className="text-muted mt-0.5 font-mono text-xs">{status.error.message}</p></div>
+          <div><p className="font-medium">Could not reach the assistant</p><p className="mt-0.5 font-mono text-xs">{status.error.message}</p></div>
         </div>
       ) : null}
 
@@ -190,7 +190,7 @@ export function AssistantPanel({ seed, seedKey, context, compact }: {
             value={input} onChange={e => setInput(e.target.value)} rows={2} disabled={!available || busy}
             onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(task, input) } }}
             placeholder={available ? 'Ask about the evidence in view. Enter to send, Shift+Enter for a new line.' : 'Assistant unavailable'}
-            className="flex-1 resize-none rounded-md border border-border bg-bg px-3 py-2 text-sm placeholder:text-faint focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/25 disabled:opacity-50"
+            className="lat-textarea flex-1 min-w-0 resize-none text-sm placeholder:text-muted disabled:opacity-50"
           />
           {busy
             ? <Button type="button" variant="secondary" onClick={stop} aria-label="Stop"><Square size={14} /> Stop</Button>
@@ -219,7 +219,7 @@ function MessageView({ m }: { m: Message }) {
       <div className="h-7 w-7 rounded-md bg-info-bg flex items-center justify-center text-accent shrink-0"><Bot size={14} /></div>
       <div className="min-w-0 flex-1">
         <div className="text-[11px] uppercase tracking-wider text-faint font-semibold mb-1.5">Assistant</div>
-        {m.text ? <Markdown text={m.text} /> : m.streaming ? <div className="flex items-center gap-1.5 h-5"><span className="h-1.5 w-1.5 rounded-full bg-muted" /><span className="h-1.5 w-1.5 rounded-full bg-muted" /><span className="h-1.5 w-1.5 rounded-full bg-muted" /></div> : null}
+        {m.text ? <Markdown text={m.text} /> : m.streaming ? <Spinner label="Generating response" /> : null}
         {refused ? <p className="mt-2 text-sm text-warning">The model declined to answer this request. Try rephrasing or narrowing the evidence.</p> : null}
         {m.error ? <p className="mt-2 text-sm text-critical flex items-center gap-1.5"><AlertCircle size={14} />{m.error}</p> : null}
         {m.evidence && !m.streaming ? (

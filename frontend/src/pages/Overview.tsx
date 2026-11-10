@@ -88,7 +88,7 @@ export default function OverviewPage() {
       <div className="grid gap-5 xl:grid-cols-2 2xl:grid-cols-3">
         <Card>
           <CardHeader title="Important findings" subtitle="Highest severity first"
-            action={<Link to="/health" className="text-sm text-accent hover:underline inline-flex items-center gap-1 whitespace-nowrap shrink-0">All findings <ArrowRight size={14} /></Link>} />
+            action={<Link to="/health" className="text-sm text-link hover:underline inline-flex items-center gap-1 whitespace-nowrap shrink-0">All findings <ArrowRight size={14} /></Link>} />
           <div className="px-5 pb-5 space-y-2">
             {!d ? [0, 1, 2].map(i => <Skeleton key={i} className="h-16" />)
               : d.top_findings.length === 0 ? <EmptyState title="No findings" body="Every diagnostic check passed on the last scan." />
@@ -97,7 +97,7 @@ export default function OverviewPage() {
         </Card>
         <Card>
           <CardHeader title="Recent changes" subtitle="Since the previous snapshot, at the significance set in Settings"
-            action={<Link to="/changes" className="text-sm text-accent hover:underline inline-flex items-center gap-1 whitespace-nowrap shrink-0">Time machine <ArrowRight size={14} /></Link>} />
+            action={<Link to="/changes" className="text-sm text-link hover:underline inline-flex items-center gap-1 whitespace-nowrap shrink-0">Time machine <ArrowRight size={14} /></Link>} />
           <div className="px-5 pb-5 space-y-2">
             {!d ? [0, 1, 2].map(i => <Skeleton key={i} className="h-16" />)
               : d.recent_changes.length === 0 ? <EmptyState title="No changes" body="Nothing has changed between the last two snapshots." />
@@ -107,7 +107,7 @@ export default function OverviewPage() {
         {ev.data !== null || ev.loading ? (
           <Card className="xl:col-span-2 2xl:col-span-1">
             <CardHeader title="Recent events" subtitle="User actions, warnings and errors vCenter recorded in the last day"
-              action={<Link to="/events" className="text-sm text-accent hover:underline inline-flex items-center gap-1 whitespace-nowrap shrink-0">All events <ArrowRight size={14} /></Link>} />
+              action={<Link to="/events" className="text-sm text-link hover:underline inline-flex items-center gap-1 whitespace-nowrap shrink-0">All events <ArrowRight size={14} /></Link>} />
             <div className="px-5 pb-5">
               {!ev.data ? <div className="space-y-2">{[0, 1, 2].map(i => <Skeleton key={i} className="h-10" />)}</div>
                 : ev.data.length === 0 ? <EmptyState title="Quiet day" body="No user actions, warnings or errors in the last 24 hours." />
@@ -165,7 +165,7 @@ function HealthChecks({ health }: { health: Overview['health'] }) {
 function Row({ dot, label, n, title }: { dot: string; label: string; n: number; title?: string }) {
   return (
     <div className="flex items-center gap-2.5" title={title}>
-      <span className={cn('h-2 w-2 rounded-full', dot)} />
+      <span className={cn('h-2 w-2 shrink-0 rounded-full', dot)} />
       <span className="font-semibold tnum w-8">{n}</span>
       <span className="text-muted">{label}</span>
     </div>

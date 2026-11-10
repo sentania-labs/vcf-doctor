@@ -65,7 +65,7 @@ export default function HealthPage() {
 }
 
 function Count({ n }: { n: number }) {
-  return <span className="ml-0.5 rounded bg-border px-1.5 text-[11px] text-muted tnum">{n}</span>
+  return <span className="ml-0.5 rounded bg-surface-2 px-1.5 text-[11px] text-current tnum">{n}</span>
 }
 
 interface Related {

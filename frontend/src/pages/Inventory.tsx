@@ -115,7 +115,7 @@ function TreeNode({ r, depth, childrenOf, selected, onSelect, filter }: { r: Res
         <ResourceIcon type={r.type} size={14} className="text-muted shrink-0" />
         <span className="text-sm truncate">{r.name}</span>
         {dot ? <span className={cn('ml-1.5 h-1.5 w-1.5 rounded-full shrink-0', dot)} /> : null}
-        <span className="ml-auto text-[11px] text-faint uppercase tracking-wider shrink-0"><ResourceTypeLabel type={r.type} />{kids.length ? ` ${kids.length}` : ''}</span>
+        <span className="ml-auto text-[11px] text-muted uppercase tracking-wider shrink-0"><ResourceTypeLabel type={r.type} />{kids.length ? ` ${kids.length}` : ''}</span>
       </div>
       {expanded && kids.map(k => <TreeNode key={k.id} r={k} depth={depth + 1} childrenOf={childrenOf} selected={selected} onSelect={onSelect} filter={filter} />)}
     </div>
@@ -130,8 +130,8 @@ function LeafRow({ r, selected, onSelect }: { r: Resource; selected: Resource | 
       <ResourceIcon type={r.type} size={14} className="text-muted shrink-0" />
       <span className="text-sm truncate">{r.name}</span>
       {dot ? <span className={cn('h-1.5 w-1.5 rounded-full shrink-0', dot)} /> : null}
-      {!Number.isNaN(used) ? <span className={cn('ml-auto text-xs tnum', used >= 85 ? 'text-warning font-semibold' : 'text-muted')}>{used}% used</span>
-        : r.properties.kind ? <span className="ml-auto text-[11px] text-faint">{String(r.properties.kind).replace('DistributedVirtualPortgroup', 'VDS portgroup').replace('NsxSegment', 'NSX segment')}</span> : null}
+      {!Number.isNaN(used) ? <span className={cn('ml-auto text-xs tnum', selected?.id === r.id ? 'text-accent-ink' : used >= 85 ? 'text-warning font-semibold' : 'text-muted')}>{used}% used</span>
+        : r.properties.kind ? <span className="ml-auto text-[11px] text-muted">{String(r.properties.kind).replace('DistributedVirtualPortgroup', 'VDS portgroup').replace('NsxSegment', 'NSX segment')}</span> : null}
     </div>
   )
 }
@@ -144,7 +144,7 @@ function Properties({ r, byId, onSelect }: { r: Resource; byId: Map<string, Reso
         <div className="flex items-center gap-2 mb-1.5"><Badge tone="neutral"><ResourceTypeLabel type={r.type} /></Badge>{statusDot(r) ? <span className={cn('h-2 w-2 rounded-full', statusDot(r))} /> : null}</div>
         <h2 className="text-lg font-semibold tracking-tight break-all">{r.name}</h2>
         <p className="text-xs text-faint font-mono mt-1 break-all">{r.id}</p>
-        {parent ? <p className="text-sm text-muted mt-2">in <button onClick={() => onSelect(parent)} className="text-accent hover:underline">{parent.name}</button></p> : null}
+        {parent ? <p className="text-sm text-muted mt-2">in <button onClick={() => onSelect(parent)} className="text-link hover:underline">{parent.name}</button></p> : null}
       </div>
       <div className="px-5 py-4">
         <PropertyGroups properties={r.properties} />
@@ -154,7 +154,7 @@ function Properties({ r, byId, onSelect }: { r: Resource; byId: Map<string, Reso
             <ul className="space-y-1">
               {r.relationships.map((rel, i) => {
                 const t = byId.get(rel.target_id)
-                return <li key={i} className="text-[13px] flex items-center gap-2"><span className="text-muted">{humanKey(rel.kind)}</span>{t ? <button onClick={() => onSelect(t)} className="text-accent hover:underline inline-flex items-center gap-1"><ResourceIcon type={t.type} size={12} />{t.name}</button> : <span className="font-mono text-faint">{rel.target_id}</span>}</li>
+                return <li key={i} className="text-[13px] flex items-center gap-2"><span className="text-muted">{humanKey(rel.kind)}</span>{t ? <button onClick={() => onSelect(t)} className="text-link hover:underline inline-flex items-center gap-1"><ResourceIcon type={t.type} size={12} />{t.name}</button> : <span className="font-mono text-faint">{rel.target_id}</span>}</li>
               })}
             </ul>
           </>

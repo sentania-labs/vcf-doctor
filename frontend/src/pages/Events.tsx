@@ -67,21 +67,21 @@ export default function EventsPage() {
         actions={<Segmented value={range} onChange={setRange} options={RANGE_PRESETS.map(p => ({ value: p.value, label: `Last ${p.label}` }))} />} />
 
       {capture.data?.task_history_unavailable ? (
-        <Card className="mb-5 border-warning/40 bg-warning-bg">
+        <div className="lat-banner lat-banner--warn mb-5">
           <div role="status" className="px-4 py-3 flex items-start gap-3 text-sm">
             <AlertTriangle size={17} className="text-warning mt-0.5 shrink-0" />
-            <div><p className="font-semibold text-fg">Task history unavailable</p><p className="text-muted mt-0.5">This connection does not support task history or denies permission to read it. Events are still collected, but task history is missing. VCF Doctor checks access again on each scan.</p></div>
+            <div><p className="font-semibold">Task history unavailable</p><p className="mt-0.5">This connection does not support task history or denies permission to read it. Events are still collected, but task history is missing. VCF Doctor checks access again on each scan.</p></div>
           </div>
-        </Card>
+        </div>
       ) : null}
 
       {capture.data && capture.data.incomplete_intervals.length > 0 ? (
-        <Card className="mb-5 border-warning/40 bg-warning-bg">
+        <div className="lat-banner lat-banner--warn mb-5">
           <div className="px-4 py-3 flex items-start gap-3 text-sm">
             <AlertTriangle size={17} className="text-warning mt-0.5 shrink-0" />
-            <div><p className="font-semibold text-fg">Event capture has {capture.data.incomplete_intervals.length} incomplete {capture.data.incomplete_intervals.length === 1 ? 'interval' : 'intervals'}</p><p className="text-muted mt-0.5">A vCenter query failed or reached the safety limit in its smallest query window. VCF Doctor kept the interval for automatic retry on later scans, so this is visible rather than silently lost.</p></div>
+            <div><p className="font-semibold">Event capture has {capture.data.incomplete_intervals.length} incomplete {capture.data.incomplete_intervals.length === 1 ? 'interval' : 'intervals'}</p><p className="mt-0.5">A vCenter query failed or reached the safety limit in its smallest query window. VCF Doctor kept the interval for automatic retry on later scans, so this is visible rather than silently lost.</p></div>
           </div>
-        </Card>
+        </div>
       ) : null}
 
       <div className="flex flex-wrap items-center gap-3 mb-5">
@@ -130,21 +130,21 @@ export default function EventsPage() {
 
 function EventRow({ e, onResource }: { e: Event; onResource: (id: string) => void }) {
   return (
-    <div className="px-4 py-2.5 grid grid-cols-[64px_10px_minmax(0,1fr)_minmax(0,170px)_minmax(0,200px)] items-start gap-3">
+    <div className="px-4 py-2.5 grid grid-cols-[64px_10px_minmax(0,1fr)] lg:grid-cols-[64px_10px_minmax(0,1fr)_minmax(0,170px)_minmax(0,200px)] items-start gap-3">
       <span className="text-[13px] text-muted tnum pt-0.5 whitespace-nowrap" title={formatDateTime(e.time)}>{relativeTime(e.time)}</span>
       <EventCategoryDot category={e.category} className="mt-2" />
       <div className="min-w-0">
-        <p className={cn('text-sm leading-snug', e.category === 'error' ? 'text-fg font-medium' : 'text-fg')}>{e.message}</p>
+        <p className={cn('text-sm leading-snug [overflow-wrap:anywhere]', e.category === 'error' ? 'text-fg font-medium' : 'text-fg')}>{e.message}</p>
         <p className="mt-0.5 text-xs text-faint flex items-center gap-2 min-w-0">
           <span className="font-mono truncate" title={e.type}>{e.type}</span>
           {e.source === 'task' ? <Badge tone="neutral" className="normal-case tracking-normal">task</Badge> : null}
           <span className="tnum">{formatTime(e.time)}</span>
         </p>
       </div>
-      <span className="text-[13px] text-muted truncate pt-0.5" title={e.user ?? undefined}>{e.user ?? <span className="text-faint">system</span>}</span>
-      <span className="min-w-0 pt-0.5">
+      <span className="col-start-3 lg:col-start-auto text-[13px] text-muted truncate pt-0.5" title={e.user ?? undefined}>{e.user ?? <span className="text-faint">system</span>}</span>
+      <span className="col-start-3 lg:col-start-auto min-w-0 pt-0.5">
         {e.resource_id ? (
-          <button onClick={() => onResource(e.resource_id as string)} className="inline-flex items-center gap-1.5 text-[13px] text-accent hover:underline max-w-full" title="Open in Inventory">
+          <button onClick={() => onResource(e.resource_id as string)} className="inline-flex items-center gap-1.5 text-[13px] text-link hover:underline max-w-full" title="Open in Inventory">
             <ResourceIcon type={e.resource_type ?? ''} size={13} className="shrink-0" /><span className="truncate">{e.resource_name ?? e.resource_id}</span>
           </button>
         ) : e.resource_name ? <span className="text-[13px] text-muted truncate inline-block max-w-full">{e.resource_name}</span> : null}
