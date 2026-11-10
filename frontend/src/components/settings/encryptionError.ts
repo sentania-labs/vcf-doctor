@@ -8,3 +8,8 @@ export function encryptionErrorMessage(error: string): string {
   }
   return 'The encryption key is unavailable. Check the deployment details and contact the person who manages the deployment.'
 }
+
+export function keyFileDescription(source: 'env' | 'file', error?: string | null): string | null {
+  if (source !== 'file' || error) return null
+  return 'The key file lives on the persistent volume with owner-only permissions. A key supplied by the deployment takes precedence over it. The key is never shown here.'
+}

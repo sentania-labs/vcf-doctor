@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import { strict as assert } from 'node:assert'
-import { encryptionErrorMessage } from './encryptionError.ts'
+import { encryptionErrorMessage, keyFileDescription } from './encryptionError.ts'
 
 test('explains how to recover when the encryption key file cannot be created', () => {
   const message = encryptionErrorMessage('cannot create encryption key file /data/vcf-doctor.key: Permission denied. Point VCF_DOCTOR_DATA_DIR at a writable directory, or set VCF_DOCTOR_SECRET_KEY and no file is needed.')
@@ -21,4 +21,10 @@ test('unknown key errors direct users to deployment help without exposing raw de
   const message = encryptionErrorMessage('unexpected VCF_DOCTOR_SECRET_KEY error')
   assert.match(message, /deployment details/)
   assert.doesNotMatch(message, /VCF_DOCTOR_/)
+})
+
+test('the key file description is shown only when the file key is available', () => {
+  assert.match(keyFileDescription('file', null) ?? '', /persistent volume/)
+  assert.equal(keyFileDescription('file', 'cannot create encryption key file /data/key'), null)
+  assert.equal(keyFileDescription('env', null), null)
 })
