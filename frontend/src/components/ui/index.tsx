@@ -1,6 +1,7 @@
 import { useEffect, useRef, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes } from 'react'
 import { AlertTriangle, Inbox, Loader2, X } from 'lucide-react'
 import { cn } from '@/lib/cn'
+export { Skeleton } from './Skeleton'
 
 /* ---------- Button ---------- */
 type Variant = 'primary' | 'secondary' | 'ghost' | 'danger'
@@ -185,9 +186,6 @@ export function Spinner({ className, label = 'Loading' }: { className?: string; 
       <span>{label}</span>
     </span>
   )
-}
-export function Skeleton({ className }: { className?: string }) {
-  return <div aria-hidden="true" className={cn('rounded-md border border-border-strong bg-surface-2', className)} />
 }
 export function EmptyState({ icon, title, body, action }: { icon?: ReactNode; title: string; body?: ReactNode; action?: ReactNode }) {
   return (
