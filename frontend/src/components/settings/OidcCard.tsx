@@ -1,3 +1,4 @@
+import DeploymentHelp from './DeploymentHelp'
 import { useEffect, useState, type FormEvent } from 'react'
 import { CheckCircle2, KeyRound } from 'lucide-react'
 import type { OidcValues } from '@/types'
@@ -46,7 +47,7 @@ export default function OidcCard() {
   }
 
   const field = (k: keyof typeof form, label: string, hint: string, placeholder = '') => (
-    <Field label={label} hint={pinned?.[k] ? `Set by ${ENV_NAME[k]} on the deployment: ${shown(k)}` : hint}>
+    <Field label={label} hint={pinned?.[k] ? `Set by the deployment: ${shown(k)}` : hint}>
       <Input value={pinned?.[k] ? shown(k) : form[k]} onChange={e => set(k)(e.target.value)} disabled={busy || !!pinned?.[k]}
         placeholder={placeholder} spellCheck={false} autoComplete="off" className="font-mono" />
     </Field>
@@ -60,7 +61,7 @@ export default function OidcCard() {
         {s.error && !s.data ? <ErrorState title="Single sign-on settings unavailable" error={s.error} onRetry={s.reload} /> : !s.data ? <Skeleton className="h-40 rounded-md" /> : (
           <form onSubmit={e => void submit(e)} className="space-y-4" noValidate>
             {!s.data.auth_enabled ? (
-              <p className="lat-banner lat-banner--warn" role="status">Authentication is switched off by the deployment (VCF_DOCTOR_AUTH), so nothing here is used.</p>
+              <p className="lat-banner lat-banner--warn" role="status">Authentication is switched off by the deployment, so nothing here is used.</p>
             ) : null}
             <div className="grid sm:grid-cols-2 gap-4">
               {field('issuer', 'Issuer URL', 'The provider\'s issuer, for example https://auth.example.com/application/o/vcf-doctor/. Its discovery document is read from there.', 'https://auth.example.com/application/o/vcf-doctor/')}
@@ -68,16 +69,17 @@ export default function OidcCard() {
               {field('redirect_uri', 'Redirect URI', 'Optional. Leave empty to use the address below; set it when the console sits behind an ingress that changes the scheme or host.', s.data.callback_url)}
               {field('scopes', 'Scopes', `Space separated; openid is always requested. Empty means ${s.data.defaults.scopes}. Many providers need a scope such as groups for the groups claim to be sent.`, s.data.defaults.scopes)}
               {field('groups_claim', 'Groups claim', `The claim that lists a person's groups. Empty means ${s.data.defaults.groups_claim}.`, s.data.defaults.groups_claim)}
-              <Field label="Admin groups" hint={pinned?.admin_groups ? `Set by ${ENV_NAME.admin_groups} on the deployment: ${shown('admin_groups')}` : 'Members of any of these get full access, the same as the operator password. One per line, matched exactly. Anyone else who signs in is refused. No group is assumed: with none listed, single sign-on stays off.'}>
+              <Field label="Admin groups" hint={pinned?.admin_groups ? `Set by the deployment: ${shown('admin_groups')}` : 'Members of any of these get full access, the same as the operator password. One per line, matched exactly. Anyone else who signs in is refused. No group is assumed: with none listed, single sign-on stays off.'}>
                 <textarea value={pinned?.admin_groups ? shown('admin_groups').split(', ').join('\n') : groups} onChange={e => setGroups(e.target.value)}
                   disabled={busy || !!pinned?.admin_groups} rows={3} spellCheck={false} className={textareaCls} placeholder={'one group per line'} />
               </Field>
             </div>
             <ul className="text-xs text-faint space-y-1 list-disc pl-4">
               <li>Register this redirect URI at the provider: <span className="font-mono text-muted break-all">{s.data.effective.redirect_uri || s.data.callback_url}</span></li>
-              <li>Client secret: {s.data.client_secret ? 'a secret file is mounted and will be used.' : 'no secret file found, so this is treated as a public client (PKCE only). To use a secret, mount it as a file and point VCF_DOCTOR_OIDC_CLIENT_SECRET_FILE at it; it is never entered or stored here.'}</li>
+              <li>Client secret: {s.data.client_secret ? 'a secret file is mounted and will be used.' : 'no secret file found, so this is treated as a public client (PKCE only). To use a secret, supply a secret file in the deployment; it is never entered or stored here.'}</li>
               <li>A person's groups are checked at every sign-in. Removing someone from a group stops new sign-ins, and their next refused sign-in ends the sessions they already have. If they never try again, a session lasts until it expires or the operator password is changed.</li>
             </ul>
+            <DeploymentHelp>Authentication: VCF_DOCTOR_AUTH. Client secret file: VCF_DOCTOR_OIDC_CLIENT_SECRET_FILE. {Object.entries(ENV_NAME).filter(([key]) => pinned?.[key as keyof OidcValues]).map(([key, name]) => <span key={key}>{key}: {name}. </span>)}</DeploymentHelp>
             {!s.data.configured && s.data.problems.length > 0 && (form.issuer || form.client_id || groups) ? (
               <p className="text-sm text-muted bg-surface-2 rounded-md px-3 py-2">Not on yet: {s.data.problems.join('; ')}.</p>
             ) : null}
