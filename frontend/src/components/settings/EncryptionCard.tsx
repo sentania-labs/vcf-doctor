@@ -10,6 +10,7 @@ import { useAppState } from '@/state/AppState'
 import { Badge, Button, Card, CardHeader, Skeleton } from '@/components/ui'
 
 function plainRotation(text: string, status: EncryptionStatus): string {
+  if (text.startsWith('cannot create encryption key file ')) return encryptionErrorMessage(text)
   return text.replaceAll(status.key_previous_env_var, 'the previous deployment key').replaceAll(status.key_env_var, 'the deployment key')
 }
 
