@@ -13,6 +13,12 @@ FROM python:3.14-slim@sha256:af8a5aa14780025dbfbcfbc81bd8a91ebd87711dd5b0f48ed71
 ARG BUILD_VERSION=dev
 ARG BUILD_SHA=unknown
 ARG BUILD_DATE=unknown
+# zlib1g 1.3.1-1+b1 carries CVE-2026-76844 and CVE-2026-85091, fixed in
+# 1.3.1-1+deb13u1, which the newest slim digest does not ship yet. Drop this
+# step once the base image does.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends --only-upgrade zlib1g \
+    && rm -rf /var/lib/apt/lists/*
 COPY --from=ghcr.io/astral-sh/uv:0.12.8 /uv /usr/local/bin/uv
 WORKDIR /app
 COPY backend/pyproject.toml ./
