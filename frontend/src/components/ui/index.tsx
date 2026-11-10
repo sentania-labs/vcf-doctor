@@ -29,7 +29,7 @@ export function Card({ className, children, onClick, interactive }: { className?
   return (
     <div
       onClick={onClick}
-      className={cn('lat-card', !/(?:^|\s)p[xytrbl]?-[^\s]+/.test(className ?? '') && '!p-0', interactive && 'cursor-pointer hover:border-border-strong hover:bg-surface-2', className)}
+      className={cn('lat-card p-0', interactive && 'cursor-pointer hover:border-border-strong hover:bg-surface-2', className)}
     >
       {children}
     </div>

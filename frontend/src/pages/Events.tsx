@@ -92,7 +92,7 @@ export default function EventsPage() {
           { value: 'error', label: <><EventCategoryDot category="error" className="h-1.5 w-1.5" />Errors</> },
           { value: 'info', label: <><EventCategoryDot category="info" className="h-1.5 w-1.5" />Info</> },
         ]} />
-        <div className="relative"><Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-faint" /><Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search message, type, user or resource" className="!pl-8 !w-80" aria-label="Search events" /></div>
+        <div className="relative"><Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-faint" /><Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search message, type, user or resource" className="pl-8 w-80" aria-label="Search events" /></div>
         {events.data ? (
           <div className="ml-auto flex flex-wrap items-baseline gap-x-4 gap-y-1 text-sm">
             <span className="text-xl font-semibold tracking-tight tnum">{rows.length}{rows.length >= limit ? '+' : ''} <span className="text-sm text-muted font-medium">{rows.length === 1 ? 'event' : 'events'}</span></span>

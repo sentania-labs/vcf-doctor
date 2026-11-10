@@ -63,7 +63,7 @@ export default function InventoryPage() {
   return (
     <div className="">
       <PageHeader title="Inventory" subtitle={res.data ? Object.entries(counts).map(([k, v]) => `${v} ${k}${v === 1 ? '' : 's'}`).join(', ') : 'Everything the collector sees, arranged by containment'}
-        actions={<div className="relative"><Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-faint" /><Input value={q} onChange={e => setQ(e.target.value)} placeholder="Filter by name" className="!pl-8 !w-64" /></div>} />
+        actions={<div className="relative"><Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-faint" /><Input value={q} onChange={e => setQ(e.target.value)} placeholder="Filter by name" className="pl-8 w-64" /></div>} />
 
       {res.error && !res.data ? <Card><ErrorState title="Inventory unavailable" error={res.error} onRetry={res.reload} /></Card>
         : res.loading && !res.data ? <div className="grid gap-5 xl:grid-cols-[1fr_400px]"><Skeleton className="h-[480px] rounded-xl" /><Skeleton className="h-[480px] rounded-xl" /></div>

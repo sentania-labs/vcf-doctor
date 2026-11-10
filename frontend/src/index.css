@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "../public/lattice/lattice.css" layer(components);
 
 /* Map existing utility names onto the shared Lattice palette. */
 :root {

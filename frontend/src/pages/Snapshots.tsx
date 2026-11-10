@@ -61,7 +61,7 @@ export default function SnapshotsPage() {
     <div className="">
       <PageHeader title="Snapshots" subtitle="Point-in-time inventory captures. Scheduled ones thin out with age; manual ones stay until you delete them."
         actions={<>
-          <div className="relative"><Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-faint" /><Input value={q} onChange={e => setQ(e.target.value)} placeholder="Filter by label, tier or date" className="!pl-8 !w-64" aria-label="Filter snapshots" /></div>
+          <div className="relative"><Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-faint" /><Input value={q} onChange={e => setQ(e.target.value)} placeholder="Filter by label, tier or date" className="pl-8 w-64" aria-label="Filter snapshots" /></div>
           <Button variant="primary" onClick={() => { setTarget(connectionId ?? connections[0]?.id ?? ''); setOpen(true) }} disabled={connections.length === 0}><Camera size={15} /> Capture Snapshot</Button>
         </>} />
 
