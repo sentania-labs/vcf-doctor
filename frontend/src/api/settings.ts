@@ -14,7 +14,7 @@ export function updateSettings(body: SettingsUpdate): Promise<Settings> {
       retention_policy: { ...body.retention_policy },
       event_policy: { ...body.event_policy },
       changes_min_significance: body.changes_min_significance ?? mockState.settings.changes_min_significance ?? 'low',
-      assistant: { ...mockState.settings.assistant, ...rest, api_key_set: api_key ? true : mockState.settings.assistant.api_key_set, api_key_stored: api_key ? true : mockState.settings.assistant.api_key_stored },
+      assistant: { ...mockState.settings.assistant, ...rest, api_key_set: api_key ? true : mockState.settings.assistant.api_key_set, api_key_source: api_key ? 'stored' : mockState.settings.assistant.api_key_source, api_key_stored: api_key ? true : mockState.settings.assistant.api_key_stored },
     }
     const a = mockState.settings.assistant
     mockState.assistantStatus = {

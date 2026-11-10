@@ -317,6 +317,7 @@ export default function SettingsPage() {
                   <Badge tone={assistant.api_key_unreadable ? 'critical' : assistant.api_key_set ? 'ok' : 'neutral'} className="shrink-0"><KeyRound size={11} /> {assistant.api_key_unreadable ? (assistant.api_key_set ? 'Re-enter key (deployment key in use)' : 'Re-enter key') : assistant.api_key_set ? 'Key set' : 'No key'}</Badge>
                 </div>
               </Field>
+              {assistant.api_key_source ? <p className="text-xs text-muted">{assistant.api_key_source === 'stored' ? 'Using the key saved in Settings.' : assistant.api_key_source === 'deployment' ? 'Using the deployment-supplied key.' : 'No Anthropic API key is in use.'}</p> : null}
               {assistant.api_key_stored ? <Button type="button" variant="secondary" onClick={() => void clearKey()} loading={clearingKey} disabled={saving}>Clear saved key</Button> : null}
               {clearError ? <p className="lat-banner lat-banner--bad" role="alert">Could not clear the saved key: {clearError}</p> : null}
               <DeploymentHelp>Assistant key: ANTHROPIC_API_KEY</DeploymentHelp>
