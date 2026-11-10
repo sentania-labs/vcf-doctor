@@ -52,10 +52,10 @@ export default function OverviewPage() {
   const verdictTone = !d ? '' : d.counts.critical > 0 ? 'text-critical' : d.counts.warning > 0 ? 'text-warning' : 'text-ok'
 
   return (
-    <div className="space-y-6 anim-fade-up">
+    <div className="space-y-6">
       <div className="flex items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Environment Health</h1>
+          <h1 className="page-title">Environment Health</h1>
           <p className="text-sm text-muted mt-1">{scope}{d?.last_scan ? `. Scanned ${relativeTime(d.last_scan)}` : ''}</p>
         </div>
       </div>

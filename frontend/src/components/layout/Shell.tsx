@@ -27,7 +27,7 @@ const secondary = [
 function NavItem({ to, label, icon: Icon, end }: { to: string; label: string; icon: typeof Activity; end?: boolean }) {
   return (
     <NavLink to={to} end={end}
-      className={({ isActive }) => cn('flex items-center gap-3 rounded-md px-3 h-9 text-[13.5px] font-medium transition-colors duration-150',
+      className={({ isActive }) => cn('flex items-center gap-3 rounded-md px-3 h-9 text-[13.5px] font-medium',
         isActive ? 'bg-surface-3 text-fg' : 'text-muted hover:text-fg hover:bg-surface-2')}>
       {({ isActive }) => (<>
         <Icon size={16} className={isActive ? 'text-accent' : 'text-faint'} />
@@ -49,7 +49,7 @@ function SignOutItem() {
       </div>
     ) : null}
     <button type="button" disabled={busy} onClick={() => { setBusy(true); void signOut().finally(() => setBusy(false)) }}
-      className={cn('flex items-center gap-3 rounded-md px-3 h-9 text-[13.5px] font-medium transition-colors duration-150 w-full text-left',
+      className={cn('flex items-center gap-3 rounded-md px-3 h-9 text-[13.5px] font-medium w-full text-left',
         'text-muted hover:text-fg hover:bg-surface-2 disabled:opacity-50')}>
       <LogOut size={16} className="text-faint" />
       Sign out
@@ -74,7 +74,7 @@ export function Shell() {
             <div className="text-[11px] text-faint">Operations console</div>
           </div>
         </div>
-        <nav className="flex-1 px-3 py-4 flex flex-col gap-0.5">
+        <nav className="console-nav flex-1 px-3 py-4 flex flex-col gap-0.5">
           {outage ? null : <>
             {primary.map(n => <NavItem key={n.to} {...n} />)}
             <div className="my-4 border-t border-border" />
@@ -90,14 +90,14 @@ export function Shell() {
       <div className="flex-1 min-w-0 flex flex-col">
         <TopBar />
         {backend === 'down' ? (
-          <div className="bg-critical-bg border-b border-critical/40 px-6 py-2.5 text-sm flex items-center gap-2.5 text-fg">
-            <span className="h-2 w-2 rounded-full bg-critical anim-pulse" />
+          <div className="lat-banner lat-banner--bad flex flex-wrap items-center gap-2.5" role="alert">
+            <span className="h-2 w-2 rounded-full bg-critical" />
             {databaseDown ? (<>
               <span className="font-medium">The database is unreachable.</span>
-              <span className="text-muted">The console is running, but it cannot read or save anything until PostgreSQL is back. Retrying every 5 seconds.</span>
+              <span>The console is running, but it cannot read or save anything until PostgreSQL is back. Retrying every 5 seconds.</span>
             </>) : (<>
               <span className="font-medium">This console cannot serve.</span>
-              <span className="text-muted">Its backend is unreachable. Pages show the last data they loaded. Retrying every 5 seconds.</span>
+              <span>Its backend is unreachable. Pages show the last data they loaded. Retrying every 5 seconds.</span>
             </>)}
             {backendError && !databaseDown ? <span className="ml-auto font-mono text-xs text-muted">{backendError}</span> : null}
           </div>

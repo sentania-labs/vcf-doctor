@@ -71,7 +71,7 @@ export default function TokensCard() {
           </Field>
           <Button type="submit" loading={busy} disabled={!name.trim()}><KeyRound size={15} /> Create token</Button>
         </form>
-        {err ? <p className="text-sm text-critical bg-critical-bg rounded-md px-3 py-2" role="alert">{err}</p> : null}
+        {err ? <p className="lat-banner lat-banner--bad" role="alert">{err}</p> : null}
 
         {s.error && !s.data ? <ErrorState title="Tokens unavailable" error={s.error} onRetry={s.reload} /> : !s.data ? <Skeleton className="h-24 rounded-md" /> : s.data.tokens.length === 0 ? (
           <p className="text-sm text-muted">You have no tokens.</p>

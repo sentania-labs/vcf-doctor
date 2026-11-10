@@ -62,8 +62,8 @@ export default function LoginPage() {
 
   return (
     <div className="h-full flex items-center justify-center bg-bg text-fg px-4">
-      <div className="w-full max-w-[400px] anim-fade-up">
-        <div className="rounded-xl border border-border bg-surface shadow-card">
+      <div className="w-full max-w-[400px]">
+        <div className="rounded-xl border border-border bg-surface">
           <div className="px-7 pt-7 pb-5 flex items-center gap-3 border-b border-border">
             <div className="h-10 w-10 rounded-lg bg-accent text-accent-fg flex items-center justify-center shrink-0"><Stethoscope size={20} /></div>
             <div className="leading-tight">
@@ -77,7 +77,7 @@ export default function LoginPage() {
               <div className="flex items-center justify-center py-6"><Spinner /></div>
             ) : unreachable ? (
               <div className="space-y-4">
-                <div className="flex items-start gap-2.5 rounded-md bg-critical-bg px-3 py-2.5 text-sm">
+                <div className="lat-banner lat-banner--bad flex items-start gap-2.5">
                   <AlertTriangle size={16} className="text-critical mt-0.5 shrink-0" />
                   <div>
                     <div className="font-medium">Backend unreachable.</div>
@@ -89,7 +89,7 @@ export default function LoginPage() {
               </div>
             ) : (
               <form onSubmit={e => void submit(e)} className="space-y-4" noValidate>
-                {ssoError ? <p className="text-sm text-critical bg-critical-bg rounded-md px-3 py-2" role="alert">{ssoError}</p> : null}
+                {ssoError ? <p className="lat-banner lat-banner--bad" role="alert">{ssoError}</p> : null}
                 {status?.oidc?.enabled ? (
                   <div className="space-y-4">
                     <div>
@@ -120,10 +120,10 @@ export default function LoginPage() {
                   </Field>
                 ) : null}
                 {locked ? (
-                  <p className="text-sm text-warning bg-warning-bg rounded-md px-3 py-2" role="alert" aria-live="polite">
+                  <p className="lat-banner lat-banner--warn" role="alert" aria-live="polite">
                     Too many attempts, try again in {waitSeconds} {waitSeconds === 1 ? 'second' : 'seconds'}.
                   </p>
-                ) : err ? <p className="text-sm text-critical bg-critical-bg rounded-md px-3 py-2" role="alert">{err}</p> : null}
+                ) : err ? <p className="lat-banner lat-banner--bad" role="alert">{err}</p> : null}
                 <Button type="submit" variant="primary" className="w-full" loading={busy} disabled={locked}>
                   {locked ? `Try again in ${waitSeconds}s` : firstRun ? 'Set password and sign in' : 'Sign in'}
                 </Button>

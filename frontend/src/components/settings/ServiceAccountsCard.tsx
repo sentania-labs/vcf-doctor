@@ -70,7 +70,7 @@ function AccountTokens({ account, onChanged }: { account: ServiceAccount; onChan
         </Field>
         <Button type="submit" loading={busy} disabled={!name.trim() || !!account.disabled_at}><KeyRound size={15} /> Issue token</Button>
       </form>
-      {err ? <p className="text-sm text-critical bg-critical-bg rounded-md px-3 py-2" role="alert">{err}</p> : null}
+      {err ? <p className="lat-banner lat-banner--bad" role="alert">{err}</p> : null}
       {s.error && !s.data ? <ErrorState title="Tokens unavailable" error={s.error} onRetry={s.reload} /> : !s.data ? <Skeleton className="h-16 rounded-md" /> : s.data.tokens.length === 0 ? (
         <p className="text-sm text-muted">This account has no tokens.</p>
       ) : (
@@ -134,7 +134,7 @@ export default function ServiceAccountsCard() {
           </Field>
           <Button type="submit" loading={busy} disabled={!name.trim()}><Plus size={15} /> Create account</Button>
         </form>
-        {err ? <p className="text-sm text-critical bg-critical-bg rounded-md px-3 py-2" role="alert">{err}</p> : null}
+        {err ? <p className="lat-banner lat-banner--bad" role="alert">{err}</p> : null}
 
         {s.error && !s.data ? <ErrorState title="Service accounts unavailable" error={s.error} onRetry={s.reload} /> : !s.data ? <Skeleton className="h-24 rounded-md" /> : s.data.accounts.length === 0 ? (
           <p className="text-sm text-muted">There are no service accounts.</p>

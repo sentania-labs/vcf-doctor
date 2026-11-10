@@ -58,10 +58,10 @@ export default function SnapshotsPage() {
   )
 
   return (
-    <div className="anim-fade-up">
+    <div className="">
       <PageHeader title="Snapshots" subtitle="Point-in-time inventory captures. Scheduled ones thin out with age; manual ones stay until you delete them."
         actions={<>
-          <div className="relative"><Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-faint" /><Input value={q} onChange={e => setQ(e.target.value)} placeholder="Filter by label, tier or date" className="pl-8 w-64" aria-label="Filter snapshots" /></div>
+          <div className="relative"><Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-faint" /><Input value={q} onChange={e => setQ(e.target.value)} placeholder="Filter by label, tier or date" className="!pl-8 !w-64" aria-label="Filter snapshots" /></div>
           <Button variant="primary" onClick={() => { setTarget(connectionId ?? connections[0]?.id ?? ''); setOpen(true) }} disabled={connections.length === 0}><Camera size={15} /> Capture Snapshot</Button>
         </>} />
 
@@ -73,7 +73,7 @@ export default function SnapshotsPage() {
         ) : (
           <>
             <div className="flex flex-wrap items-baseline gap-x-5 gap-y-2 mb-5 text-sm">
-              <span className="text-2xl font-semibold tracking-tight tnum">{list.length} <span className="text-base text-muted font-medium">{list.length === 1 ? 'snapshot' : 'snapshots'}</span></span>
+              <span className="page-title tnum">{list.length} <span className="text-base text-muted font-medium">{list.length === 1 ? 'snapshot' : 'snapshots'}</span></span>
               {TIER_ORDER.filter(t => tierCounts[t] > 0).map(t => <span key={t} className="text-muted"><span className="font-semibold text-fg tnum">{tierCounts[t]}</span> {tierLabel[t].toLowerCase()}</span>)}
               <span className="text-muted">Day groups: <span className="font-medium text-fg">{groupingTimezone}</span></span>
               {needle ? <span className="text-muted ml-auto">{filtered.length} match{filtered.length === 1 ? '' : 'es'} <button className="text-accent hover:underline ml-1" onClick={() => setQ('')}>clear</button></span> : null}
@@ -84,7 +84,7 @@ export default function SnapshotsPage() {
               <div className="space-y-8">
                 {groups.map(g => (
                   <section key={g.key}>
-                    <h2 className="flex items-baseline gap-2 text-xs font-semibold uppercase tracking-wider text-faint mb-3 sticky top-0 bg-bg/95 backdrop-blur py-1 z-10">
+                    <h2 className="flex items-baseline gap-2 text-xs font-semibold uppercase tracking-wider text-faint mb-3 sticky top-0 bg-bg py-1 z-10">
                       {g.label} <span className="tnum font-medium normal-case tracking-normal">{g.items.length}</span>
                     </h2>
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -128,7 +128,7 @@ export default function SnapshotsPage() {
 
 function SnapshotCard({ s, latest, showConnection, connName, onDelete }: { s: SnapshotSummary; latest: boolean; showConnection: boolean; connName: (id: string) => string; onDelete: () => void }) {
   return (
-    <Card className="px-5 py-4 flex flex-col gap-3 anim-fade-up">
+    <Card className="px-5 py-4 flex flex-col gap-3">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
@@ -141,7 +141,7 @@ function SnapshotCard({ s, latest, showConnection, connName, onDelete }: { s: Sn
       </div>
       <div className="flex items-center justify-between text-sm pt-2 border-t border-border">
         <div className="text-muted"><span className="text-fg font-semibold tnum">{s.resource_count}</span> resources{showConnection ? <span className="text-faint"> in {connName(s.connection_id)}</span> : null}</div>
-        <button onClick={onDelete} className="text-faint hover:text-critical transition-colors p-1 rounded" title="Delete snapshot"><Trash2 size={15} /></button>
+        <button onClick={onDelete} className="text-faint hover:text-critical p-1 rounded" title="Delete snapshot"><Trash2 size={15} /></button>
       </div>
     </Card>
   )

@@ -77,7 +77,7 @@ export default function EnvironmentPage() {
   }
 
   return (
-    <div className="anim-fade-up">
+    <div className="">
       <PageHeader title="Environment Changes" subtitle="What changed across every connection between two points in time, rolled up from each scan's recorded differences"
         actions={minSig ? (
           <Segmented value={minSig} onChange={setMinSig} options={[
@@ -123,7 +123,7 @@ export default function EnvironmentPage() {
         : !data ? (
           <div className="space-y-4"><div className="grid gap-4 md:grid-cols-5">{[0, 1, 2, 3, 4].map(i => <Skeleton key={i} className="h-24" />)}</div>{[0, 1].map(i => <Skeleton key={i} className="h-40" />)}</div>
         ) : (
-          <div className={cn(result.loading && 'opacity-50 transition-opacity')} aria-busy={result.loading}>
+          <div className={cn(result.loading && 'opacity-50')} aria-busy={result.loading}>
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5 mb-8">
               <StatCard label="Connections covered" value={<>{data.totals.covered}<span className="text-lg text-muted font-medium"> of {data.totals.connections}</span></>}
                 sub={data.totals.no_data > 0 ? `${data.totals.no_data} with no data in window` : 'every connection scanned in this window'} icon={<Globe size={16} />}

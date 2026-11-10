@@ -13,7 +13,7 @@ export function ChangeLogRow({ row, open, onToggle, onCompare }: { row: ChangeLo
   return (
     <div className={cn(open && 'bg-surface-2/50')}>
       <button onClick={onToggle} aria-expanded={open}
-        className="w-full text-left px-4 py-2.5 grid grid-cols-[76px_auto_minmax(0,1fr)_16px] items-center gap-3 hover:bg-surface-2 transition-colors">
+        className="w-full text-left px-4 py-2.5 grid grid-cols-[76px_auto_minmax(0,1fr)_16px] items-center gap-3 hover:bg-surface-2">
         <span className="text-[13px] text-muted tnum" title={formatDateTime(row.observed_at)}>{formatTime(row.observed_at)}</span>
         <span className="flex items-center gap-1.5">
           <Badge tone={significanceTone[row.significance]} dot>{row.significance}</Badge>

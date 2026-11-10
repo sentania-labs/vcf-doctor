@@ -27,13 +27,13 @@ export function TopBar() {
     selectedId === ALL,
     databaseDown,
   )
-  const dotCls = { ok: 'bg-ok', error: 'bg-critical', running: 'bg-warning anim-pulse', none: 'bg-faint' }[dot]
+  const dotCls = { ok: 'bg-ok', error: 'bg-critical', running: 'bg-warning', none: 'bg-faint' }[dot]
 
   return (
-    <header className="min-h-16 py-2 shrink-0 border-b border-border bg-surface/80 backdrop-blur px-6 flex flex-wrap items-center gap-5">
+    <header className="lat-header min-h-16 shrink-0">
       <div className="relative">
         <select value={selectedId} disabled={databaseDown} onChange={e => setSelectedId(e.target.value)}
-          className="appearance-none h-9 pl-3 pr-9 rounded-md border border-border bg-bg text-sm font-medium hover:border-border-strong focus:outline-none focus:border-accent transition-colors min-w-[220px]">
+          className="lat-select appearance-none h-9 pl-3 pr-9 min-w-[220px]">
           <option value={ALL}>All connections{connections.length ? ` (${connections.length})` : ''}</option>
           {connections.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>

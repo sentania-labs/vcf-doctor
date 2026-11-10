@@ -67,8 +67,8 @@ export default function HealthScoreCard() {
               </div>
               <p className="text-sm text-muted">{s.data.formula}</p>
               {Number.isFinite(weights.critical) ? <p className="text-xs text-faint">Example with these weights: one of four hosts disconnected costs {Math.round(weights.critical / 4)} points; one of forty costs {Math.round(weights.critical / 40)}. A check where every object fails costs its full weight.</p> : null}
-              {invalid ? <p className="text-sm text-critical bg-critical-bg rounded-md px-3 py-2" role="alert">{invalid}</p> : null}
-              {err ? <p className="text-sm text-critical bg-critical-bg rounded-md px-3 py-2" role="alert">{err}</p> : null}
+              {invalid ? <p className="lat-banner lat-banner--bad" role="alert">{invalid}</p> : null}
+              {err ? <p className="lat-banner lat-banner--bad" role="alert">{err}</p> : null}
               <div className="flex items-center gap-3">
                 <Button variant="primary" onClick={() => void run(() => updateHealthScoreWeights(weights))} loading={busy} disabled={!dirty || invalid !== null}>Save weights</Button>
                 <Button onClick={() => void run(() => resetHealthScoreWeights())} disabled={busy || isDefault}><RotateCcw size={14} /> Reset to defaults</Button>

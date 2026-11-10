@@ -38,7 +38,7 @@ export default function TrustedProxiesCard() {
       <div className="px-5 pb-5 space-y-4">
         {s.error && !s.data ? <ErrorState title="Trusted proxies unavailable" error={s.error} onRetry={s.reload} /> : !s.data ? <Skeleton className="h-24 rounded-md" /> : (
           <form onSubmit={e => void submit(e)} className="space-y-4" noValidate>
-            {s.data.env_problem ? <p className="text-sm text-warning bg-warning-bg rounded-md px-3 py-2" role="alert">{s.data.env_problem} Nothing is trusted until it is fixed.</p> : null}
+            {s.data.env_problem ? <p className="lat-banner lat-banner--warn" role="alert">{s.data.env_problem} Nothing is trusted until it is fixed.</p> : null}
             {s.data.ignored_forwarded_headers && s.data.peer ? (
               <div className="flex items-start gap-2.5 rounded-md bg-warning-bg px-3 py-2.5 text-sm" role="status">
                 <AlertTriangle size={16} className="text-warning mt-0.5 shrink-0" />
@@ -57,7 +57,7 @@ export default function TrustedProxiesCard() {
               <textarea
                 value={text} onChange={e => setText(e.target.value)} disabled={busy || pinned} rows={3} spellCheck={false}
                 placeholder={'10.42.0.0/16'}
-                className="w-full rounded-md border border-border bg-bg px-3 py-2 text-sm font-mono text-fg placeholder:text-faint transition-colors focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/25 disabled:opacity-50"
+                className="w-full rounded-md border border-border bg-bg px-3 py-2 text-sm font-mono text-fg placeholder:text-faint focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/25 disabled:opacity-50"
               />
             </Field>
             <ul className="text-xs text-faint space-y-1 list-disc pl-4">
@@ -65,7 +65,7 @@ export default function TrustedProxiesCard() {
               <li>Trust the ingress and each client gets its own lockout; one guesser cannot lock out the rest. HTTPS detection (the HSTS header, secure cookies) also relies on a trusted proxy reporting the scheme.</li>
               <li>Only trust addresses you control. Anything listed here can claim any client address.</li>
             </ul>
-            {err ? <p className="text-sm text-critical bg-critical-bg rounded-md px-3 py-2" role="alert">{err}</p> : null}
+            {err ? <p className="lat-banner lat-banner--bad" role="alert">{err}</p> : null}
             <div className="flex items-center gap-3">
               <Button type="submit" loading={busy} disabled={pinned}><Network size={15} /> Save trusted proxies</Button>
               {saved ? <span className="text-sm text-ok inline-flex items-center gap-1.5"><CheckCircle2 size={15} /> Saved</span> : null}

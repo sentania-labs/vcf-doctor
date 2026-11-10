@@ -140,7 +140,7 @@ export function AssistantPanel({ seed, seedKey, context, compact }: {
           </div>
         </div>
       ) : status.error ? (
-        <div className="mx-5 mt-4 rounded-lg border border-critical/40 bg-critical-bg px-4 py-3 text-sm flex gap-2.5 shrink-0">
+        <div className="lat-banner lat-banner--bad mx-5 mt-4 flex gap-2.5 shrink-0">
           <AlertCircle size={16} className="text-critical shrink-0 mt-0.5" />
           <div><p className="font-medium">Could not reach the assistant</p><p className="text-muted mt-0.5 font-mono text-xs">{status.error.message}</p></div>
         </div>
@@ -149,7 +149,7 @@ export function AssistantPanel({ seed, seedKey, context, compact }: {
       {/* Transcript */}
       <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-5 py-5 space-y-5">
         {messages.length === 0 ? (
-          <div className={cn('anim-fade-up', compact ? '' : 'max-w-2xl')}>
+          <div className={cn('', compact ? '' : 'max-w-2xl')}>
             <div className="h-10 w-10 rounded-lg bg-surface-2 border border-border flex items-center justify-center text-accent mb-4"><Bot size={20} /></div>
             <h3 className="text-base font-semibold tracking-tight">Evidence-grounded assistant</h3>
             <p className="text-sm text-muted mt-1 leading-relaxed">Answers come only from the findings, changes, resources and vCenter events shown above. Scripts are produced for your review and are never executed.</p>
@@ -157,7 +157,7 @@ export function AssistantPanel({ seed, seedKey, context, compact }: {
               {STARTERS.map(s => (
                 <button key={s.label} disabled={!available || busy}
                   onClick={() => { setTask(s.task); void send(s.task, s.question) }}
-                  className="text-left rounded-lg border border-border bg-surface px-4 py-2.5 text-sm hover:border-border-strong hover:bg-surface-2 transition-colors disabled:opacity-50 flex items-center justify-between gap-3">
+                  className="text-left rounded-lg border border-border bg-surface px-4 py-2.5 text-sm hover:border-border-strong hover:bg-surface-2 disabled:opacity-50 flex items-center justify-between gap-3">
                   <span>{s.label}</span>
                   <span className="text-[11px] uppercase tracking-wider text-faint font-semibold">{TASK_LABEL[s.task]}</span>
                 </button>
@@ -204,7 +204,7 @@ export function AssistantPanel({ seed, seedKey, context, compact }: {
 function MessageView({ m }: { m: Message }) {
   if (m.role === 'user') {
     return (
-      <div className="flex gap-3 anim-fade-up">
+      <div className="flex gap-3">
         <div className="h-7 w-7 rounded-md bg-surface-3 flex items-center justify-center text-muted shrink-0"><User size={14} /></div>
         <div className="min-w-0">
           <div className="text-[11px] uppercase tracking-wider text-faint font-semibold mb-1">{m.task ? TASK_LABEL[m.task] : 'You'}</div>
@@ -215,11 +215,11 @@ function MessageView({ m }: { m: Message }) {
   }
   const refused = m.stopReason === 'refusal'
   return (
-    <div className="flex gap-3 anim-fade-up">
+    <div className="flex gap-3">
       <div className="h-7 w-7 rounded-md bg-info-bg flex items-center justify-center text-accent shrink-0"><Bot size={14} /></div>
       <div className="min-w-0 flex-1">
         <div className="text-[11px] uppercase tracking-wider text-faint font-semibold mb-1.5">Assistant</div>
-        {m.text ? <Markdown text={m.text} /> : m.streaming ? <div className="flex items-center gap-1.5 h-5"><span className="h-1.5 w-1.5 rounded-full bg-muted anim-pulse" /><span className="h-1.5 w-1.5 rounded-full bg-muted anim-pulse [animation-delay:200ms]" /><span className="h-1.5 w-1.5 rounded-full bg-muted anim-pulse [animation-delay:400ms]" /></div> : null}
+        {m.text ? <Markdown text={m.text} /> : m.streaming ? <div className="flex items-center gap-1.5 h-5"><span className="h-1.5 w-1.5 rounded-full bg-muted" /><span className="h-1.5 w-1.5 rounded-full bg-muted" /><span className="h-1.5 w-1.5 rounded-full bg-muted" /></div> : null}
         {refused ? <p className="mt-2 text-sm text-warning">The model declined to answer this request. Try rephrasing or narrowing the evidence.</p> : null}
         {m.error ? <p className="mt-2 text-sm text-critical flex items-center gap-1.5"><AlertCircle size={14} />{m.error}</p> : null}
         {m.evidence && !m.streaming ? (

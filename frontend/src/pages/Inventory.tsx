@@ -61,9 +61,9 @@ export default function InventoryPage() {
   }, [res.data])
 
   return (
-    <div className="anim-fade-up">
+    <div className="">
       <PageHeader title="Inventory" subtitle={res.data ? Object.entries(counts).map(([k, v]) => `${v} ${k}${v === 1 ? '' : 's'}`).join(', ') : 'Everything the collector sees, arranged by containment'}
-        actions={<div className="relative"><Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-faint" /><Input value={q} onChange={e => setQ(e.target.value)} placeholder="Filter by name" className="pl-8 w-64" /></div>} />
+        actions={<div className="relative"><Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-faint" /><Input value={q} onChange={e => setQ(e.target.value)} placeholder="Filter by name" className="!pl-8 !w-64" /></div>} />
 
       {res.error && !res.data ? <Card><ErrorState title="Inventory unavailable" error={res.error} onRetry={res.reload} /></Card>
         : res.loading && !res.data ? <div className="grid gap-5 xl:grid-cols-[1fr_400px]"><Skeleton className="h-[480px] rounded-xl" /><Skeleton className="h-[480px] rounded-xl" /></div>
@@ -108,7 +108,7 @@ function TreeNode({ r, depth, childrenOf, selected, onSelect, filter }: { r: Res
   const dot = statusDot(r)
   return (
     <div>
-      <div className={cn('flex items-center gap-1.5 h-9 pr-3 cursor-pointer rounded-md mx-2 transition-colors', selected?.id === r.id ? 'bg-surface-3' : 'hover:bg-surface-2')} style={{ paddingLeft: 8 + depth * 20 }} onClick={() => onSelect(r)}>
+      <div className={cn('flex items-center gap-1.5 h-9 pr-3 cursor-pointer rounded-md mx-2', selected?.id === r.id ? 'bg-surface-3' : 'hover:bg-surface-2')} style={{ paddingLeft: 8 + depth * 20 }} onClick={() => onSelect(r)}>
         <button onClick={e => { e.stopPropagation(); setOpen(o => !o) }} className={cn('h-5 w-5 flex items-center justify-center text-faint hover:text-fg rounded', kids.length === 0 && 'invisible')}>
           {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         </button>
@@ -126,7 +126,7 @@ function LeafRow({ r, selected, onSelect }: { r: Resource; selected: Resource | 
   const dot = statusDot(r)
   const used = r.type === 'datastore' ? Number(r.properties.usedPct) : NaN
   return (
-    <div className={cn('flex items-center gap-2 h-9 px-3 mx-2 rounded-md cursor-pointer transition-colors', selected?.id === r.id ? 'bg-surface-3' : 'hover:bg-surface-2')} onClick={() => onSelect(r)}>
+    <div className={cn('flex items-center gap-2 h-9 px-3 mx-2 rounded-md cursor-pointer', selected?.id === r.id ? 'bg-surface-3' : 'hover:bg-surface-2')} onClick={() => onSelect(r)}>
       <ResourceIcon type={r.type} size={14} className="text-muted shrink-0" />
       <span className="text-sm truncate">{r.name}</span>
       {dot ? <span className={cn('h-1.5 w-1.5 rounded-full shrink-0', dot)} /> : null}

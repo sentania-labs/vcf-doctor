@@ -32,7 +32,7 @@ export default function ChangesPage() {
 
   if (!connectionId) {
     return (
-      <div className="anim-fade-up">
+      <div className="">
         <PageHeader title="What Changed?" subtitle="The change log and snapshot comparisons for one vCenter" />
         <Card>
           <EmptyState icon={<GitCompareArrows size={20} />} title="Pick a connection"
@@ -48,7 +48,7 @@ export default function ChangesPage() {
   }
 
   return (
-    <div className="anim-fade-up">
+    <div className="">
       <PageHeader title="What Changed?" subtitle={view === 'timeline' ? 'Every difference each scan recorded, newest first' : 'Semantic differences between two snapshots, most important first'}
         actions={minSig ? (
           <Segmented value={minSig} onChange={setMinSig} options={[
@@ -73,7 +73,7 @@ export default function ChangesPage() {
 function Tab({ active, onClick, icon, children }: { active: boolean; onClick: () => void; icon: React.ReactNode; children: React.ReactNode }) {
   return (
     <button role="tab" aria-selected={active} onClick={onClick}
-      className={cn('inline-flex items-center gap-2 px-3 h-10 text-sm font-medium border-b-2 -mb-px transition-colors',
+      className={cn('inline-flex items-center gap-2 px-3 h-10 text-sm font-medium border-b-2 -mb-px',
         active ? 'border-accent text-fg' : 'border-transparent text-muted hover:text-fg')}>
       {icon}{children}
     </button>

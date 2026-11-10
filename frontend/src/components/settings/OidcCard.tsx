@@ -15,7 +15,7 @@ function splitGroups(text: string): string[] {
   return text.split(/[\n,]/).map(s => s.trim()).filter(Boolean)
 }
 
-const textareaCls = 'w-full rounded-md border border-border bg-bg px-3 py-2 text-sm font-mono text-fg placeholder:text-faint transition-colors focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/25 disabled:opacity-50'
+const textareaCls = 'w-full rounded-md border border-border bg-bg px-3 py-2 text-sm font-mono text-fg placeholder:text-faint focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/25 disabled:opacity-50'
 
 export default function OidcCard() {
   const s = useAsync(() => getOidcSettings(), [])
@@ -60,7 +60,7 @@ export default function OidcCard() {
         {s.error && !s.data ? <ErrorState title="Single sign-on settings unavailable" error={s.error} onRetry={s.reload} /> : !s.data ? <Skeleton className="h-40 rounded-md" /> : (
           <form onSubmit={e => void submit(e)} className="space-y-4" noValidate>
             {!s.data.auth_enabled ? (
-              <p className="text-sm text-warning bg-warning-bg rounded-md px-3 py-2" role="status">Authentication is switched off by the deployment (VCF_DOCTOR_AUTH), so nothing here is used.</p>
+              <p className="lat-banner lat-banner--warn" role="status">Authentication is switched off by the deployment (VCF_DOCTOR_AUTH), so nothing here is used.</p>
             ) : null}
             <div className="grid sm:grid-cols-2 gap-4">
               {field('issuer', 'Issuer URL', 'The provider\'s issuer, for example https://auth.example.com/application/o/vcf-doctor/. Its discovery document is read from there.', 'https://auth.example.com/application/o/vcf-doctor/')}
@@ -81,7 +81,7 @@ export default function OidcCard() {
             {!s.data.configured && s.data.problems.length > 0 && (form.issuer || form.client_id || groups) ? (
               <p className="text-sm text-muted bg-surface-2 rounded-md px-3 py-2">Not on yet: {s.data.problems.join('; ')}.</p>
             ) : null}
-            {err ? <p className="text-sm text-critical bg-critical-bg rounded-md px-3 py-2" role="alert">{err}</p> : null}
+            {err ? <p className="lat-banner lat-banner--bad" role="alert">{err}</p> : null}
             <div className="flex items-center gap-3">
               <Button type="submit" loading={busy}><KeyRound size={15} /> Save single sign-on</Button>
               {saved ? <span className="text-sm text-ok inline-flex items-center gap-1.5"><CheckCircle2 size={15} /> Saved</span> : null}

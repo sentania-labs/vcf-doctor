@@ -37,7 +37,7 @@ export default function HealthPage() {
   const close = () => setParams(p => { p.delete('finding'); return p }, { replace: true })
 
   return (
-    <div className="anim-fade-up">
+    <div className="">
       <PageHeader title="Health" subtitle="Deterministic diagnostic findings from the latest snapshot"
         actions={
           <Segmented value={filter} onChange={setFilter} options={[
