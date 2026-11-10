@@ -8,7 +8,8 @@
   --border-strong: var(--ink-subtle);
   --fg: var(--ink);
   --fg-muted: var(--ink-muted);
-  --fg-faint: var(--ink-subtle);
+  /* Lattice's --ink-subtle is 4.0:1 on the sunken surface in light and 4.07:1 in dark; these clear 4.5:1 on both surfaces. */
+  --fg-faint: #616d7e;
   --accent-fg: var(--on-accent);
   --critical: var(--bad-ink);
   --critical-bg: var(--bad-soft);
@@ -55,6 +56,7 @@ html, body, #root { height: 100%; }
     --warn: #e0a400; --warn-soft: rgba(224,164,0,0.09); --warn-ink: #e0a400;
     --bad: #c64e1e; --bad-soft: rgba(217,89,38,0.12); --bad-ink: #ea8c64;
     color-scheme: dark;
+    --fg-faint: #929aa6;
   }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -65,10 +67,9 @@ html, body, #root { height: 100%; }
   .spin-icon { display: none; }
   .spin-label { position: static; width: auto; height: auto; overflow: visible; clip: auto; }
 }
-html[data-theme="dark"] { color-scheme: dark; }
+html[data-theme="dark"] { color-scheme: dark; --fg-faint: #929aa6; }
 html[data-theme="light"] { color-scheme: light; }
 .lat-input[aria-invalid="true"] { border-color: var(--bad); }
-.bg-surface-2 .text-faint { color: var(--ink-muted); }
 .tnum { font-variant-numeric: tabular-nums; }
 
 .prose-md > * + * { margin-top: 0.75rem; }
