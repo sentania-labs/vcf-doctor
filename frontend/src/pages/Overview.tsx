@@ -11,13 +11,13 @@ import { cn } from '@/lib/cn'
 
 function HealthRing({ score }: { score: number }) {
   const r = 54, c = 2 * Math.PI * r
-  const tone = score >= 90 ? 'var(--ok)' : score >= 70 ? 'var(--warning)' : 'var(--critical)'
+  const tone = score >= 90 ? 'var(--ok)' : score >= 70 ? 'var(--warn)' : 'var(--bad)'
   return (
     <div className="relative h-32 w-32 shrink-0">
       <svg viewBox="0 0 128 128" className="h-32 w-32 -rotate-90">
         <circle cx="64" cy="64" r={r} fill="none" stroke="var(--surface-sunken)" strokeWidth="9" />
         <circle cx="64" cy="64" r={r} fill="none" stroke={tone} strokeWidth="9" strokeLinecap="round"
-          strokeDasharray={c} strokeDashoffset={c * (1 - Math.max(0, Math.min(100, score)) / 100)} style={{ transition: 'stroke-dashoffset 700ms cubic-bezier(.2,.8,.2,1)' }} />
+          strokeDasharray={c} strokeDashoffset={c * (1 - Math.max(0, Math.min(100, score)) / 100)} />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
         <span className="text-4xl font-semibold tracking-tight tnum">{Math.round(score)}</span>
