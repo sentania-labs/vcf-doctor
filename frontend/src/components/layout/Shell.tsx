@@ -28,7 +28,7 @@ function NavItem({ to, label, icon: Icon, end }: { to: string; label: string; ic
   return (
     <NavLink to={to} end={end}
       className={({ isActive }) => cn('flex items-center gap-3 rounded-md px-3 h-9 text-[13.5px] font-medium',
-        isActive ? 'bg-surface-3 text-fg' : 'text-muted hover:text-fg hover:bg-surface-2')}>
+        isActive ? 'bg-accent-soft text-fg' : 'text-muted hover:text-fg hover:bg-surface-2')}>
       {({ isActive }) => (<>
         <Icon size={16} className={isActive ? 'text-accent' : 'text-faint'} />
         {label}
@@ -91,7 +91,7 @@ export function Shell() {
         <TopBar />
         {backend === 'down' ? (
           <div className="lat-banner lat-banner--bad flex flex-wrap items-center gap-2.5" role="alert">
-            <span className="h-2 w-2 rounded-full bg-critical" />
+            <span className="h-2 w-2 rounded-full bg-bad" />
             {databaseDown ? (<>
               <span className="font-medium">The database is unreachable.</span>
               <span>The console is running, but it cannot read or save anything until PostgreSQL is back. Retrying every 5 seconds.</span>

@@ -53,8 +53,8 @@ export default function ChangesPage() {
         actions={minSig ? (
           <Segmented value={minSig} onChange={setMinSig} options={[
             { value: 'low', label: 'All' },
-            { value: 'medium', label: <><span className="h-1.5 w-1.5 rounded-full bg-warning" />Medium and above</> },
-            { value: 'high', label: <><span className="h-1.5 w-1.5 rounded-full bg-critical" />High only</> },
+            { value: 'medium', label: <><span className="h-1.5 w-1.5 rounded-full bg-warn" />Medium and above</> },
+            { value: 'high', label: <><span className="h-1.5 w-1.5 rounded-full bg-bad" />High only</> },
           ]} />
         ) : null} />
 
@@ -104,8 +104,8 @@ function Timeline({ connectionId, minSig, setMinSig, refreshKey, onCompare }: { 
         {log.data ? (
           <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1 ml-auto text-sm">
             <span className="text-xl font-semibold tracking-tight tnum">{rows.length}{rows.length >= limit ? '+' : ''} <span className="text-sm text-muted font-medium">{rows.length === 1 ? 'change' : 'changes'}</span></span>
-            <Summary n={counts.high} label="high impact" dot="bg-critical" />
-            <Summary n={counts.medium} label="medium" dot="bg-warning" />
+            <Summary n={counts.high} label="high impact" dot="bg-bad" />
+            <Summary n={counts.medium} label="medium" dot="bg-warn" />
             <Summary n={counts.low} label="informational" dot="bg-faint" />
           </div>
         ) : null}
@@ -195,8 +195,8 @@ function Compare({ connectionId, minSig, setMinSig, refreshKey, initialFrom, ini
           <>
             <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2 mb-6">
               <span className="text-3xl font-semibold tracking-tight tnum">{total} <span className="text-lg text-muted font-medium">{total === 1 ? 'change' : 'changes'}</span></span>
-              <Summary n={groups.high.length} label="high impact" dot="bg-critical" />
-              <Summary n={groups.medium.length} label="medium" dot="bg-warning" />
+              <Summary n={groups.high.length} label="high impact" dot="bg-bad" />
+              <Summary n={groups.medium.length} label="medium" dot="bg-warn" />
               <Summary n={groups.low.length} label="informational" dot="bg-faint" />
               {fromSnap && toSnap ? <span className="text-sm text-muted ml-auto">{formatDateTime(fromSnap.created_at)} to {formatDateTime(toSnap.created_at)}</span> : null}
             </div>
@@ -209,7 +209,7 @@ function Compare({ connectionId, minSig, setMinSig, refreshKey, initialFrom, ini
                 {(['high', 'medium', 'low'] as Significance[]).map(sig => groups[sig].length === 0 ? null : (
                   <section key={sig}>
                     <h2 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-faint mb-3">
-                      <span className={cn('h-2 w-2 rounded-full', sig === 'high' ? 'bg-critical' : sig === 'medium' ? 'bg-warning' : 'bg-faint')} />
+                      <span className={cn('h-2 w-2 rounded-full', sig === 'high' ? 'bg-bad' : sig === 'medium' ? 'bg-warn' : 'bg-faint')} />
                       {significanceLabel[sig]} <span className="tnum">{groups[sig].length}</span>
                     </h2>
                     <div className="grid gap-3 lg:grid-cols-2">

@@ -15,7 +15,7 @@ function HealthRing({ score }: { score: number }) {
   return (
     <div className="relative h-32 w-32 shrink-0">
       <svg viewBox="0 0 128 128" className="h-32 w-32 -rotate-90">
-        <circle cx="64" cy="64" r={r} fill="none" stroke="var(--surface-3)" strokeWidth="9" />
+        <circle cx="64" cy="64" r={r} fill="none" stroke="var(--surface-sunken)" strokeWidth="9" />
         <circle cx="64" cy="64" r={r} fill="none" stroke={tone} strokeWidth="9" strokeLinecap="round"
           strokeDasharray={c} strokeDashoffset={c * (1 - Math.max(0, Math.min(100, score)) / 100)} style={{ transition: 'stroke-dashoffset 700ms cubic-bezier(.2,.8,.2,1)' }} />
       </svg>
@@ -69,9 +69,9 @@ export default function OverviewPage() {
             {d ? <>
               <p className={cn('text-xl font-semibold tracking-tight leading-snug', verdictTone)}>{verdict}</p>
               <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm">
-                <Row dot="bg-critical" label="critical" n={d.counts.critical} />
-                <Row dot="bg-warning" label={d.counts.warning === 1 ? 'warning' : 'warnings'} n={d.counts.warning} />
-                <Row dot="bg-info" label="info" n={d.counts.info} />
+                <Row dot="bg-bad" label="critical" n={d.counts.critical} />
+                <Row dot="bg-warn" label={d.counts.warning === 1 ? 'warning' : 'warnings'} n={d.counts.warning} />
+                <Row dot="bg-accent" label="info" n={d.counts.info} />
               </dl>
               <HealthChecks health={d.health} />
             </> : <div className="space-y-2"><Skeleton className="h-6 w-56" /><Skeleton className="h-4 w-40" /><Skeleton className="h-4 w-32" /></div>}
@@ -153,9 +153,9 @@ function HealthChecks({ health }: { health: Overview['health'] }) {
         <span title={tip} aria-label="How the score is calculated" className="inline-flex cursor-help text-muted"><Info size={13} /></span>
       </div>
       <dl className="mt-1.5 grid grid-cols-3 gap-x-4 gap-y-1">
-        <Row dot="bg-ok" label="passed" n={health.passed} />
-        <Row dot="bg-critical" label="findings" n={health.findings} />
-        <Row dot="bg-surface-3" label="not evaluated" n={health.not_evaluated} title="No applicable objects on the last scan, or the check compares against a previous snapshot that does not exist yet." />
+        <Row dot="bg-good" label="passed" n={health.passed} />
+        <Row dot="bg-bad" label="findings" n={health.findings} />
+        <Row dot="bg-border-strong" label="not evaluated" n={health.not_evaluated} title="No applicable objects on the last scan, or the check compares against a previous snapshot that does not exist yet." />
       </dl>
       <p className="mt-1.5 text-xs text-faint">Score is 100 minus {health.deduction} lost across checks with findings, weighted by severity and by the share of objects affected.</p>
     </div>

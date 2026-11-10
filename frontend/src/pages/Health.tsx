@@ -42,9 +42,9 @@ export default function HealthPage() {
         actions={
           <Segmented value={filter} onChange={setFilter} options={[
             { value: 'all', label: <>All <Count n={counts.all} /></> },
-            { value: 'critical', label: <><span className="h-1.5 w-1.5 rounded-full bg-critical" />Critical <Count n={counts.critical} /></> },
-            { value: 'warning', label: <><span className="h-1.5 w-1.5 rounded-full bg-warning" />Warning <Count n={counts.warning} /></> },
-            { value: 'info', label: <><span className="h-1.5 w-1.5 rounded-full bg-info" />Info <Count n={counts.info} /></> },
+            { value: 'critical', label: <><span className="h-1.5 w-1.5 rounded-full bg-bad" />Critical <Count n={counts.critical} /></> },
+            { value: 'warning', label: <><span className="h-1.5 w-1.5 rounded-full bg-warn" />Warning <Count n={counts.warning} /></> },
+            { value: 'info', label: <><span className="h-1.5 w-1.5 rounded-full bg-accent" />Info <Count n={counts.info} /></> },
           ]} />
         } />
 
@@ -65,7 +65,7 @@ export default function HealthPage() {
 }
 
 function Count({ n }: { n: number }) {
-  return <span className="ml-0.5 rounded bg-surface-3 px-1.5 text-[11px] text-muted tnum">{n}</span>
+  return <span className="ml-0.5 rounded bg-border px-1.5 text-[11px] text-muted tnum">{n}</span>
 }
 
 interface Related {
@@ -209,7 +209,7 @@ function FindingDrawer({ finding, onClose }: { finding: Finding | null; onClose:
             ) : (
               <ul className="space-y-1.5">
                 {related.changes.map((c, i) => (
-                  <li key={i} className="text-sm flex items-center gap-2"><span className={`h-1.5 w-1.5 rounded-full ${c.significance === 'high' ? 'bg-critical' : c.significance === 'medium' ? 'bg-warning' : 'bg-faint'}`} /><span className="font-medium">{c.resource_name}</span><span className="text-muted">{c.summary}</span></li>
+                  <li key={i} className="text-sm flex items-center gap-2"><span className={`h-1.5 w-1.5 rounded-full ${c.significance === 'high' ? 'bg-bad' : c.significance === 'medium' ? 'bg-warn' : 'bg-faint'}`} /><span className="font-medium">{c.resource_name}</span><span className="text-muted">{c.summary}</span></li>
                 ))}
               </ul>
             )}

@@ -27,7 +27,7 @@ export function TierBadge({ snapshot }: { snapshot: Pick<SnapshotSummary, 'tier'
 
 /* ---------- vCenter event categories ---------- */
 export const eventCategoryLabel: Record<EventCategory, string> = { user: 'User action', warning: 'Warning', error: 'Error', info: 'Info' }
-export const eventCategoryDot: Record<EventCategory, string> = { user: 'bg-accent', warning: 'bg-warning', error: 'bg-critical', info: 'bg-faint' }
+export const eventCategoryDot: Record<EventCategory, string> = { user: 'bg-accent', warning: 'bg-warn', error: 'bg-bad', info: 'bg-faint' }
 export function EventCategoryDot({ category, className }: { category: EventCategory; className?: string }) {
   return <span aria-hidden className={cn('inline-block h-2 w-2 rounded-full shrink-0', eventCategoryDot[category] ?? 'bg-faint', className)} title={eventCategoryLabel[category] ?? category} />
 }
@@ -98,7 +98,7 @@ export function FindingRow({ finding, onClick, compact }: { finding: Finding; on
     <button onClick={onClick} className={cn('w-full text-left group rounded-lg border border-border bg-surface hover:border-border-strong hover:bg-surface-2',
       compact ? 'px-4 py-3' : 'px-5 py-4')}>
       <div className="flex items-start gap-3">
-        <span className={cn('mt-1.5 h-2 w-2 rounded-full shrink-0', finding.severity === 'critical' ? 'bg-critical' : finding.severity === 'warning' ? 'bg-warning' : 'bg-info')} />
+        <span className={cn('mt-1.5 h-2 w-2 rounded-full shrink-0', finding.severity === 'critical' ? 'bg-bad' : finding.severity === 'warning' ? 'bg-warn' : 'bg-accent')} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
             <SeverityBadge severity={finding.severity} />

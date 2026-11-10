@@ -170,14 +170,14 @@ export function AssistantPanel({ seed, seedKey, context, compact }: {
       {/* Composer */}
       <div className="border-t border-border px-5 py-4 shrink-0 bg-surface">
         <div className="flex items-center gap-2 mb-2.5 flex-wrap">
-          <Select value={task} onChange={e => setTask(e.target.value as AssistantTask)} className="h-8 text-[13px]" disabled={busy}>
+          <Select value={task} onChange={e => setTask(e.target.value as AssistantTask)} className="h-8 w-auto text-[13px]" disabled={busy}>
             <option value="ask">Ask</option>
             <option value="explain">Explain</option>
             <option value="investigate">Investigate</option>
             <option value="generate-script">Generate script</option>
           </Select>
           {task === 'generate-script' ? (
-            <Select value={format} onChange={e => setFormat(e.target.value as ScriptFormat)} className="h-8 text-[13px]" disabled={busy}>
+            <Select value={format} onChange={e => setFormat(e.target.value as ScriptFormat)} className="h-8 w-auto text-[13px]" disabled={busy}>
               <option value="powercli">PowerCLI</option>
               <option value="python">Python</option>
               <option value="shell">Shell</option>
@@ -205,7 +205,7 @@ function MessageView({ m }: { m: Message }) {
   if (m.role === 'user') {
     return (
       <div className="flex gap-3">
-        <div className="h-7 w-7 rounded-md bg-surface-3 flex items-center justify-center text-muted shrink-0"><User size={14} /></div>
+        <div className="h-7 w-7 rounded-md bg-surface-2 flex items-center justify-center text-muted shrink-0"><User size={14} /></div>
         <div className="min-w-0">
           <div className="text-[11px] uppercase tracking-wider text-faint font-semibold mb-1">{m.task ? TASK_LABEL[m.task] : 'You'}</div>
           <p className="text-sm">{m.text}</p>

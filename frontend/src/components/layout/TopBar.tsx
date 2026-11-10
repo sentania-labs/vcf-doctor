@@ -27,7 +27,7 @@ export function TopBar() {
     selectedId === ALL,
     databaseDown,
   )
-  const dotCls = { ok: 'bg-ok', error: 'bg-critical', running: 'bg-warning', none: 'bg-faint' }[dot]
+  const dotCls = { ok: 'bg-good', error: 'bg-bad', running: 'bg-warn', none: 'bg-faint' }[dot]
 
   return (
     <header className="lat-header min-h-16 shrink-0">

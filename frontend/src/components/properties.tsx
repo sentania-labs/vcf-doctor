@@ -80,12 +80,12 @@ const CHIP_KEYS = new Set(['ntpServers', 'dnsServers', 'datastores', 'networks',
 
 // Keys whose value reads better as a status dot plus text.
 function stateTone(k: string, v: unknown): string | null {
-  if (k === 'connectionState') return v === 'connected' ? 'bg-ok' : v === 'disconnected' || v === 'notResponding' ? 'bg-critical' : 'bg-warning'
-  if (k === 'powerState') return v === 'poweredOn' ? 'bg-ok' : v === 'poweredOff' ? 'bg-faint' : 'bg-warning'
-  if (k === 'toolsStatus') return v === 'toolsOk' ? 'bg-ok' : v === 'toolsOld' ? 'bg-warning' : 'bg-critical'
-  if (k === 'overallStatus') return v === 'green' ? 'bg-ok' : v === 'yellow' ? 'bg-warning' : v === 'red' ? 'bg-critical' : 'bg-faint'
-  if (k === 'maintenanceMode' || k === 'lockdownMode') return v === true || (typeof v === 'string' && v !== 'lockdownDisabled' && v !== 'normal') ? 'bg-warning' : null
-  if (k === 'accessible') return v === true ? 'bg-ok' : v === false ? 'bg-critical' : null
+  if (k === 'connectionState') return v === 'connected' ? 'bg-good' : v === 'disconnected' || v === 'notResponding' ? 'bg-bad' : 'bg-warn'
+  if (k === 'powerState') return v === 'poweredOn' ? 'bg-good' : v === 'poweredOff' ? 'bg-faint' : 'bg-warn'
+  if (k === 'toolsStatus') return v === 'toolsOk' ? 'bg-good' : v === 'toolsOld' ? 'bg-warn' : 'bg-bad'
+  if (k === 'overallStatus') return v === 'green' ? 'bg-good' : v === 'yellow' ? 'bg-warn' : v === 'red' ? 'bg-bad' : 'bg-faint'
+  if (k === 'maintenanceMode' || k === 'lockdownMode') return v === true || (typeof v === 'string' && v !== 'lockdownDisabled' && v !== 'normal') ? 'bg-warn' : null
+  if (k === 'accessible') return v === true ? 'bg-good' : v === false ? 'bg-bad' : null
   return null
 }
 
@@ -178,7 +178,7 @@ function Scalar({ k, v }: { k: string; v: unknown }) {
 function Chips({ items }: { items: unknown[] }) {
   return (
     <div className="flex flex-wrap gap-1.5">
-      {items.map((it, i) => <span key={i} className="inline-flex items-center rounded-md bg-surface-3 text-fg px-2 py-0.5 text-xs font-mono break-all">{typeof it === 'object' && it !== null ? formatValue(it) : String(it)}</span>)}
+      {items.map((it, i) => <span key={i} className="inline-flex items-center rounded-md bg-surface-2 text-fg px-2 py-0.5 text-xs font-mono break-all">{typeof it === 'object' && it !== null ? formatValue(it) : String(it)}</span>)}
     </div>
   )
 }

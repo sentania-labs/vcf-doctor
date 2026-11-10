@@ -95,9 +95,9 @@ export default function InventoryPage() {
 
 function statusDot(r: Resource): string | null {
   const p = r.properties
-  if (r.type === 'host') return p.connectionState === 'connected' ? 'bg-ok' : 'bg-critical'
-  if (r.type === 'vm') return p.powerState === 'poweredOn' ? 'bg-ok' : 'bg-faint'
-  if (r.type === 'datastore') { const u = Number(p.usedPct); return Number.isNaN(u) ? null : u >= 85 ? 'bg-warning' : 'bg-ok' }
+  if (r.type === 'host') return p.connectionState === 'connected' ? 'bg-good' : 'bg-bad'
+  if (r.type === 'vm') return p.powerState === 'poweredOn' ? 'bg-good' : 'bg-faint'
+  if (r.type === 'datastore') { const u = Number(p.usedPct); return Number.isNaN(u) ? null : u >= 85 ? 'bg-warn' : 'bg-good' }
   return null
 }
 
@@ -108,7 +108,7 @@ function TreeNode({ r, depth, childrenOf, selected, onSelect, filter }: { r: Res
   const dot = statusDot(r)
   return (
     <div>
-      <div className={cn('flex items-center gap-1.5 h-9 pr-3 cursor-pointer rounded-md mx-2', selected?.id === r.id ? 'bg-surface-3' : 'hover:bg-surface-2')} style={{ paddingLeft: 8 + depth * 20 }} onClick={() => onSelect(r)}>
+      <div className={cn('flex items-center gap-1.5 h-9 pr-3 cursor-pointer rounded-md mx-2', selected?.id === r.id ? 'bg-accent-soft' : 'hover:bg-surface-2')} style={{ paddingLeft: 8 + depth * 20 }} onClick={() => onSelect(r)}>
         <button onClick={e => { e.stopPropagation(); setOpen(o => !o) }} className={cn('h-5 w-5 flex items-center justify-center text-faint hover:text-fg rounded', kids.length === 0 && 'invisible')}>
           {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         </button>
@@ -126,7 +126,7 @@ function LeafRow({ r, selected, onSelect }: { r: Resource; selected: Resource | 
   const dot = statusDot(r)
   const used = r.type === 'datastore' ? Number(r.properties.usedPct) : NaN
   return (
-    <div className={cn('flex items-center gap-2 h-9 px-3 mx-2 rounded-md cursor-pointer', selected?.id === r.id ? 'bg-surface-3' : 'hover:bg-surface-2')} onClick={() => onSelect(r)}>
+    <div className={cn('flex items-center gap-2 h-9 px-3 mx-2 rounded-md cursor-pointer', selected?.id === r.id ? 'bg-accent-soft' : 'hover:bg-surface-2')} onClick={() => onSelect(r)}>
       <ResourceIcon type={r.type} size={14} className="text-muted shrink-0" />
       <span className="text-sm truncate">{r.name}</span>
       {dot ? <span className={cn('h-1.5 w-1.5 rounded-full shrink-0', dot)} /> : null}

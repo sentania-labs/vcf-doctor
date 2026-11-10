@@ -18,7 +18,7 @@ export function Button({ variant = 'secondary', size = 'md', loading, className,
         variantCls[variant], sizeCls[size], className)}
       disabled={disabled || loading} {...rest}
     >
-      {loading ? <Loader2 size={15} /> : null}
+      {loading ? <Loader2 size={15} className="spin" /> : null}
       {children}
     </button>
   )
@@ -98,7 +98,7 @@ export function Toggle({ checked, onChange, label, disabled }: { checked: boolea
     <button type="button" role="switch" aria-checked={checked} disabled={disabled} onClick={() => onChange(!checked)}
       className={cn('inline-flex items-center gap-2.5 disabled:opacity-50', label && 'text-sm')}>
       <span className={cn('relative inline-flex h-5 w-9 shrink-0 items-center rounded-full border',
-        checked ? 'bg-accent border-accent' : 'bg-surface-3 border-border-strong')}>
+        checked ? 'bg-accent border-accent' : 'bg-surface-2 border-border-strong')}>
         <span className={cn('absolute h-3.5 w-3.5 rounded-full bg-white', checked ? 'translate-x-[18px]' : 'translate-x-[3px]')} />
       </span>
       {label ? <span>{label}</span> : null}
@@ -109,11 +109,11 @@ export function Toggle({ checked, onChange, label, disabled }: { checked: boolea
 /* ---------- Segmented control ---------- */
 export function Segmented<T extends string>({ value, onChange, options }: { value: T; onChange: (v: T) => void; options: Array<{ value: T; label: ReactNode }> }) {
   return (
-    <div className="inline-flex rounded-lg border border-border bg-surface-2 p-0.5">
+    <div className="inline-flex rounded-lg border border-border bg-surface p-0.5">
       {options.map(o => (
         <button key={o.value} onClick={() => onChange(o.value)}
-          className={cn('h-8 rounded-md px-3 text-[13px] font-medium inline-flex items-center gap-1.5',
-            value === o.value ? 'bg-surface text-fg' : 'text-muted hover:text-fg')}>
+          className={cn('h-8 rounded-md border px-3 text-[13px] font-medium inline-flex items-center gap-1.5',
+            value === o.value ? 'border-accent bg-accent-soft text-accent-ink' : 'border-transparent text-muted hover:text-fg')}>
           {o.label}
         </button>
       ))}
@@ -178,11 +178,16 @@ export function Drawer({ open, onClose, title, children, width = 'w-[520px]', he
 }
 
 /* ---------- States ---------- */
-export function Spinner({ className }: { className?: string }) {
-  return <Loader2 size={18} className={cn('text-muted', className)} />
+export function Spinner({ className, label = 'Loading' }: { className?: string; label?: string }) {
+  return (
+    <span role="status" className={cn('inline-flex items-center gap-2 text-muted', className)}>
+      <Loader2 size={18} className="spin spin-icon" aria-hidden="true" />
+      <span className="spin-label">{label}</span>
+    </span>
+  )
 }
 export function Skeleton({ className }: { className?: string }) {
-  return <div className={cn('rounded-md bg-surface-3', className)} />
+  return <div className={cn('rounded-md bg-surface-2', className)} />
 }
 export function EmptyState({ icon, title, body, action }: { icon?: ReactNode; title: string; body?: ReactNode; action?: ReactNode }) {
   return (
