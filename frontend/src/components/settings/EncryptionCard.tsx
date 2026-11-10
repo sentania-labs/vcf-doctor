@@ -1,4 +1,5 @@
 import DeploymentHelp from './DeploymentHelp'
+import { encryptionErrorMessage } from './encryptionError'
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AlertTriangle, CheckCircle2, FileKey, KeyRound, Lock } from 'lucide-react'
@@ -40,7 +41,7 @@ export default function EncryptionCard({ reloadKey, onRotated }: { reloadKey?: u
                 <div className="text-sm font-mono break-all">{d.key_source === 'env' ? 'the deployment (for example a sealed Kubernetes secret)' : d.key_file}</div>
               </div>
             </div>
-            {d.key_error ? <p className="lat-banner lat-banner--bad" role="alert">The encryption key is unavailable. Until this is fixed, stored passwords cannot be read and new ones cannot be saved.</p> : null}
+            {d.key_error ? <p className="lat-banner lat-banner--bad" role="alert">{encryptionErrorMessage(d.key_error)} Until this is fixed, stored passwords cannot be read and new ones cannot be saved.</p> : null}
             {d.key_source === 'file' ? (
               <p className="text-xs text-faint">The key file lives on the persistent volume with owner-only permissions. A key supplied by the deployment takes precedence over it. The key is never shown here.</p>
             ) : null}
