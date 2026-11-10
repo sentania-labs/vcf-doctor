@@ -275,7 +275,7 @@ export default function SettingsPage() {
             <CardHeader title="Assistant" subtitle="Evidence-grounded explanations and scripts. Never executes anything."
               action={status.data ? <Badge tone={status.data.available ? 'ok' : 'warning'} dot>{status.data.available ? 'Available' : 'Unavailable'}</Badge> : null} />
             <div className="px-5 pb-5 space-y-5">
-              {status.data && !status.data.available && status.data.reason ? <p className="lat-banner lat-banner--warn">{status.data.reason.replace('Set ANTHROPIC_API_KEY or enter a key on the Settings page.', 'Enter a key below or supply one in the deployment.')}</p> : null}
+              {status.data && !status.data.available && status.data.reason ? <p className="lat-banner lat-banner--warn">{status.data.reason}</p> : null}
               <Toggle checked={assistant.enabled} onChange={v => setAssistant(a => ({ ...a, enabled: v }))} label="Assistant enabled" />
               <div className="grid sm:grid-cols-2 gap-4">
                 <Field label="Provider" hint={assistant.provider === 'mock' ? 'Mock answers from canned evidence and needs no key. Not real analysis; switch to Anthropic for real answers.' : 'Answers come from the Anthropic API.'}>
@@ -296,7 +296,7 @@ export default function SettingsPage() {
               <Field label="Anthropic API key" hint="Write-only. The key is stored on the server and never shown again. A key saved here takes precedence over a deployment key; clear it to fall back to the deployment key.">
                 <div className="flex items-center gap-3">
                   <Input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder={assistant.api_key_set ? 'Enter a new key to replace the stored one' : 'sk-ant-...'} autoComplete="new-password" disabled={assistant.provider === 'mock'} />
-                  <Badge tone={assistant.api_key_unreadable ? 'critical' : assistant.api_key_set ? 'ok' : 'neutral'} className="shrink-0"><KeyRound size={11} /> {assistant.api_key_unreadable ? (assistant.api_key_set ? 'Re-enter key (env in use)' : 'Re-enter key') : assistant.api_key_set ? 'Key set' : 'No key'}</Badge>
+                  <Badge tone={assistant.api_key_unreadable ? 'critical' : assistant.api_key_set ? 'ok' : 'neutral'} className="shrink-0"><KeyRound size={11} /> {assistant.api_key_unreadable ? (assistant.api_key_set ? 'Re-enter key (deployment key in use)' : 'Re-enter key') : assistant.api_key_set ? 'Key set' : 'No key'}</Badge>
                 </div>
               </Field>
               <DeploymentHelp>Assistant key: ANTHROPIC_API_KEY</DeploymentHelp>

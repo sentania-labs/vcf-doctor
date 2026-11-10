@@ -16,7 +16,8 @@ from app.models import AssistantRequest, AssistantStatus
 log = logging.getLogger(__name__)
 
 NO_KEY_REASON = (
-    "No Anthropic API key configured. Set ANTHROPIC_API_KEY or enter a key on the Settings page."
+    "No Anthropic API key configured. "
+    "Enter a key on the Settings page or supply one in the deployment."
 )
 REFUSAL_NOTICE = (
     "\n\n[The model declined to answer this request (stop reason: refusal). "
