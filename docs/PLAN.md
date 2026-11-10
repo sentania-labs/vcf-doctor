@@ -161,12 +161,14 @@ class AssistantSettings:
     enabled: bool
     model: str             # default "claude-opus-5"
     api_key_set: bool      # a usable key exists, stored or from the deployment
+    api_key_source: Literal["stored", "deployment", "none"]  # which key is in use
     api_key_stored: bool   # a key entered on the Settings page is stored
 ```
 
 The API key may be supplied by `ANTHROPIC_API_KEY` from the deployment or
 entered on the Settings page. The key entered on the Settings page wins when
-both are present. The key is never returned by any endpoint or written to a snapshot.
+both are present. Sending an empty `api_key` clears the stored key, and the
+deployment key takes over if there is one. The key is never returned by any endpoint or written to a snapshot.
 
 ### API surface
 
