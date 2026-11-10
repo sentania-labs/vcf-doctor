@@ -148,7 +148,8 @@ The Claude assistant is enabled by default but unavailable until it has an
 Anthropic API key; its buttons say so. Enter one in
 Settings, Assistant (stored encrypted, never shown again) or set
 `ANTHROPIC_API_KEY` on the container. A key entered in Settings takes
-precedence. Everything the assistant says is grounded in the evidence on
+precedence; use Clear saved key there to fall back to the container's key.
+Everything the assistant says is grounded in the evidence on
 screen, and any script it generates is shown, never run.
 
 ## Next
