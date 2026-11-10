@@ -205,11 +205,13 @@ export default function SettingsPage() {
   const [assistant, setAssistant] = useState<AssistantSettings>({ enabled: true, provider: 'anthropic', model: 'claude-opus-5', api_key_set: false })
   const [models, setModels] = useState<AssistantModel[]>([])
   const [modelSource, setModelSource] = useState<'live' | 'curated' | null>(null)
+  const [modelRefresh, setModelRefresh] = useState(0)
   useEffect(() => {
     let cancelled = false
-    getAssistantModels().then(r => { if (!cancelled) { setModels(r.models); setModelSource(r.source) } }).catch(() => { if (!cancelled) setModels([]) })
+    setModelSource(null)
+    getAssistantModels().then(r => { if (!cancelled) { setModels(r.models); setModelSource(r.source) } }).catch(() => { if (!cancelled) { setModels([]); setModelSource('curated') } })
     return () => { cancelled = true }
-  }, [assistant.api_key_set])
+  }, [assistant.api_key_set, modelRefresh])
   const [apiKey, setApiKey] = useState('')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -224,6 +226,7 @@ export default function SettingsPage() {
     try {
       const body = { retention_policy: retention, event_policy: eventPolicy, changes_min_significance: minSig, assistant: { enabled: assistant.enabled, provider: assistant.provider, model: assistant.model.trim() || 'claude-opus-5', ...(apiKey ? { api_key: apiKey } : {}) } }
       apply(await updateSettings(body))
+      if (apiKey) setModelRefresh(n => n + 1)
       setSaved(true); setTimeout(() => setSaved(false), 2500)
       status.reload()
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)) } finally { setSaving(false) }
@@ -284,7 +287,7 @@ export default function SettingsPage() {
                     <option value="mock">Mock (no key, canned answers)</option>
                   </Select>
                 </Field>
-                <Field label="Model" hint={modelSource === 'live' ? 'List comes from your Anthropic account.' : 'Add an API key to list the models available to your account.'}>
+                <Field label="Model" hint={!assistant.api_key_set ? 'Add an API key to list the models available to your account.' : modelSource === null ? 'Loading models from your Anthropic account.' : modelSource === 'live' ? 'List comes from your Anthropic account.' : models.length ? 'Model lookup failed. The list shown is a fallback. Check your key or reload this page to try again.' : 'Model lookup failed. Check your key or reload this page to try again.'}>
                   <Select value={assistant.model} onChange={e => setAssistant(a => ({ ...a, model: e.target.value }))} disabled={assistant.provider === 'mock'}>
                     {(models.length ? models : [{ id: assistant.model, display_name: assistant.model, recommended: false }]).map(m => (
                       <option key={m.id} value={m.id}>{m.display_name}{m.recommended ? ' (recommended)' : ''}</option>
@@ -295,7 +298,7 @@ export default function SettingsPage() {
               </div>
               <Field label="Anthropic API key" hint="Write-only. The key is stored on the server and never shown again. A key saved here takes precedence over a deployment key; clear it to fall back to the deployment key.">
                 <div className="flex items-center gap-3">
-                  <Input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder={assistant.api_key_set ? 'Enter a new key to replace the stored one' : 'sk-ant-...'} autoComplete="new-password" disabled={assistant.provider === 'mock'} />
+                  <Input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder={assistant.api_key_stored ? 'Enter a new key to replace the stored one' : 'Enter a key to save'} autoComplete="new-password" disabled={assistant.provider === 'mock'} />
                   <Badge tone={assistant.api_key_unreadable ? 'critical' : assistant.api_key_set ? 'ok' : 'neutral'} className="shrink-0"><KeyRound size={11} /> {assistant.api_key_unreadable ? (assistant.api_key_set ? 'Re-enter key (deployment key in use)' : 'Re-enter key') : assistant.api_key_set ? 'Key set' : 'No key'}</Badge>
                 </div>
               </Field>

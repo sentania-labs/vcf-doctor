@@ -18,11 +18,13 @@ def test_defaults_without_anything_stored():
     assert s.provider == "anthropic"
     assert s.model == "claude-opus-5"
     assert s.api_key_set is False
+    assert s.api_key_stored is False
 
 
 def test_roundtrip_never_returns_key():
     out = assistant_settings.update_settings({"api_key": SECRET, "model": "claude-opus-5"})
     assert out.api_key_set is True
+    assert out.api_key_stored is True
     dumped = out.model_dump()
     assert SECRET not in str(dumped)
     assert "api_key" not in dumped
@@ -37,6 +39,7 @@ def test_gui_key_wins_over_env(monkeypatch):
     """A key entered in Settings must take effect even when the deployment set one."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-env-0000")
     assert assistant_settings.resolve_api_key() == "sk-ant-env-0000"
+    assert assistant_settings.get_settings().api_key_stored is False
     assistant_settings.update_settings({"api_key": SECRET})
     assert assistant_settings.resolve_api_key() == SECRET
     assert assistant_settings.get_settings().api_key_set is True
@@ -46,6 +49,7 @@ def test_clearing_key():
     assistant_settings.update_settings({"api_key": SECRET})
     assistant_settings.update_settings({"api_key": ""})
     assert assistant_settings.get_settings().api_key_set is False
+    assert assistant_settings.get_settings().api_key_stored is False
 
 
 def test_partial_update_keeps_other_fields():

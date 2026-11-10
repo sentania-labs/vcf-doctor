@@ -48,6 +48,8 @@ def get_settings() -> AssistantSettings:
     merged: dict[str, Any] = {"model": cfg.llm_model}
     merged.update({k: v for k, v in raw.items() if k in _PERSISTED_FIELDS})
     merged["api_key_set"] = resolve_api_key() is not None
+    stored = db.get_setting(API_KEY_KEY)
+    merged["api_key_stored"] = isinstance(stored, str) and bool(stored.strip())
     merged["api_key_unreadable"] = stored_key_unreadable()
     return AssistantSettings(**merged)
 
@@ -62,6 +64,7 @@ def update_settings(payload: dict[str, Any]) -> AssistantSettings:
         else:
             db.set_setting(API_KEY_KEY, vault.encrypt(str(key).strip()))
     payload.pop("api_key_set", None)
+    payload.pop("api_key_stored", None)
     payload.pop("api_key_unreadable", None)
 
     current = get_settings().model_dump()

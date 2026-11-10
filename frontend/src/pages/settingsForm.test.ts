@@ -10,7 +10,7 @@ import {
   type SettingsFormState,
 } from './settingsForm.ts'
 
-const saved: AssistantSettings = { enabled: true, provider: 'anthropic', model: 'claude-opus-5', api_key_set: true, api_key_unreadable: true }
+const saved: AssistantSettings = { enabled: true, provider: 'anthropic', model: 'claude-opus-5', api_key_set: true, api_key_stored: true, api_key_unreadable: true }
 
 test('a rotation refreshes the stored-key state and keeps unsaved edits', () => {
   // Operator changes the model and disables the assistant, but has not saved.

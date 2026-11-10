@@ -79,7 +79,7 @@ export interface AssistantContext {
   question: string; findings: Finding[]; changes: Change[]; resources: Resource[]; events: Event[]; allowed_actions: string[]
 }
 export interface AssistantRequest { task: AssistantTask; script_format?: ScriptFormat; context: AssistantContext }
-export interface AssistantSettings { enabled: boolean; provider: 'anthropic' | 'mock'; model: string; api_key_set: boolean; api_key_unreadable?: boolean }
+export interface AssistantSettings { enabled: boolean; provider: 'anthropic' | 'mock'; model: string; api_key_set: boolean; api_key_stored?: boolean; api_key_unreadable?: boolean }
 export interface AssistantStatus { available: boolean; provider: string; model: string; reason: string | null }
 
 // ---- Frontend-added types (Agent D). Shapes assumed from the API notes; field names above are frozen.
