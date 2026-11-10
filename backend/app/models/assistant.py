@@ -33,6 +33,7 @@ class AssistantSettings(BaseModel):
     provider: Literal["anthropic", "mock"] = "anthropic"
     model: str = "claude-opus-5"
     api_key_set: bool = False  # never the key itself
+    api_key_stored: bool = False
     # A key is stored but cannot be decrypted (encryption key lost or rotated).
     api_key_unreadable: bool = False
 

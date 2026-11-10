@@ -12,7 +12,7 @@ export interface SettingsFormState {
 // After a key rotation only the stored-key state can have changed on the
 // server; everything else on the form is the operator's, saved or not.
 export function withRefreshedKeyState(local: AssistantSettings, fresh: AssistantSettings): AssistantSettings {
-  return { ...local, api_key_set: fresh.api_key_set, api_key_unreadable: fresh.api_key_unreadable }
+  return { ...local, api_key_set: fresh.api_key_set, api_key_stored: fresh.api_key_stored, api_key_unreadable: fresh.api_key_unreadable }
 }
 
 // A rotation leaves these three alone, so each one is its own function: the page
