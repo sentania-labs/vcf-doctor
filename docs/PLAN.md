@@ -160,12 +160,13 @@ Assistant configuration is also application state so it has a GUI:
 class AssistantSettings:
     enabled: bool
     model: str             # default "claude-opus-5"
-    api_key_set: bool      # never returns the key itself
+    api_key_set: bool      # a usable key exists, stored or from the deployment
+    api_key_stored: bool   # a key entered on the Settings page is stored
 ```
 
 The API key may be supplied by `ANTHROPIC_API_KEY` from the deployment or
-entered on the Settings page. The environment variable wins when both are
-present. The key is never returned by any endpoint or written to a snapshot.
+entered on the Settings page. The key entered on the Settings page wins when
+both are present. The key is never returned by any endpoint or written to a snapshot.
 
 ### API surface
 
