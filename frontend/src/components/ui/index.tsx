@@ -187,7 +187,7 @@ export function Spinner({ className, label = 'Loading' }: { className?: string; 
   )
 }
 export function Skeleton({ className }: { className?: string }) {
-  return <div role="status" aria-live="polite" className={cn('rounded-md border border-border-strong bg-surface-2 min-h-8 flex items-center justify-center px-2 text-xs text-muted', className)}><Loader2 size={14} className="spin spin-icon mr-2" aria-hidden="true" />Loading</div>
+  return <div aria-hidden="true" className={cn('rounded-md border border-border-strong bg-surface-2', className)} />
 }
 export function EmptyState({ icon, title, body, action }: { icon?: ReactNode; title: string; body?: ReactNode; action?: ReactNode }) {
   return (
