@@ -2,10 +2,11 @@ import DeploymentHelp from '@/components/settings/DeploymentHelp'
 import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react'
 import { AlertTriangle, CheckCircle2, Database, KeyRound, ShieldCheck } from 'lucide-react'
 import type { AssistantSettings, EventPolicy, RetentionPolicy, Settings, Significance } from '@/types'
-import { getSettings, updateSettings, getAssistantStatus, changePassword, getAssistantModels, type AssistantModel } from '@/api'
+import { getSettings, updateSettings, getAssistantStatus, clearAssistantKey, changePassword, getAssistantModels, type AssistantModel } from '@/api'
 import { ApiError } from '@/api/client'
 import { useAuth } from '@/state/AuthState'
 import { useAsync } from '@/hooks/useAsync'
+import { assistantBadge } from './assistantStatus'
 import { refreshedEventPolicy, refreshedMinSig, refreshedRetention, withRefreshedKeyState } from './settingsForm'
 import { Badge, Button, Card, CardHeader, ErrorState, Field, Input, PageHeader, Select, Skeleton, Toggle } from '@/components/ui'
 import HealthScoreCard from '@/components/settings/HealthScoreCard'
@@ -213,12 +214,15 @@ export default function SettingsPage() {
     return () => { cancelled = true }
   }, [assistant.api_key_set, modelRefresh])
   const [apiKey, setApiKey] = useState('')
+  const [clearingKey, setClearingKey] = useState(false)
+  const [clearError, setClearError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
   useEffect(() => { if (s.data) { setRetention(s.data.retention_policy ?? DEFAULT_RETENTION); setEventPolicy(s.data.event_policy ?? DEFAULT_EVENTS); setAssistant(s.data.assistant); setMinSig(s.data.changes_min_significance ?? 'low') } }, [s.data])
   const apply = (d: Settings) => { setRetention(d.retention_policy ?? DEFAULT_RETENTION); setEventPolicy(d.event_policy ?? DEFAULT_EVENTS); setAssistant(d.assistant); setMinSig(d.changes_min_significance ?? 'low'); setApiKey('') }
+  const badge = assistantBadge(status.data, status.loading || clearingKey, status.error)
   const retentionInvalid = retentionProblem(retention) !== null || eventProblem(eventPolicy) !== null
 
   const save = async () => {
@@ -230,6 +234,17 @@ export default function SettingsPage() {
       setSaved(true); setTimeout(() => setSaved(false), 2500)
       status.reload()
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)) } finally { setSaving(false) }
+  }
+
+  const clearKey = async () => {
+    if (!window.confirm('Clear the saved key? A deployment-supplied key will take over if present. Without one, the Anthropic assistant will be unavailable.')) return
+    setClearingKey(true); setClearError(null)
+    try {
+      const fresh = await clearAssistantKey()
+      setAssistant(a => withRefreshedKeyState(a, fresh))
+      setModelRefresh(n => n + 1)
+      status.reload()
+    } catch (e) { setClearError(e instanceof Error ? e.message : String(e)) } finally { setClearingKey(false) }
   }
 
   // A rotation may have made the stored API key readable again. Refresh only
@@ -253,7 +268,7 @@ export default function SettingsPage() {
   return (
     <div className=" max-w-3xl">
       <PageHeader title="Settings" subtitle="Working defaults are in place. Nothing here is required to start."
-        actions={<>{saved ? <span className="text-sm text-ok inline-flex items-center gap-1.5"><CheckCircle2 size={15} /> Saved</span> : null}<Button variant="primary" onClick={() => void save()} loading={saving} disabled={!s.data || retentionInvalid} title={retentionInvalid ? 'Fix the retention windows first' : undefined}>Save changes</Button></>} />
+        actions={<>{saved ? <span className="text-sm text-ok inline-flex items-center gap-1.5"><CheckCircle2 size={15} /> Saved</span> : null}<Button variant="primary" onClick={() => void save()} loading={saving} disabled={!s.data || retentionInvalid || clearingKey} title={retentionInvalid ? 'Fix the retention windows first' : undefined}>Save changes</Button></>} />
 
       {!s.data ? <div className="space-y-5"><Skeleton className="h-40 rounded-xl" /><Skeleton className="h-72 rounded-xl" /></div> : (
         <div className="space-y-5">
@@ -276,9 +291,9 @@ export default function SettingsPage() {
 
           <Card>
             <CardHeader title="Assistant" subtitle="Evidence-grounded explanations and scripts. Never executes anything."
-              action={status.data ? <Badge tone={status.data.available ? 'ok' : 'warning'} dot>{status.data.available ? 'Available' : 'Unavailable'}</Badge> : null} />
+              action={badge ? <Badge tone={badge.tone} dot>{badge.label}</Badge> : null} />
             <div className="px-5 pb-5 space-y-5">
-              {status.data && !status.data.available && status.data.reason ? <p className="lat-banner lat-banner--warn">{status.data.reason}</p> : null}
+              {!status.loading && !status.error && status.data && !status.data.available && status.data.reason ? <p className="lat-banner lat-banner--warn">{status.data.reason}</p> : null}
               <Toggle checked={assistant.enabled} onChange={v => setAssistant(a => ({ ...a, enabled: v }))} label="Assistant enabled" />
               <div className="grid sm:grid-cols-2 gap-4">
                 <Field label="Provider" hint={assistant.provider === 'mock' ? 'Mock answers from canned evidence and needs no key. Not real analysis; switch to Anthropic for real answers.' : 'Answers come from the Anthropic API.'}>
@@ -296,12 +311,14 @@ export default function SettingsPage() {
                   </Select>
                 </Field>
               </div>
-              <Field label="Anthropic API key" hint="Write-only. The key is stored on the server and never shown again. A key saved here takes precedence over a deployment key; clear it to fall back to the deployment key.">
+              <Field label="Anthropic API key" hint="Write-only. The key is stored on the server and never shown again. A key saved here takes precedence over a deployment key; clear it to use a deployment-supplied key if present. Without one, the Anthropic assistant is unavailable.">
                 <div className="flex items-center gap-3">
                   <Input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder={assistant.api_key_stored ? 'Enter a new key to replace the stored one' : 'Enter a key to save'} autoComplete="new-password" disabled={assistant.provider === 'mock'} />
                   <Badge tone={assistant.api_key_unreadable ? 'critical' : assistant.api_key_set ? 'ok' : 'neutral'} className="shrink-0"><KeyRound size={11} /> {assistant.api_key_unreadable ? (assistant.api_key_set ? 'Re-enter key (deployment key in use)' : 'Re-enter key') : assistant.api_key_set ? 'Key set' : 'No key'}</Badge>
                 </div>
               </Field>
+              {assistant.api_key_stored ? <Button type="button" variant="secondary" onClick={() => void clearKey()} loading={clearingKey} disabled={saving}>Clear saved key</Button> : null}
+              {clearError ? <p className="lat-banner lat-banner--bad" role="alert">Could not clear the saved key: {clearError}</p> : null}
               <DeploymentHelp>Assistant key: ANTHROPIC_API_KEY</DeploymentHelp>
               {assistant.api_key_unreadable ? <p className="lat-banner lat-banner--bad" role="alert">The stored API key was encrypted with a different key and cannot be read.{assistant.api_key_set ? ' The deployment key is being used meanwhile.' : ''} Enter it again to store it under the current encryption key.</p> : null}
             </div>

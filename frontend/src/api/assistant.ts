@@ -1,10 +1,19 @@
-import type { AssistantRequest, AssistantStatus, AssistantStreamEvent } from '@/types'
-import { apiGet, apiUrl, ApiError } from './client'
+import type { AssistantRequest, AssistantSettings, AssistantStatus, AssistantStreamEvent } from '@/types'
+import { apiGet, apiSend, apiUrl, ApiError } from './client'
 import { USE_MOCKS, delay, mockState, mockAssistantText } from './mocks'
 
 export function getAssistantStatus(): Promise<AssistantStatus> {
   if (USE_MOCKS) return delay(mockState.assistantStatus, 100)
   return apiGet<AssistantStatus>('/assistant/status')
+}
+
+export function clearAssistantKey(): Promise<AssistantSettings> {
+  if (USE_MOCKS) {
+    mockState.settings.assistant = { ...mockState.settings.assistant, api_key_set: false, api_key_stored: false, api_key_unreadable: false }
+    mockState.assistantStatus = { ...mockState.assistantStatus, available: mockState.settings.assistant.enabled && mockState.settings.assistant.provider === 'mock', reason: !mockState.settings.assistant.enabled ? 'Assistant is disabled in Settings.' : mockState.settings.assistant.provider === 'mock' ? null : 'No Anthropic API key is configured. Add one in Settings or select the Mock provider.' }
+    return delay(mockState.settings.assistant, 100)
+  }
+  return apiSend<AssistantSettings>('PUT', '/assistant/settings', { api_key: '' })
 }
 
 export type AssistantEventHandler = (ev: AssistantStreamEvent) => void
