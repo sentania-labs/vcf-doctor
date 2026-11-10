@@ -28,7 +28,7 @@ def stored_key_unreadable() -> bool:
     return isinstance(stored, str) and bool(stored) and not vault.readable(stored)
 
 
-def resolve_api_key() -> str | None:
+def _resolve_api_key() -> tuple[str | None, str]:
     """A key entered in Settings wins; ANTHROPIC_API_KEY is the deployment default.
     An unreadable stored key is treated as absent so the env fallback still works."""
     stored = db.get_setting(API_KEY_KEY)
@@ -38,16 +38,22 @@ def resolve_api_key() -> str | None:
         except vault.SecretUnreadable:
             plain = ""
         if plain:
-            return plain
+            return plain, "stored"
     env = os.environ.get(ENV_KEY, "").strip()
-    return env or None
+    return (env, "deployment") if env else (None, "none")
+
+
+def resolve_api_key() -> str | None:
+    return _resolve_api_key()[0]
 
 
 def get_settings() -> AssistantSettings:
     raw = db.get_setting(SETTINGS_KEY) or {}
     merged: dict[str, Any] = {"model": cfg.llm_model}
     merged.update({k: v for k, v in raw.items() if k in _PERSISTED_FIELDS})
-    merged["api_key_set"] = resolve_api_key() is not None
+    key, source = _resolve_api_key()
+    merged["api_key_set"] = key is not None
+    merged["api_key_source"] = source
     stored = db.get_setting(API_KEY_KEY)
     merged["api_key_stored"] = isinstance(stored, str) and bool(stored.strip())
     merged["api_key_unreadable"] = stored_key_unreadable()
@@ -63,6 +69,7 @@ def update_settings(payload: dict[str, Any]) -> AssistantSettings:
             db.set_setting(API_KEY_KEY, "")
         else:
             db.set_setting(API_KEY_KEY, vault.encrypt(str(key).strip()))
+    payload.pop("api_key_source", None)
     payload.pop("api_key_set", None)
     payload.pop("api_key_stored", None)
     payload.pop("api_key_unreadable", None)

@@ -65,6 +65,21 @@ def test_status_without_key_is_unavailable_with_reason(client):
     assert "API key" in body["reason"]
 
 
+def test_save_and_clear_key_with_deployment_fallback(client, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "deployment-key")
+    saved = client.put("/api/assistant/settings", json={"api_key": "saved-key"}).json()
+    assert saved["api_key_stored"] and saved["api_key_set"]
+    assert saved["api_key_source"] == "stored"
+    assert assistant_settings.resolve_api_key() == "saved-key"
+    cleared = client.put("/api/assistant/settings", json={"api_key": ""}).json()
+    assert not cleared["api_key_stored"] and cleared["api_key_set"]
+    assert cleared["api_key_source"] == "deployment"
+    assert assistant_settings.resolve_api_key() == "deployment-key"
+    assert client.get("/api/assistant/status").json()["available"] is True
+    monkeypatch.delenv("ANTHROPIC_API_KEY")
+    assert client.get("/api/assistant/status").json()["available"] is False
+
+
 def test_ask_without_key_emits_error_event(client):
     with client.stream("POST", "/api/assistant", json=_body()) as r:
         assert r.status_code == 200

@@ -129,7 +129,7 @@ def test_wrong_key_marks_connection_needing_credentials(monkeypatch):
         get_collector(loaded)
 
     s = assistant_settings.get_settings()
-    assert s.api_key_set is False and s.api_key_unreadable is True
+    assert s.api_key_set is False and s.api_key_unreadable is True and s.api_key_source == "none"
     assert assistant_settings.resolve_api_key() is None
 
     # Re-entering stores under the new key and clears the flag.
@@ -147,6 +147,7 @@ def test_wrong_key_env_fallback_for_assistant(monkeypatch):
     _rotate_key(monkeypatch)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-env-0000")
     assert assistant_settings.resolve_api_key() == "sk-ant-env-0000"
+    assert assistant_settings.get_settings().api_key_source == "deployment"
 
 
 def test_api_surfaces_status_and_never_the_key(monkeypatch):

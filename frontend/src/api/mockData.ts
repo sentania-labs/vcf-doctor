@@ -440,7 +440,7 @@ export const mockState = {
     retention_policy: { recent_days: 14, hourly_days: 30, daily_days: 365, timezone: 'UTC' },
     event_policy: { retention_hours: 48, row_cap: 250000 },
     changes_min_significance: 'low',
-    assistant: { enabled: true, provider: 'mock', model: 'claude-opus-5', api_key_set: false },
+    assistant: { enabled: true, provider: 'mock', model: 'claude-opus-5', api_key_set: false, api_key_source: 'none' },
   } as Settings,
   assistantStatus: { available: true, provider: 'mock', model: 'claude-opus-5', reason: null } as AssistantStatus,
   nextId: 100,
