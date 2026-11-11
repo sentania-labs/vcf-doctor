@@ -9,7 +9,7 @@ RUN npm run build
 
 # 3.14.10-slim-trixie: the first slim build whose Debian 13.7 layer has apt and
 # libapt-pkg7.0 3.0.4, which is what closes CVE-2026-109518.
-FROM python:3.14-slim@sha256:af8a5aa14780025dbfbcfbc81bd8a91ebd87711dd5b0f48ed71090949dd7cb1d AS backend
+FROM python:3.15-slim@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928 AS backend
 ARG BUILD_VERSION=dev
 ARG BUILD_SHA=unknown
 ARG BUILD_DATE=unknown
