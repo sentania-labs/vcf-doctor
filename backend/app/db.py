@@ -203,12 +203,10 @@ def classify_connection_failure(message: str) -> tuple[str, str | None]:
         return "unknown", detail if safe else None
     if re.search(
         r" failed: (Connection refused|Connection timed out|No route to host|"
-        r"server closed the connection unexpectedly)$",
+        r"No such file or directory|server closed the connection unexpectedly)$",
         line,
         re.I,
-    ) or re.fullmatch(
-        r"(connection failed: )?(timeout expired|could not translate host name .*)", line, re.I
-    ):
+    ) or re.fullmatch(r"connection timeout expired|failed to resolve host '[^'\n]*': .*", line):
         return "unreachable", None
     return "unknown", None
 

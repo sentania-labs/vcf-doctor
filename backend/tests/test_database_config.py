@@ -740,3 +740,89 @@ def test_unrecognized_refusal_from_a_real_server(monkeypatch, tmp_path):
             assert db.connection_failure() == ("unknown", None)
         finally:
             admin.execute("DROP ROLE vcfd_unrecognized_test")
+
+
+def test_unreachable_server_is_classified_from_real_connection_errors(monkeypatch):
+    monkeypatch.setattr(cfg, "db_password_file", "")
+    for overrides in (
+        {"host": "127.0.0.1", "hostaddr": "127.0.0.1", "port": _free_port()},
+        {"host": "vcfd-no-such-host.invalid", "hostaddr": ""},
+        {"host": "/vcfd-no-such-socket-dir"},
+    ):
+        monkeypatch.setattr(cfg, "database_url", make_conninfo(cfg.database_url, **overrides))
+        assert db.connection_failure() == ("unreachable", None), overrides
+
+
+def test_a_connect_timeout_is_unreachable():
+    assert db.classify_connection_failure("connection timeout expired") == ("unreachable", None)
+
+
+def test_auth_status_and_gated_requests_name_a_refused_credential(monkeypatch, tmp_path):
+    import psycopg
+    from fastapi.testclient import TestClient
+
+    from app import auth
+    from app.config import settings
+    from app.main import app
+
+    db.reset_for_tests()
+    monkeypatch.setattr(settings, "auth", "on")
+    with TestClient(app) as client:
+        cookie = auth.issue_token()
+        client.cookies.set(auth.COOKIE, cookie)
+        password_file = tmp_path / "wrong-password"
+        password_file.write_text("vcfd-deliberately-wrong-password", encoding="utf-8")
+        monkeypatch.setattr(cfg, "db_password_file", str(password_file))
+        monkeypatch.setattr(cfg, "db_pool_timeout", 0.5)
+        monkeypatch.setattr(db, "PROBE_TIMEOUT", 0.5)
+        try:
+            with psycopg.connect(db.conninfo()):
+                pytest.skip("test PostgreSQL accepts connections without checking passwords")
+        except psycopg.OperationalError:
+            pass
+        db.close()
+        expected = {
+            "enabled": True,
+            "authenticated": False,
+            "database": "unavailable",
+            "reason": "credential_refused",
+        }
+        status = client.get("/api/auth/status")
+        assert status.status_code == 200
+        assert status.json() == expected
+        gated = client.get("/api/settings")
+        assert gated.status_code == 503
+        assert gated.json() == expected
+    db.close()
+
+
+def test_auth_status_and_gated_requests_name_a_missing_database(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app import auth
+    from app.config import settings
+    from app.main import app
+
+    db.reset_for_tests()
+    monkeypatch.setattr(settings, "auth", "on")
+    with TestClient(app) as client:
+        client.cookies.set(auth.COOKIE, auth.issue_token())
+        monkeypatch.setattr(
+            cfg, "database_url", make_conninfo(cfg.database_url, dbname="vcfd_missing_672391")
+        )
+        monkeypatch.setattr(cfg, "db_pool_timeout", 0.5)
+        monkeypatch.setattr(db, "PROBE_TIMEOUT", 0.5)
+        db.close()
+        expected = {
+            "enabled": True,
+            "authenticated": False,
+            "database": "unavailable",
+            "reason": "database_missing",
+        }
+        status = client.get("/api/auth/status")
+        assert status.status_code == 200
+        assert status.json() == expected
+        gated = client.get("/api/settings")
+        assert gated.status_code == 503
+        assert gated.json() == expected
+    db.close()
