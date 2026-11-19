@@ -18,10 +18,16 @@ test('database health has two states and makes no claim without an answer', () =
 
 test('a database that is up but not migrated says so', () => {
   const generic = databaseHealthPresentation(false)?.message
-  assert.equal(databaseHealthPresentation(false, 'unreachable')?.message, generic)
+  assert.match(databaseHealthPresentation(false, 'unreachable')?.message ?? '', /unreachable/)
   const message = databaseHealthPresentation(false, 'unmigrated')?.message
   assert.notEqual(message, generic)
   assert.match(message ?? '', /migrations/)
   assert.match(message ?? '', /This page updates when it is back\./)
   assert.equal(databaseHealthPresentation(true, 'unmigrated')?.label, 'Healthy')
+})
+
+test('connection failures name the cause and suggest a remedy', () => {
+  assert.match(databaseHealthPresentation(false, 'credential_refused')?.message ?? '', /credential.*password file/)
+  assert.match(databaseHealthPresentation(false, 'database_missing')?.message ?? '', /does not exist.*Create/)
+  assert.match(databaseHealthPresentation(false, 'unknown')?.message ?? '', /Could not connect/)
 })

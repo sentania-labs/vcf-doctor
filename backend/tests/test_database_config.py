@@ -10,7 +10,7 @@ import urllib.error
 import urllib.request
 
 import pytest
-from psycopg.conninfo import conninfo_to_dict
+from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
 from app import config, db
 from app.config import settings as cfg
@@ -655,3 +655,88 @@ def test_a_saved_list_applies_without_waiting_for_a_refresh(monkeypatch):
     assert not threads[0].is_alive()
     assert proxies.stored_value() == ["192.0.2.0/24"]
     proxies.reset_cache()
+
+
+def test_connection_failure_messages_do_not_guess_or_expose_secrets(monkeypatch):
+    monkeypatch.setattr(cfg, "database_url", "postgresql://operator@private-host:5432/medical")
+    monkeypatch.setattr(config, "database_password", lambda: "sensitive-value")
+    assert (
+        db.classify_connection_failure(
+            'connection failed: connection to server at "private-host", port 5432 failed: '
+            'FATAL:  password authentication failed for user "operator"'
+        )[0]
+        == "credential_refused"
+    )
+    assert (
+        db.classify_connection_failure(
+            'connection failed: connection to server at "private-host", port 5432 failed: '
+            'FATAL:  database "medical" does not exist'
+        )[0]
+        == "database_missing"
+    )
+    assert (
+        db.classify_connection_failure(
+            'connection failed: connection to server at "private-host", port 5432 failed: '
+            'Connection refused'
+        )[0]
+        == "unreachable"
+    )
+    reason, detail = db.classify_connection_failure(
+        'connection failed: connection to server at "private-host", port 5432 failed: '
+        'FATAL:  too many connections'
+    )
+    assert reason == "unknown" and detail == "too many connections"
+    monkeypatch.setattr(config, "database_password", lambda: "too many connections")
+    assert db.classify_connection_failure(
+        'connection failed: connection to server at "private-host", port 5432 failed: '
+        'FATAL:  too many connections'
+    ) == ("unknown", None)
+    monkeypatch.setattr(config, "database_password", lambda: "sensitive-value")
+    reason, detail = db.classify_connection_failure(
+        'connection failed: connection to server at "private-host", port 5432 failed: '
+        'FATAL:  password=sensitive-value postgresql://operator:sensitive-value@private-host/medical'
+    )
+    assert reason == "unknown" and (
+        detail is None
+        or all(
+            value not in detail for value in ("sensitive-value", "private-host", "postgresql://")
+        )
+    )
+
+
+def test_missing_database_is_classified_from_a_real_server(monkeypatch):
+    url = make_conninfo(cfg.database_url, dbname="vcfd_missing_672391")
+    monkeypatch.setattr(cfg, "database_url", url)
+    assert db.connection_failure() == ("database_missing", None)
+
+
+def test_refused_password_is_classified_from_a_real_server(monkeypatch, tmp_path):
+    import psycopg
+
+    password_file = tmp_path / "wrong-password"
+    password_file.write_text("vcfd-deliberately-wrong-password", encoding="utf-8")
+    monkeypatch.setattr(cfg, "db_password_file", str(password_file))
+    try:
+        with psycopg.connect(db.conninfo()):
+            pytest.skip("test PostgreSQL accepts connections without checking passwords")
+    except psycopg.OperationalError:
+        pass
+    assert db.connection_failure() == ("credential_refused", None)
+
+
+def test_unrecognized_refusal_from_a_real_server(monkeypatch, tmp_path):
+    import psycopg
+
+    password_file = tmp_path / "role-password"
+    password_file.write_text("vcfd-test-role-password", encoding="utf-8")
+    with psycopg.connect(db.conninfo(), autocommit=True) as admin:
+        admin.execute(
+            "CREATE ROLE vcfd_unrecognized_test NOLOGIN PASSWORD 'vcfd-test-role-password'"
+        )
+        try:
+            url = make_conninfo(cfg.database_url, user="vcfd_unrecognized_test")
+            monkeypatch.setattr(cfg, "database_url", url)
+            monkeypatch.setattr(cfg, "db_password_file", str(password_file))
+            assert db.connection_failure() == ("unknown", None)
+        finally:
+            admin.execute("DROP ROLE vcfd_unrecognized_test")

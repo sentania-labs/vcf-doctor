@@ -18,6 +18,7 @@ means the port changed the engine and not the time model.
 
 import json
 import logging
+import re
 import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -167,6 +168,58 @@ def fetchall(sql: str, args: tuple = (), timeout: float | None = None) -> list[d
 # when it is down, a probe that waits ten seconds gets killed and takes a
 # still-serving pod with it.
 PROBE_TIMEOUT = 1.0
+
+
+def classify_connection_failure(message: str) -> tuple[str, str | None]:
+    """Classify only complete, known libpq messages. Never return the libpq
+    wrapper, which includes the server address. Unknown messages are not
+    assigned a cause based on a substring in a role or database name.
+    """
+    lines = message.splitlines()
+    if len(lines) != 1:
+        # libpq adds a hint after a refused socket; discard that hint only.
+        if len(lines) == 2 and lines[1].strip().startswith("Is the server running"):
+            lines = lines[:1]
+        else:
+            return "unknown", None
+    line = lines[0]
+    server = re.search(r" failed: FATAL:  (.*)$", line)
+    if server:
+        detail = server.group(1)
+        if re.fullmatch(r'password authentication failed for user "[^"\n]*"', detail):
+            return "credential_refused", None
+        if re.fullmatch(r'database "[^"\n]*" does not exist', detail):
+            return "database_missing", None
+        # A server can put arbitrary secrets or internal addresses into an
+        # error. Only fixed, value-free messages can be displayed publicly.
+        safe_messages = {
+            "too many connections",
+            "sorry, too many clients already",
+            "the database system is starting up",
+            "the database system is shutting down",
+        }
+        password = config.database_password()
+        safe = detail in safe_messages and not (password and password.lower() in detail.lower())
+        return "unknown", detail if safe else None
+    if re.search(
+        r" failed: (Connection refused|Connection timed out|No route to host|"
+        r"server closed the connection unexpectedly)$",
+        line,
+        re.I,
+    ) or re.fullmatch(
+        r"(connection failed: )?(timeout expired|could not translate host name .*)", line, re.I
+    ):
+        return "unreachable", None
+    return "unknown", None
+
+
+def connection_failure() -> tuple[str, str | None]:
+    """Probe outside the pool, whose timeout loses the original error."""
+    try:
+        with psycopg.connect(make_conninfo(conninfo(), connect_timeout=1), **CONNECT_KWARGS):
+            return "unknown", None
+    except psycopg.Error as exc:
+        return classify_connection_failure(str(exc))
 
 
 def reachable() -> bool:

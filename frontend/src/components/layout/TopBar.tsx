@@ -49,7 +49,7 @@ export function TopBar() {
         </span>
         {scanError ? <span className="text-xs text-critical max-w-[240px] truncate" title={scanError}>{scanError}</span> : null}
         <div className="flex items-center gap-3 shrink-0">
-          <Button variant="ghost" size="md" className="whitespace-nowrap" onClick={() => openDrawer()} disabled={databaseDown} title={databaseDown ? 'Unavailable while the database is unreachable' : 'Open assistant'}><Bot size={16} /> Assistant</Button>
+          <Button variant="ghost" size="md" className="whitespace-nowrap" onClick={() => openDrawer()} disabled={databaseDown} title={databaseDown ? 'Unavailable while the database is unavailable' : 'Open assistant'}><Bot size={16} /> Assistant</Button>
           <Button variant="primary" className="whitespace-nowrap" onClick={() => void scanNow()} loading={scanning} disabled={!canStartScan(backend, connections.length, databaseDown)}>
             {!scanning ? <RefreshCw size={15} /> : null}{scanning ? 'Scanning' : 'Scan Now'}
           </Button>

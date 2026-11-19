@@ -54,7 +54,7 @@ def status(request: Request) -> dict:
             return auth.database_down_status("unmigrated")
         if not db.is_unreachable(exc):
             raise
-        return auth.database_down_status("unreachable")
+        return auth.database_down_status(*db.connection_failure())
 
 
 def _status_body(request: Request) -> dict:

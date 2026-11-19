@@ -35,11 +35,13 @@ test-backend:
 	@if [ -n "$$VCF_DOCTOR_TEST_DATABASE_URL" ]; then \
 	  cd backend && uv run pytest -q; \
 	else \
-	  trap 'docker rm -f $(TEST_PG_NAME) >/dev/null 2>&1 || true' EXIT; \
+	  password_file=$$(mktemp); \
+	  trap 'docker rm -f $(TEST_PG_NAME) >/dev/null 2>&1 || true; rm -f "$$password_file"' EXIT; \
+	  printf '%s\n' 'vcfd-test-only-password' > "$$password_file"; \
 	  docker rm -f $(TEST_PG_NAME) >/dev/null 2>&1 || true; \
 	  docker run -d --name $(TEST_PG_NAME) \
 	    -e POSTGRES_USER=vcf_doctor -e POSTGRES_DB=vcf_doctor_test \
-	    -e POSTGRES_HOST_AUTH_METHOD=trust \
+	    -e POSTGRES_PASSWORD=vcfd-test-only-password \
 	    -p 127.0.0.1:$(TEST_PG_PORT):5432 $(POSTGRES_IMAGE) >/dev/null; \
 	  for i in $$(seq 1 60); do \
 	    docker exec $(TEST_PG_NAME) pg_isready -U vcf_doctor -q 2>/dev/null && break; \
@@ -49,7 +51,8 @@ test-backend:
 	    fi; \
 	    sleep 1; \
 	  done; \
-	  cd backend && VCF_DOCTOR_TEST_DATABASE_URL="$(TEST_DATABASE_URL)" uv run pytest -q; \
+	  cd backend && VCF_DOCTOR_TEST_DATABASE_URL="$(TEST_DATABASE_URL)" \
+	    VCF_DOCTOR_TEST_DB_PASSWORD_FILE="$$password_file" uv run pytest -q; \
 	fi
 
 # A local PostgreSQL for `make run` and `make dev-backend`. It keeps its data in
