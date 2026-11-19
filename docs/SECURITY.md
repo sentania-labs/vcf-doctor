@@ -71,8 +71,8 @@ authentication.
 
 ## Secrets at rest
 
-vCenter passwords and the Anthropic key (when entered via the GUI) are
-encrypted (Fernet, authenticated) before they reach PostgreSQL. The encryption
+vCenter passwords, the Anthropic key and the single sign-on client secret
+(when entered via the GUI) are encrypted (Fernet, authenticated) before they reach PostgreSQL. The encryption
 key comes from `VCF_DOCTOR_SECRET_KEY` when set (in the lab a sealed
 Kubernetes secret, so it survives redeploys); otherwise the app generates
 `vcf-doctor.key` in `VCF_DOCTOR_DATA_DIR` on the persistent volume on first

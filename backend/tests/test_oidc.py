@@ -960,3 +960,21 @@ def test_rotation_moves_the_stored_secret_to_the_new_key(app_client, idp, monkey
     assert not vault.readable(db.get_setting("oidc_client_secret"))
     assert vault.rekey(old, "a test").rewritten == 1
     assert vault.decrypt(db.get_setting("oidc_client_secret")) == STORED_SECRET
+
+
+def test_an_unreadable_client_secret_is_listed_by_the_encryption_status(app_client, idp):
+    from app import db, vault
+
+    _login(app_client)
+    status = app_client.get("/api/settings/encryption").json()
+    assert status["oidc_client_secret_unreadable"] is False
+    _put_secret(app_client, STORED_SECRET)
+    status = app_client.get("/api/settings/encryption").json()
+    assert status["oidc_client_secret_unreadable"] is False
+    db.set_setting("oidc_client_secret", vault.PREFIX + "A" * 80)  # sealed under another key
+    status = app_client.get("/api/settings/encryption").json()
+    assert status["oidc_client_secret_unreadable"] is True
+    # Entering it again clears it from the list.
+    _put_secret(app_client, ANOTHER_SECRET)
+    status = app_client.get("/api/settings/encryption").json()
+    assert status["oidc_client_secret_unreadable"] is False

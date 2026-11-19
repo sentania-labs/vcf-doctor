@@ -197,7 +197,7 @@ export interface RekeyOutcome {
 
 export interface EncryptionStatus {
   enabled: boolean; key_source: 'env' | 'file'; key_env_var: string; key_previous_env_var: string; key_file: string | null; previous_key_file?: string | null; key_error?: string | null
-  unreadable_connections: string[]; assistant_key_unreadable: boolean; assistant_env_fallback?: boolean
+  unreadable_connections: string[]; assistant_key_unreadable: boolean; assistant_env_fallback?: boolean; oidc_client_secret_unreadable?: boolean
   last_rekey?: RekeyOutcome | null
 }
 

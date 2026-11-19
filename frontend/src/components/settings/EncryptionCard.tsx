@@ -15,12 +15,12 @@ export default function EncryptionCard({ reloadKey, onRotated }: { reloadKey?: u
   const { connections, reloadConnections } = useAppState()
   const d = st.data
   const items = (d?.unreadable_connections ?? []).map(id => ({ id, name: connections.find(c => c.id === id)?.name ?? id }))
-  const problems = items.length + (d?.assistant_key_unreadable ? 1 : 0)
+  const problems = items.length + (d?.assistant_key_unreadable ? 1 : 0) + (d?.oidc_client_secret_unreadable ? 1 : 0)
   const last = d?.last_rekey ?? null
 
   return (
     <Card>
-      <CardHeader title="Encryption at rest" subtitle="vCenter passwords and the Anthropic API key are encrypted before they are written to the database."
+      <CardHeader title="Encryption at rest" subtitle="vCenter passwords, the Anthropic API key and the single sign-on client secret are encrypted before they are written to the database."
         action={d ? (d.key_error ? <Badge tone="critical" className="whitespace-nowrap"><AlertTriangle size={11} /> Key unavailable</Badge> : problems ? <Badge tone="critical" className="whitespace-nowrap"><AlertTriangle size={11} /> {problems} need{problems === 1 ? 's' : ''} re-entry</Badge> : <Badge tone="ok" dot>Encrypted</Badge>) : null} />
       <div className="px-5 pb-5 space-y-3">
         {!d ? (st.error ? <p className="text-sm text-critical">Encryption status unavailable: {String(st.error)}</p> : <Skeleton className="h-10" />) : (
@@ -52,6 +52,7 @@ export default function EncryptionCard({ reloadKey, onRotated }: { reloadKey?: u
                 <ul className="list-disc pl-4">
                   {items.map(i => <li key={i.id}>vCenter password for <span className="font-semibold">{i.name}</span> (<Link to="/connections" className="underline">Connections</Link>)</li>)}
                   {d.assistant_key_unreadable ? <li>Anthropic API key (Assistant section above){d.assistant_env_fallback ? ', the deployment key is in use meanwhile' : ''}</li> : null}
+                  {d.oidc_client_secret_unreadable ? <li>Single sign-on client secret (Single sign-on section below); sign-in treats it as not set until it is re-entered</li> : null}
                 </ul>
               </div>
             ) : null}

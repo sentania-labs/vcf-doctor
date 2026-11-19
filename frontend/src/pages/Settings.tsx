@@ -249,8 +249,10 @@ export default function SettingsPage() {
 
   // A rotation may have made the stored API key readable again. Refresh only
   // that, so unsaved edits elsewhere on the page are never thrown away.
+  const [oidcRefresh, setOidcRefresh] = useState(0)
   const refreshKeyState = async () => {
     status.reload()
+    setOidcRefresh(n => n + 1)
     try {
       const fresh = await getSettings()
       // Functional updates: each one sees the state as it is when it runs, so an
@@ -328,7 +330,7 @@ export default function SettingsPage() {
           <EncryptionCard reloadKey={`${assistant.api_key_set}:${assistant.api_key_unreadable ?? false}`} onRotated={() => void refreshKeyState()} />
           <DatabaseCard />
           <AccessCard />
-          <OidcCard />
+          <OidcCard refreshKey={oidcRefresh} />
           {authStatus?.user ? <TokensCard /> : null}
           {authStatus?.enabled ? <ServiceAccountsCard /> : null}
           <TrustedProxiesCard />

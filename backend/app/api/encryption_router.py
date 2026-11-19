@@ -8,7 +8,7 @@ from dataclasses import asdict
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from app import vault
+from app import oidc, vault
 from app.assistant import settings as assistant_settings
 from app.snapshots import store
 
@@ -41,6 +41,8 @@ class EncryptionStatus(BaseModel):
     key_error: str | None = None
     unreadable_connections: list[str]  # connection ids needing credential recovery
     assistant_key_unreadable: bool
+    # The stored single sign-on client secret is in the same state.
+    oidc_client_secret_unreadable: bool = False
     # The stored assistant key is unreadable but ANTHROPIC_API_KEY covers for it.
     assistant_env_fallback: bool = False
     # Outcome of the last rotation, whether it ran at startup or from Settings.
@@ -74,6 +76,7 @@ def _status() -> EncryptionStatus:
         key_error=vault.key_error(),
         unreadable_connections=connections,
         assistant_key_unreadable=unreadable,
+        oidc_client_secret_unreadable=oidc.stored_secret_unreadable(),
         assistant_env_fallback=unreadable and assistant_settings.resolve_api_key() is not None,
         last_rekey=RekeyOutcome(**asdict(last), message=last.message) if last else None,
     )
