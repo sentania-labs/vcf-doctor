@@ -792,3 +792,169 @@ def test_the_secret_never_appears_in_any_settings_response(app_client, idp, secr
         app_client.get("/api/auth/status"),
     ):
         assert CLIENT_SECRET not in response.text
+
+
+# ---- the client secret entered in Settings -----------------------------------------
+
+STORED_SECRET = "s3cret-typed-in-settings"
+ANOTHER_SECRET = "another-typed-secret"
+
+
+def _login(client):
+    client.post("/api/auth/login", json={"password": "break glass pw"})
+
+
+def _put_secret(client, value):
+    return client.put("/api/settings/oidc/client-secret", json={"secret": value})
+
+
+def _basic(idp) -> str:
+    header = idp.token_requests[-1]["authorization"]
+    return base64.b64decode(header[6:]).decode()
+
+
+def test_a_secret_can_be_set_replaced_and_removed(app_client, idp):
+    _login(app_client)
+    got = app_client.get("/api/settings/oidc").json()
+    assert got["client_secret"] is False and got["client_secret_source"] == "none"
+    assert got["client_secret_stored"] is False and got["client_secret_changed_at"] is None
+
+    got = _put_secret(app_client, STORED_SECRET).json()
+    assert got["client_secret"] is True and got["client_secret_source"] == "stored"
+    assert got["client_secret_stored"] is True
+    assert got["client_secret_changed_at"]
+
+    got = _put_secret(app_client, ANOTHER_SECRET).json()
+    assert got["client_secret_source"] == "stored" and got["client_secret_stored"] is True
+
+    got = app_client.delete("/api/settings/oidc/client-secret").json()
+    assert got["client_secret"] is False and got["client_secret_source"] == "none"
+    assert got["client_secret_stored"] is False and got["client_secret_changed_at"] is None
+
+
+def test_sign_in_uses_the_stored_secret_when_none_is_mounted(
+    app_client, idp, monkeypatch, tmp_path
+):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "oidc_client_secret_file", str(tmp_path / "missing"))
+    _login(app_client)
+    _put_secret(app_client, STORED_SECRET)
+    app_client.post("/api/auth/logout")
+    assert callback(app_client, idp).headers["location"] == "/"
+    assert _basic(idp) == f"{CLIENT_ID}:{STORED_SECRET}"
+
+
+def test_a_replaced_secret_is_the_one_used_and_a_removed_one_makes_a_public_client(
+    app_client, idp, monkeypatch, tmp_path
+):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "oidc_client_secret_file", str(tmp_path / "missing"))
+    _login(app_client)
+    _put_secret(app_client, STORED_SECRET)
+    _put_secret(app_client, ANOTHER_SECRET)
+    app_client.post("/api/auth/logout")
+    callback(app_client, idp)
+    assert _basic(idp) == f"{CLIENT_ID}:{ANOTHER_SECRET}"
+    _login(app_client)
+    app_client.delete("/api/settings/oidc/client-secret")
+    app_client.post("/api/auth/logout")
+    callback(app_client, idp)
+    assert idp.token_requests[-1]["authorization"] is None
+
+
+def test_a_mounted_secret_wins_over_the_stored_one(app_client, idp, secret_file):
+    _login(app_client)
+    got = _put_secret(app_client, STORED_SECRET).json()
+    assert got["client_secret_source"] == "deployment"
+    assert got["client_secret_stored"] is True  # still saved, just not in use
+    app_client.post("/api/auth/logout")
+    callback(app_client, idp)
+    assert _basic(idp) == f"{CLIENT_ID}:{CLIENT_SECRET}"
+    # Removing the mounted file lets the stored one take over.
+    secret_file.unlink()
+    app_client.post("/api/auth/logout")
+    callback(app_client, idp)
+    assert _basic(idp) == f"{CLIENT_ID}:{STORED_SECRET}"
+
+
+def test_the_stored_secret_is_encrypted_at_rest(app_client, idp):
+    from app import db, vault
+
+    _login(app_client)
+    _put_secret(app_client, STORED_SECRET)
+    raw = db.get_setting("oidc_client_secret")
+    assert vault.is_encrypted(raw) and STORED_SECRET not in raw
+    assert vault.decrypt(raw) == STORED_SECRET
+
+
+def test_the_stored_secret_is_never_returned_or_logged(app_client, idp, caplog):
+    _login(app_client)
+    with caplog.at_level(logging.DEBUG):
+        responses = [
+            _put_secret(app_client, STORED_SECRET),
+            _put_secret(app_client, ANOTHER_SECRET),
+            app_client.get("/api/settings/oidc"),
+            app_client.put("/api/settings/oidc", json={"issuer": ISSUER, "client_id": CLIENT_ID}),
+            app_client.get("/api/auth/status"),
+            app_client.get("/api/settings/encryption"),
+            # A malformed body must not be quoted back either.
+            app_client.put("/api/settings/oidc/client-secret", json={"secret": 12345678}),
+            app_client.put("/api/settings/oidc/client-secret", json={"nope": STORED_SECRET}),
+            app_client.put(
+                "/api/settings/oidc/client-secret", json={"secret": "bad\nline" + STORED_SECRET}
+            ),
+            app_client.delete("/api/settings/oidc/client-secret"),
+        ]
+    for response in responses:
+        assert STORED_SECRET not in response.text and ANOTHER_SECRET not in response.text
+    assert [r.status_code for r in responses[6:9]] == [400, 400, 400]
+    assert STORED_SECRET not in caplog.text and ANOTHER_SECRET not in caplog.text
+
+
+def test_an_empty_secret_is_refused_and_changes_nothing(app_client, idp):
+    _login(app_client)
+    _put_secret(app_client, STORED_SECRET)
+    assert _put_secret(app_client, "   ").status_code == 400
+    assert app_client.get("/api/settings/oidc").json()["client_secret_source"] == "stored"
+
+
+def test_the_secret_endpoints_need_a_session(app_client, idp):
+    assert _put_secret(app_client, STORED_SECRET).status_code == 401
+    assert app_client.delete("/api/settings/oidc/client-secret").status_code == 401
+
+
+def test_a_stored_secret_the_key_cannot_open_is_reported_and_not_used(
+    app_client, idp, monkeypatch, tmp_path
+):
+    from app import db, vault
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "oidc_client_secret_file", str(tmp_path / "missing"))
+    _login(app_client)
+    _put_secret(app_client, STORED_SECRET)
+    db.set_setting("oidc_client_secret", vault.PREFIX + "A" * 80)  # sealed under another key
+    got = app_client.get("/api/settings/oidc").json()
+    assert got["client_secret_unreadable"] is True and got["client_secret"] is False
+    assert got["client_secret_source"] == "none"
+    # Entering it again fixes it.
+    got = _put_secret(app_client, ANOTHER_SECRET).json()
+    assert got["client_secret_unreadable"] is False and got["client_secret_source"] == "stored"
+
+
+def test_rotation_moves_the_stored_secret_to_the_new_key(app_client, idp, monkeypatch):
+    from cryptography.fernet import Fernet
+
+    from app import db, vault
+
+    _login(app_client)
+    old = Fernet.generate_key().decode()
+    monkeypatch.setenv(vault.ENV_KEY, old)
+    vault.reset_for_tests()
+    _put_secret(app_client, STORED_SECRET)
+    monkeypatch.setenv(vault.ENV_KEY, Fernet.generate_key().decode())
+    vault.reset_for_tests()
+    assert not vault.readable(db.get_setting("oidc_client_secret"))
+    assert vault.rekey(old, "a test").rewritten == 1
+    assert vault.decrypt(db.get_setting("oidc_client_secret")) == STORED_SECRET

@@ -16,9 +16,11 @@ rotates the session signing secret).
 
 Configuration lives in the settings table and is edited on the Settings page.
 A VCF_DOCTOR_OIDC_* variable set on the deployment wins over the stored value,
-field by field. The client secret is read from a file on every sign-in and is
-never stored, shown or logged; no file means a public client that relies on
-PKCE alone.
+field by field. The client secret comes from the file named by
+VCF_DOCTOR_OIDC_CLIENT_SECRET_FILE (read on every sign-in) or, when no file is
+mounted, from the one entered in Settings, stored encrypted like the assistant
+key. It is never returned, shown or logged; no secret means a public client
+that relies on PKCE alone.
 
 This module does not import app.auth: auth.py imports it to check that a
 single-sign-on session still belongs to the configured provider.
@@ -43,12 +45,15 @@ from joserfc.errors import InvalidKeyIdError, JoseError
 from joserfc.jwk import KeySet
 from joserfc.jwt import JWTClaimsRegistry
 
-from app import db
+from app import db, vault
 from app.config import oidc_client_secret, settings
 
 log = logging.getLogger("vcf_doctor.oidc")
 
 SETTING_KEY = "oidc"
+SECRET_KEY = "oidc_client_secret"
+SECRET_CHANGED_KEY = "oidc_client_secret_changed_at"
+MAX_SECRET = 1024
 ROLE_ADMIN = "admin"
 DEFAULT_SCOPES = "openid profile email"
 DEFAULT_GROUPS_CLAIM = "groups"
@@ -347,8 +352,61 @@ def reset_cache() -> None:
         _keys_cache.clear()
 
 
+def stored_secret_present() -> bool:
+    stored = db.get_setting(SECRET_KEY)
+    return isinstance(stored, str) and bool(stored.strip())
+
+
+def stored_secret_unreadable() -> bool:
+    """True when a secret is stored but encrypted under a key we do not have."""
+    stored = db.get_setting(SECRET_KEY)
+    return isinstance(stored, str) and bool(stored) and not vault.readable(stored)
+
+
+def secret_changed_at() -> str | None:
+    value = db.get_setting(SECRET_CHANGED_KEY)
+    return value if isinstance(value, str) and value and stored_secret_present() else None
+
+
+def resolve_client_secret() -> tuple[str | None, str]:
+    """The secret sign-in uses and where it came from: a mounted file wins, then
+    the one saved in Settings. An unreadable stored secret counts as absent."""
+    mounted = oidc_client_secret()
+    if mounted:
+        return mounted, "deployment"
+    stored = db.get_setting(SECRET_KEY)
+    if isinstance(stored, str) and stored.strip():
+        try:
+            plain = vault.decrypt(stored).strip()
+        except vault.SecretUnreadable:
+            plain = ""
+        if plain:
+            return plain, "stored"
+    return None, "none"
+
+
+def set_client_secret(secret: str) -> None:
+    clean = secret.strip()
+    if not clean:
+        raise ValueError("the client secret is empty")
+    if len(clean) > MAX_SECRET or any(ord(ch) < 32 or ord(ch) == 127 for ch in clean):
+        raise ValueError("the client secret must be one line of text, at most 1024 characters")
+    encrypted = vault.encrypt(clean)
+    db.set_settings({SECRET_KEY: encrypted, SECRET_CHANGED_KEY: _now()})
+
+
+def clear_client_secret() -> None:
+    db.set_settings({SECRET_KEY: "", SECRET_CHANGED_KEY: ""})
+
+
+def _now() -> str:
+    from datetime import UTC, datetime
+
+    return datetime.now(UTC).isoformat(timespec="seconds")
+
+
 def _client(cfg: Config, redirect_uri: str) -> OAuth2Client:
-    secret = oidc_client_secret()
+    secret, _ = resolve_client_secret()
     return OAuth2Client(
         client_id=cfg.client_id,
         client_secret=secret,
