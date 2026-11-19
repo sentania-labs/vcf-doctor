@@ -921,8 +921,10 @@ def test_an_empty_secret_is_refused_and_changes_nothing(app_client, idp):
 
 
 def test_the_secret_endpoints_need_a_session(app_client, idp):
-    assert _put_secret(app_client, STORED_SECRET).status_code == 401
-    assert app_client.delete("/api/settings/oidc/client-secret").status_code == 401
+    put_response = _put_secret(app_client, STORED_SECRET)
+    delete_response = app_client.delete("/api/settings/oidc/client-secret")
+    assert put_response.status_code == 401
+    assert delete_response.status_code == 401
 
 
 def test_a_stored_secret_the_key_cannot_open_is_reported_and_not_used(
