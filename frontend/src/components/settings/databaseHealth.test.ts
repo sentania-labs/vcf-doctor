@@ -30,4 +30,5 @@ test('connection failures name the cause and suggest a remedy', () => {
   assert.match(databaseHealthPresentation(false, 'credential_refused')?.message ?? '', /credential.*password file/)
   assert.match(databaseHealthPresentation(false, 'database_missing')?.message ?? '', /does not exist.*Create/)
   assert.match(databaseHealthPresentation(false, 'unknown')?.message ?? '', /Could not connect/)
+  assert.match(databaseHealthPresentation(false, 'reconnecting')?.message ?? '', /reachable.*reconnecting.*retry/)
 })

@@ -690,7 +690,7 @@ def test_connection_failure_messages_do_not_guess_or_expose_secrets(monkeypatch)
     assert db.classify_connection_failure(
         'connection failed: connection to server at "private-host", port 5432 failed: '
         'FATAL:  too many connections'
-    ) == ("unknown", None)
+    ) == ("unknown", "[redacted]")
     monkeypatch.setattr(config, "database_password", lambda: "sensitive-value")
     reason, detail = db.classify_connection_failure(
         'connection failed: connection to server at "private-host", port 5432 failed: '
@@ -720,6 +720,7 @@ def test_refused_password_is_classified_from_a_real_server(monkeypatch, tmp_path
         with psycopg.connect(db.conninfo()):
             pytest.skip("test PostgreSQL accepts connections without checking passwords")
     except psycopg.OperationalError:
+        # Password authentication is enabled, so the refusal is expected.
         pass
     assert db.connection_failure() == ("credential_refused", None)
 
@@ -737,7 +738,9 @@ def test_unrecognized_refusal_from_a_real_server(monkeypatch, tmp_path):
             url = make_conninfo(cfg.database_url, user="vcfd_unrecognized_test")
             monkeypatch.setattr(cfg, "database_url", url)
             monkeypatch.setattr(cfg, "db_password_file", str(password_file))
-            assert db.connection_failure() == ("unknown", None)
+            reason, detail = db.connection_failure()
+            assert reason == "unknown" and detail and "not permitted to log in" in detail
+            assert "vcfd_unrecognized_test" not in detail
         finally:
             admin.execute("DROP ROLE vcfd_unrecognized_test")
 
@@ -779,6 +782,7 @@ def test_auth_status_and_gated_requests_name_a_refused_credential(monkeypatch, t
             with psycopg.connect(db.conninfo()):
                 pytest.skip("test PostgreSQL accepts connections without checking passwords")
         except psycopg.OperationalError:
+            # Password authentication is enabled, so the refusal is expected.
             pass
         db.close()
         expected = {
@@ -825,4 +829,105 @@ def test_auth_status_and_gated_requests_name_a_missing_database(monkeypatch):
         gated = client.get("/api/settings")
         assert gated.status_code == 503
         assert gated.json() == expected
+    db.close()
+
+
+def test_all_unreachable_addresses_are_classified(monkeypatch):
+    monkeypatch.setattr(cfg, "db_password_file", "")
+    url = make_conninfo(
+        cfg.database_url, host="127.0.0.1,127.0.0.2", hostaddr="", port=_free_port()
+    )
+    monkeypatch.setattr(cfg, "database_url", url)
+    assert db.connection_failure() == ("unreachable", None)
+
+
+def test_mixed_connection_attempts_are_not_misclassified():
+    message = (
+        "Multiple connection attempts failed. All failures were:\n"
+        "- host: 'one': connection failed: connection to server at \"one\" failed: "
+        "Connection refused\n"
+        "- host: 'two': connection failed: connection to server at \"two\" failed: "
+        "FATAL:  password authentication failed for user \"operator\""
+    )
+    assert db.classify_connection_failure(message)[0] == "unknown"
+
+
+def test_unknown_server_message_is_sanitized(monkeypatch):
+    monkeypatch.setattr(config, "database_password", lambda: "sensitive-value")
+    message = ('connection failed: connection to server at "private-host", port 5432 failed: '
+               'FATAL:  role "operator" is not permitted to log in')
+    reason, detail = db.classify_connection_failure(message)
+    assert reason == "unknown"
+    assert detail and "not permitted to log in" in detail and "operator" not in detail
+    reason, detail = db.classify_connection_failure(message + '\nDETAIL: secret details')
+    assert reason == "unknown" and detail and "not permitted to log in" in detail
+    assert "secret details" not in detail
+    message = ('connection failed: connection to server at "private-host", port 5432 failed: '
+               'FATAL:  denied password=sensitive-value postgresql://user:sensitive-value@host/db')
+    _, detail = db.classify_connection_failure(message)
+    assert detail and all(x not in detail for x in ("sensitive-value", "postgresql://", "host/db"))
+
+
+def test_auth_status_recovers_after_role_is_enabled(monkeypatch, tmp_path):
+    import psycopg
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    db.reset_for_tests()
+    with psycopg.connect(db.conninfo(), autocommit=True) as admin:
+        admin.execute("CREATE ROLE vcfd_recovery_test NOLOGIN PASSWORD 'vcfd-recovery-password'")
+        admin.execute("GRANT vcfd_recovery_test TO vcf_doctor")
+        password_file = tmp_path / "role-password"
+        password_file.write_text("vcfd-recovery-password", encoding="utf-8")
+        try:
+            url = make_conninfo(cfg.database_url, user="vcfd_recovery_test")
+            monkeypatch.setattr(cfg, "database_url", url)
+            monkeypatch.setattr(cfg, "db_password_file", str(password_file))
+            monkeypatch.setattr(db, "PROBE_TIMEOUT", 0.3)
+            db.close()
+            with TestClient(app) as client:
+                assert client.get('/api/auth/status').json()['database'] == 'unavailable'
+                time.sleep(20)
+                admin.execute('ALTER ROLE vcfd_recovery_test LOGIN SUPERUSER')
+                started = time.monotonic()
+                response = client.get('/api/auth/status')
+                assert response.status_code == 200
+                assert time.monotonic() - started < 4
+                deadline = time.monotonic() + 8
+                while (
+                    response.json().get('database') == 'unavailable'
+                    and time.monotonic() < deadline
+                ):
+                    time.sleep(0.5)
+                    response = client.get('/api/auth/status')
+                assert response.status_code == 200 and 'database' not in response.json()
+        finally:
+            db.close()
+            admin.execute('DROP OWNED BY vcfd_recovery_test')
+            admin.execute('DROP ROLE vcfd_recovery_test')
+
+
+def test_status_reports_reconnecting_when_pool_is_backed_off(monkeypatch):
+    from fastapi.testclient import TestClient
+    from psycopg_pool import PoolTimeout
+
+    from app.main import app
+
+    db.reset_for_tests()
+    original_fetchone = db.fetchone
+
+    def delayed_pool(sql, args=(), timeout=None):
+        if sql == "SELECT 1 AS ok":
+            raise PoolTimeout("pool still backing off")
+        return original_fetchone(sql, args, timeout)
+
+    with TestClient(app) as client:
+        monkeypatch.setattr(db, "fetchone", delayed_pool)
+        monkeypatch.setattr(db, "PROBE_TIMEOUT", 0.1)
+        started = time.monotonic()
+        response = client.get("/api/auth/status")
+        assert response.status_code == 200
+        assert response.json()["reason"] == "reconnecting"
+        assert time.monotonic() - started < 4
     db.close()

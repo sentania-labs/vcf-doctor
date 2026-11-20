@@ -12,6 +12,7 @@ const CAUSES: Record<string, string> = {
   credential_refused: 'The database refused the credential. Check the database user and password file in the deployment configuration.',
   database_missing: 'The database does not exist. Create it or correct the database name in the deployment configuration.',
   unknown: 'Could not connect to the database. Check the database and its deployment configuration.',
+  reconnecting: 'The database is reachable. The console is reconnecting and will retry automatically.',
 }
 
 export function databaseHealthPresentation(healthy: boolean | null, reason?: string): DatabaseHealthPresentation | null {
