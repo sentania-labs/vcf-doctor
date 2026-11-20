@@ -12,7 +12,7 @@ export function topBarStatus(
   allSelected: boolean,
   databaseDown = false,
 ): TopBarStatus {
-  if (databaseDown) return { dot: 'error', label: 'Database unreachable' }
+  if (databaseDown) return { dot: 'error', label: 'Database unavailable' }
   if (backend === 'down') return { dot: 'error', label: 'Console unavailable' }
   if (backend === 'checking') return { dot: 'running', label: 'Checking console' }
   if (scanStatuses.includes('running')) return { dot: 'running', label: 'Scanning' }

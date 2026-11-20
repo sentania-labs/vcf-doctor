@@ -50,11 +50,13 @@ def status(request: Request) -> dict:
         db.probe_wait(lambda timeout: db.fetchone("SELECT 1 AS ok", timeout=timeout))
         return _status_body(request)
     except Exception as exc:  # noqa: BLE001  only an unusable database is an answer here
+        if isinstance(exc, db.PoolReconnecting):
+            return auth.database_down_status("reconnecting")
         if isinstance(exc, psycopg.errors.UndefinedTable):
             return auth.database_down_status("unmigrated")
         if not db.is_unreachable(exc):
             raise
-        return auth.database_down_status("unreachable")
+        return auth.database_down_status(*db.connection_failure())
 
 
 def _status_body(request: Request) -> dict:

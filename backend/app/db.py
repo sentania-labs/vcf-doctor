@@ -18,6 +18,7 @@ means the port changed the engine and not the time model.
 
 import json
 import logging
+import re
 import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -169,6 +170,90 @@ def fetchall(sql: str, args: tuple = (), timeout: float | None = None) -> list[d
 PROBE_TIMEOUT = 1.0
 
 
+def classify_connection_failure(message: str) -> tuple[str, str | None]:
+    """Classify only complete, known libpq messages. Never return the libpq
+    wrapper, which includes the server address. Unknown messages are not
+    assigned a cause based on a substring in a role or database name.
+    """
+    marker = "Multiple connection attempts failed. All failures were:"
+    if marker in message:
+        attempts = message.split(marker, 1)[1].strip()
+        parts = re.split(r"(?m)^- host: ", attempts)
+        parts = [part for part in parts if part]
+        results = []
+        for part in parts:
+            match = re.search(
+                r": (connection failed: |connection is bad: |failed to resolve host )", part
+            )
+            if not match:
+                return "unknown", None
+            results.append(classify_connection_failure(part[match.start(1):].strip()))
+        causes = {reason for reason, _ in results}
+        if len(causes) == 1 and causes != {"unknown"}:
+            return results[0][0], None
+        if results and all(detail for _, detail in results):
+            return "unknown", "The server refused the connection."
+        return "unknown", None
+    lines = message.splitlines()
+    if len(lines) != 1:
+        # libpq adds a hint after a refused socket; discard that hint only.
+        if " failed: FATAL:  " in lines[0]:
+            lines = lines[:1]
+        elif len(lines) == 2 and lines[1].strip().startswith("Is the server running"):
+            lines = lines[:1]
+        else:
+            return "unknown", None
+    line = lines[0]
+    server = re.search(r" failed: FATAL:  (.*)$", line)
+    if server:
+        detail = server.group(1)
+        if re.fullmatch(r'password authentication failed for user "[^"\n]*"', detail):
+            return "credential_refused", None
+        if re.fullmatch(r'database "[^"\n]*" does not exist', detail):
+            return "database_missing", None
+        # Server text is untrusted and may contain identifiers and credentials.
+        detail = re.sub(r'"(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\'', '[redacted]', detail)
+        detail = re.sub(r'\b\w+://\S+', '[redacted]', detail, flags=re.I)
+        detail = re.sub(r'\S+:\S+@\S+', '[redacted]', detail)
+        detail = re.sub(r'\b[a-z_][a-z_0-9]*\s*=\s*\S+', '[redacted]', detail, flags=re.I)
+        detail = re.sub(
+            r'\b(?:password|passwd|pwd|passfile|token|secret|host|hostaddr|port|dbname|user|'
+            r'sslkey|sslcert|sslrootcert|options)'
+            r'\s*[=:]\s*\S+', '[redacted]', detail, flags=re.I,
+        )
+        detail = re.sub(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', '[redacted]', detail)
+        detail = re.sub(r'\b(?:[a-z0-9_-]+\.)+[a-z]{2,}\b', '[redacted]', detail, flags=re.I)
+        detail = re.sub(
+            r'(?<!\w)(?:[a-f0-9]{0,4}:){2,}[a-f0-9:]*', '[redacted]', detail, flags=re.I
+        )
+        for key, value in conninfo_to_dict(config.database_url_without_password()).items():
+            if key in {"host", "hostaddr", "port", "dbname", "user"}:
+                for item in value.split(","):
+                    if item:
+                        detail = re.sub(re.escape(item), '[redacted]', detail, flags=re.I)
+        password = config.database_password()
+        if password:
+            detail = re.sub(re.escape(password), '[redacted]', detail, flags=re.I)
+        return "unknown", detail[:300] or "The server refused the connection."
+    if re.search(
+        r" failed: (Connection refused|Connection timed out|No route to host|"
+        r"No such file or directory|server closed the connection unexpectedly)$",
+        line,
+        re.I,
+    ) or re.fullmatch(r"connection timeout expired|failed to resolve host '[^'\n]*': .*", line):
+        return "unreachable", None
+    return "unknown", None
+
+
+def connection_failure() -> tuple[str, str | None]:
+    """Probe outside the pool, whose timeout loses the original error."""
+    try:
+        with psycopg.connect(make_conninfo(conninfo(), connect_timeout=1), **CONNECT_KWARGS):
+            return "unknown", None
+    except psycopg.Error as exc:
+        return classify_connection_failure(str(exc))
+
+
 def reachable() -> bool:
     """Whether a fresh connection, outside the pool, can be made within about
     a second. A server that answers but refuses (too many connections, say) is
@@ -191,14 +276,33 @@ def is_unreachable(exc: BaseException) -> bool:
 
 def probe_wait[T](call: Callable[[float | None], T]) -> T:
     """Run `call` with the probe-length pool wait. If that wait runs out while
-    the server is up, the pool is merely busy: run it again with the ordinary
-    wait. With the server gone, the timeout is raised at once."""
+    the server is up, give the pool a short chance to recover, then replace a
+    pool stuck in reconnect backoff. With the server gone, raise at once."""
+    old_pool = pool()
     try:
         return call(PROBE_TIMEOUT)
     except PoolTimeout:
         if not reachable():
             raise
-        return call(None)
+        if old_pool.closed:
+            raise PoolReconnecting from None
+        old_pool.check()
+        try:
+            return call(max(PROBE_TIMEOUT, 1.0))
+        except PoolTimeout as exc:
+            # A pool that backed off while the server was down can sleep for a
+            # minute after it returns. Replace it once, without closing checked
+            # out connections, so the next poll gets fresh connection attempts.
+            global _pool
+            with _pool_guard:
+                if _pool is old_pool:
+                    _pool = None
+                    old_pool.close(timeout=0)
+            raise PoolReconnecting from exc
+
+
+class PoolReconnecting(Exception):
+    """The server is reachable but the connection pool is not ready yet."""
 
 
 def healthy() -> tuple[bool, str | None]:

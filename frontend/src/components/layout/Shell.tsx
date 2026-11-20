@@ -94,8 +94,8 @@ export function Shell() {
             <span className="h-2 w-2 mt-1.5 shrink-0 rounded-full bg-current" />
             <div className="flex-1 min-w-0">
             {databaseDown ? (<>
-              <span className="font-medium">The database is unreachable.</span>
-              {' '}<span>The console is running, but it cannot read or save anything until PostgreSQL is back. Retrying every 5 seconds.</span>
+              <span className="font-medium">The database is unavailable.</span>
+              {' '}<span>The console is running, but it cannot read or save anything until the database is available. Retrying every 5 seconds.</span>
             </>) : (<>
               <span className="font-medium">This console cannot serve.</span>
               {' '}<span>Its backend is unreachable. Pages show the last data they loaded. Retrying every 5 seconds.</span>

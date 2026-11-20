@@ -30,7 +30,7 @@ export default function DatabaseCard() {
           className={cn('lat-banner flex items-start gap-2',
             down && 'lat-banner--bad')}>
           <Database size={14} className={cn('mt-0.5 shrink-0', down ? '' : 'text-muted')} />
-          <span>{health.message}</span>
+          <span>{health.message}{down && status?.database_detail ? <q className="block mt-2">{status.database_detail}</q> : null}</span>
         </div>
       </div>
     </Card>

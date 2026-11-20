@@ -10,7 +10,7 @@ test('Scan Now requires a serving console and at least one connection', () => {
 })
 
 test('during a database outage the top bar names the database, not the console', () => {
-  assert.deepEqual(topBarStatus('down', [], true, true), { dot: 'error', label: 'Database unreachable' })
-  assert.deepEqual(topBarStatus('up', ['ok'], true, true), { dot: 'error', label: 'Database unreachable' })
+  assert.deepEqual(topBarStatus('down', [], true, true), { dot: 'error', label: 'Database unavailable' })
+  assert.deepEqual(topBarStatus('up', ['ok'], true, true), { dot: 'error', label: 'Database unavailable' })
   assert.equal(topBarStatus('down', [], true).label, 'Console unavailable')
 })
