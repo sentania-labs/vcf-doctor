@@ -139,7 +139,11 @@ export interface OidcSettings {
   configured: boolean; problems: string[]
   // What to register at the provider when no redirect URI is set.
   callback_url: string
-  client_secret: boolean; auth_enabled: boolean
+  // Whether a client secret is in use; where it comes from ("deployment" file wins over "stored").
+  client_secret: boolean; client_secret_source: 'deployment' | 'stored' | 'none'
+  // Saved in Settings (write-only: only its presence and change time are ever sent).
+  client_secret_stored: boolean; client_secret_unreadable: boolean; client_secret_changed_at: string | null
+  auth_enabled: boolean
 }
 // Personal API tokens. The secret is only ever in CreatedApiToken, returned once at creation.
 export interface ApiToken {
@@ -193,7 +197,7 @@ export interface RekeyOutcome {
 
 export interface EncryptionStatus {
   enabled: boolean; key_source: 'env' | 'file'; key_env_var: string; key_previous_env_var: string; key_file: string | null; previous_key_file?: string | null; key_error?: string | null
-  unreadable_connections: string[]; assistant_key_unreadable: boolean; assistant_env_fallback?: boolean
+  unreadable_connections: string[]; assistant_key_unreadable: boolean; assistant_env_fallback?: boolean; oidc_client_secret_unreadable?: boolean
   last_rekey?: RekeyOutcome | null
 }
 

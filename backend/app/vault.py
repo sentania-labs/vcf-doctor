@@ -95,7 +95,7 @@ def _normalise(raw: str) -> bytes:
     try:
         Fernet(raw.encode())
         return raw.encode()
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         # Not a Fernet key: treat it as a passphrase. scrypt with a work factor
         # makes offline guessing against a copied database expensive; the salt
         # is fixed per application because the only place to keep a random one
@@ -240,6 +240,10 @@ def _genuine_token(stored: str) -> bool:
         return False
 
 
+# Settings rows that hold a secret encrypted under the key. Rotation moves each.
+ENCRYPTED_SETTING_KEYS = ("assistant_api_key", "oidc_client_secret")
+
+
 def migrate_plaintext() -> int:
     """Encrypt legacy plaintext secret rows. One transaction, idempotent, safe to
     run on every startup. Returns the number of rows rewritten.
@@ -380,10 +384,10 @@ def rekey(previous_key: str, source: str, *, always_record: bool = False) -> Rek
             if value is not None:
                 c.execute("UPDATE connections SET password = %s WHERE id = %s", (value, row["id"]))
                 rewritten += 1
-        row = c.execute(
-            "SELECT value FROM settings WHERE key = %s", ("assistant_api_key",)
-        ).fetchone()
-        if row is not None:
+        for setting_key in ENCRYPTED_SETTING_KEYS:
+            row = c.execute("SELECT value FROM settings WHERE key = %s", (setting_key,)).fetchone()
+            if row is None:
+                continue
             try:
                 stored = json.loads(row["value"])
             except ValueError:
@@ -393,7 +397,7 @@ def rekey(previous_key: str, source: str, *, always_record: bool = False) -> Rek
                 if value is not None:
                     c.execute(
                         "UPDATE settings SET value = %s WHERE key = %s",
-                        (json.dumps(value), "assistant_api_key"),
+                        (json.dumps(value), setting_key),
                     )
                     rewritten += 1
         error = None

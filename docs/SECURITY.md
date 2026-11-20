@@ -33,8 +33,9 @@ and the callback route is public because the visitor has no session yet: it
 issues one only for a verified person in an admin group. A session records
 who signed in (issuer and subject), and sign-ins, refusals and every change
 made through the API are logged with that identity. The operator password
-stays as break-glass. The client secret is read from a file and is never
-stored, shown or logged. Groups are re-checked at each sign-in, not while a
+stays as break-glass. The client secret is either a mounted file or one entered in
+Settings, stored encrypted like the Assistant key; a mounted file wins. It is
+never returned, shown or logged. Groups are re-checked at each sign-in, not while a
 session is live. A person who is refused at a sign-in (the provider vouches
 for them and they are in no admin group) has every session issued to them
 before that moment ended, as well as their API tokens. A removed person who
@@ -70,8 +71,8 @@ authentication.
 
 ## Secrets at rest
 
-vCenter passwords and the Anthropic key (when entered via the GUI) are
-encrypted (Fernet, authenticated) before they reach PostgreSQL. The encryption
+vCenter passwords, the Anthropic key and the single sign-on client secret
+(when entered via the GUI) are encrypted (Fernet, authenticated) before they reach PostgreSQL. The encryption
 key comes from `VCF_DOCTOR_SECRET_KEY` when set (in the lab a sealed
 Kubernetes secret, so it survives redeploys); otherwise the app generates
 `vcf-doctor.key` in `VCF_DOCTOR_DATA_DIR` on the persistent volume on first
@@ -100,8 +101,8 @@ The connection itself (host, database, user) is a deployment binding rather
 than a product setting. It has no field in Settings; the interface reports only
 whether the database is reachable, and where to change it is the deployment.
 
-Losing the key means re-entering the vCenter passwords and the API key,
-nothing worse: affected connections are flagged "Needs password" on the
+Losing the key means re-entering the vCenter passwords, the API key and any
+single sign-on client secret saved in Settings, nothing worse: affected connections are flagged "Needs password" on the
 Connections page until you do.
 
 Rotating does not cost a re-entry when the previous key is still available.
