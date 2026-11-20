@@ -133,7 +133,8 @@ written to the database. The encryption key comes from one of two places:
 
 Losing the key is recoverable: the snapshots and history are untouched, but
 each connection is flagged **Needs password** on the Connections page until
-you re-enter it, and the Anthropic key must be re-entered in Settings.
+you re-enter it, and the Anthropic key, and any single sign-on client secret saved in
+Settings, must be re-entered.
 Settings, Encryption at rest shows which source is active and never shows
 the key itself. For rotation and recovery, see
 [Secrets at rest](SECURITY.md#secrets-at-rest). Generate a new key with:

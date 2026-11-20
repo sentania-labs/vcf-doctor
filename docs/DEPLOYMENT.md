@@ -247,13 +247,13 @@ about a minute. Explicit libpq URL parameters override each default.
 | `VCF_DOCTOR_DB_POOL_MIN_SIZE` | `1` | Connections kept open per worker process |
 | `VCF_DOCTOR_DB_POOL_TIMEOUT` | `10` | Seconds a request waits for a free pooled connection |
 | `VCF_DOCTOR_DATA_DIR` | `/data` | Writable directory for the generated encryption key file. Nothing else is written there. |
-| `VCF_DOCTOR_SECRET_KEY` | unset | Key for encrypting vCenter passwords and the Anthropic key at rest. Unset: a key file is generated in `VCF_DOCTOR_DATA_DIR`. See [Security](SECURITY.md). |
+| `VCF_DOCTOR_SECRET_KEY` | unset | Key for encrypting vCenter passwords, the Anthropic key and a single sign-on client secret saved in Settings at rest. Unset: a key file is generated in `VCF_DOCTOR_DATA_DIR`. See [Security](SECURITY.md). |
 | `VCF_DOCTOR_SECRET_KEY_PREVIOUS` | unset | Previous encryption key for startup rotation. See [rotating the encryption key](#rotating-the-encryption-key) for the procedure in each deployment shape. |
 | `ANTHROPIC_API_KEY` | unset | Enables the Claude assistant. A key entered in Settings takes precedence. |
 | `VCF_DOCTOR_AUTH` | `on` | `off` disables the login page (use only behind ingress authentication) |
 | `VCF_DOCTOR_ADMIN_PASSWORD` | unset | Seeds the operator password on first boot; otherwise the UI asks on first visit |
 | `VCF_DOCTOR_OIDC_ISSUER`, `_CLIENT_ID`, `_REDIRECT_URI`, `_SCOPES`, `_GROUPS_CLAIM`, `_ADMIN_GROUPS` | unset | Single sign-on settings, each overriding the value saved in Settings. See [single sign-on](#single-sign-on). |
-| `VCF_DOCTOR_OIDC_CLIENT_SECRET_FILE` | `/run/secrets/vcf-doctor-oidc-client-secret` | File holding the OIDC client secret. Missing file means a public client (PKCE only). The secret is never an environment variable. |
+| `VCF_DOCTOR_OIDC_CLIENT_SECRET_FILE` | `/run/secrets/vcf-doctor-oidc-client-secret` | File holding the OIDC client secret. It takes precedence over a secret saved in Settings. With neither, the client is public (PKCE only). The secret is never an environment variable. |
 | `VCF_DOCTOR_TRUSTED_PROXIES` | unset (trust nobody) | Comma-separated IPs or CIDRs (the ingress) whose `X-Forwarded-For` and `X-Forwarded-Proto` are believed. Overrides the Settings page value. Set it to the ingress pod network so each visitor gets their own login lockout instead of sharing the ingress's. |
 | `VCF_DOCTOR_LLM_MODEL` | `claude-opus-5` | Default assistant model; changeable in Settings |
 | `VCF_DOCTOR_RETENTION_RECENT_DAYS` | `14` | Default retention tier: every scheduled snapshot younger than this is kept; changeable in Settings |
@@ -291,14 +291,14 @@ the console behaves exactly as it did before.
 
 ### What you provide
 
-Everything but the secret is on **Settings, Single sign-on**, and each can be
-pinned by the variable named below, which wins over the saved value.
+Everything is on **Settings, Single sign-on**, and each setting but the secret
+can be pinned by the variable named below, which wins over the saved value.
 
 | Setting | Variable | Notes |
 |---|---|---|
 | Issuer URL | `VCF_DOCTOR_OIDC_ISSUER` | Required. `https`, or `http` to localhost for development. The discovery document is read from `<issuer>/.well-known/openid-configuration`, and its `issuer` must match. |
 | Client ID | `VCF_DOCTOR_OIDC_CLIENT_ID` | Required. |
-| Client secret | `VCF_DOCTOR_OIDC_CLIENT_SECRET_FILE` | A file, never a value in the environment or the interface. Mount it like the database password. No file means a public client. |
+| Client secret | `VCF_DOCTOR_OIDC_CLIENT_SECRET_FILE` | Only for a provider that requires a confidential client. Enter it in Settings (write-only, stored encrypted like the Assistant key, replaceable and removable) or mount it as a file like the database password. A mounted file wins over the saved one. Never a value in the environment. With neither, the client is public (PKCE only). |
 | Admin groups | `VCF_DOCTOR_OIDC_ADMIN_GROUPS` | Required. Comma separated in the variable, one per line on the page. Matched exactly, case included. With none listed, single sign-on stays off. |
 | Redirect URI | `VCF_DOCTOR_OIDC_REDIRECT_URI` | Optional. Default `<this console's address>/api/auth/oidc/callback`. Set it when an ingress terminates TLS and the console would otherwise see `http`, or [trust the ingress](SECURITY.md#access). |
 | Scopes | `VCF_DOCTOR_OIDC_SCOPES` | Default `openid profile email`. `openid` is always requested. Add whatever scope makes your provider send groups. |
@@ -318,9 +318,10 @@ Register the redirect URI at the provider exactly as the page shows it.
    puts a `groups` claim in the ID token, so the default scopes are enough.
    Bind a policy or group to the application so only the people you want can
    reach it.
-4. Put the client secret in a file and mount it (below), then set in Settings
-   (or the variables): the issuer from step 2, the client ID, and the names
-   of the groups whose members should be administrators.
+4. Set in Settings (or the variables): the issuer from step 2, the client ID,
+   the client secret, and the names of the groups whose members should be
+   administrators. To keep the secret out of the database, mount it as a file
+   instead (below).
 
 Keycloak, Okta and Entra ID differ only in where those values are found: the
 issuer is the realm or tenant URL, and groups need a mapper or claim that puts
